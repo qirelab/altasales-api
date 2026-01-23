@@ -10,7 +10,10 @@ async function bootstrap() {
     .setDescription('API документация для Altasales')
     .setVersion('1.0')
     .build();
-
+  app.enableCors({
+    origin: process.env.CLIENT_URI?.split(','),
+    credentials: true,
+  });
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
