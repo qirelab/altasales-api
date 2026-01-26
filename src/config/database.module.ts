@@ -1,4 +1,3 @@
-// database.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -11,7 +10,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
-        url: config.get<string>('DATABASE_URL'),
+        host: config.get<string>('DB_HOST') || 'localhost',
+        port: Number(config.get<string>('DB_PORT') || 5432),
+        username: config.get<string>('DB_USER') || 'altasales_user',
+        password: config.get<string>('DB_PASSWORD') || 'maimchik002',
+        database: config.get<string>('DB_NAME') || 'altasales',
         ssl: false,
         entities: [__dirname + '/../**/*.entity{.ts,.js}'],
         synchronize: !(config.get('NODE_ENV') === 'production'),
@@ -19,4 +22,4 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
     }),
   ],
 })
-export class DatabaseModule { }
+export class DatabaseModule {}
