@@ -1,5 +1,5 @@
-import { Controller, Post, Body, Get, Param, Headers, Res, HttpStatus, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiHeader } from '@nestjs/swagger';
+import { Controller, Post, Body, Get, Headers, Res, HttpStatus, Logger, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiCookieAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { FirebaseService } from './firebase/firebase.service';
@@ -7,6 +7,8 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyTokenDto } from './dto/verify-token.dto';
+import { SessionGuard } from './guards/session.guard';
+import { CurrentUser, type CurrentUserData } from './decorators/current-user.decorator';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -72,7 +74,7 @@ export class AuthController {
         return {
           status: HttpStatus.UNAUTHORIZED,
           body: {
-            message: "You're not authorized to access this resource",
+            message: 'You\'re not authorized to access this resource',
           },
         };
       }
@@ -86,27 +88,54 @@ export class AuthController {
     }
   }
 
+  // TODO: only for testing
+  @Post('register')
+  @ApiOperation({ summary: 'Register new user' })
+  @ApiResponse({ status: 201, description: 'User successfully registered' })
+  @ApiResponse({ status: 400, description: 'Registration error' })
+  async register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto);
+  }
+
+  // TODO: only for testing
+  @Post('login-email')
+  @ApiOperation({ summary: 'Login with email and password' })
+  @ApiResponse({ status: 200, description: 'Successful login' })
+  @ApiResponse({ status: 400, description: 'Invalid credentials' })
+  async loginWithEmail(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto);
+  }
+
   @Post('verify-token')
-  @ApiOperation({ summary: 'Верификация Firebase ID токена' })
-  @ApiResponse({ status: 200, description: 'Токен валиден' })
-  @ApiResponse({ status: 401, description: 'Недействительный токен' })
+  @ApiOperation({ summary: 'Verify Firebase ID token' })
+  @ApiResponse({ status: 200, description: 'Token is valid' })
+  @ApiResponse({ status: 401, description: 'Invalid token' })
   async verifyToken(@Body() verifyTokenDto: VerifyTokenDto) {
     return this.authService.verifyToken(verifyTokenDto);
   }
 
   @Post('reset-password')
-  @ApiOperation({ summary: 'Восстановление пароля' })
-  @ApiResponse({ status: 200, description: 'Ссылка для восстановления пароля отправлена' })
-  @ApiResponse({ status: 400, description: 'Пользователь не найден' })
+  @ApiOperation({ summary: 'Reset password' })
+  @ApiResponse({ status: 200, description: 'Password reset link sent' })
+  @ApiResponse({ status: 400, description: 'User not found' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
   }
 
-  @Get('user/:uid')
-  @ApiOperation({ summary: 'Получить информацию о пользователе по UID' })
-  @ApiResponse({ status: 200, description: 'Информация о пользователе' })
-  @ApiResponse({ status: 400, description: 'Пользователь не найден' })
-  async getUserByUid(@Param('uid') uid: string) {
-    return this.authService.getUserByUid(uid);
+
+  @Get('me')
+  @UseGuards(SessionGuard)
+  @ApiOperation({ summary: 'Get current user information (protected route)' })
+  @ApiCookieAuth('session')
+  @ApiResponse({ status: 200, description: 'Current user information' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - session cookie required' })
+  async getCurrentUser(@CurrentUser() user: CurrentUserData) {
+    return {
+      id: user.id,
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      emailVerified: user.emailVerified,
+    };
   }
 }

@@ -9,7 +9,7 @@ export class FirebaseService {
   constructor(private configService: ConfigService) {
     this.firebaseApp = admin.initializeApp({
       credential: admin.credential.cert(
-        JSON.parse(this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT')!)
+        JSON.parse(this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT')!),
       ),
     });
   }
