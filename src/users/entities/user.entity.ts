@@ -15,7 +15,7 @@ export class User {
   @Column({ unique: true })
   email: string;
 
-  @ApiProperty({ example: 'password123', description: 'User password' })
-  @Column()
-  password: string;
+  @ApiProperty({ example: 'firebase-uid-123', description: 'Firebase UID' })
+  @Column({ unique: true, nullable: true })
+  firebaseUid: string;
 }
