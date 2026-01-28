@@ -57,4 +57,14 @@ export class UsersService {
     const user = await this.findOne(id);
     await this.userRepository.remove(user);
   }
+
+  async getProfile(userId: number) {
+    const user = await this.findOne(userId);
+    return {
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      name: user.name,
+      lastName: user.lastName,
+    };
+  }
 }
