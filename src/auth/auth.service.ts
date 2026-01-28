@@ -47,6 +47,8 @@ export class AuthService {
       const user = queryRunner.manager.create(User, {
         email: registerDto.email,
         name: registerDto.name || firebaseUserRecord.displayName || '',
+        lastName: registerDto.lastName || '',
+        phoneNumber: registerDto.phoneNumber || '',
         firebaseUid: firebaseUserRecord.uid,
       });
 
@@ -247,4 +249,5 @@ export class AuthService {
       throw new UnauthorizedException('Invalid session cookie');
     }
   }
+
 }

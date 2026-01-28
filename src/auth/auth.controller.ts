@@ -138,4 +138,5 @@ export class AuthController {
       emailVerified: user.emailVerified,
     };
   }
+
 }

@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiCookieAuth } from '@nestjs/swagger';
+import { SessionGuard } from '../auth/guards/session.guard';
+import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -9,6 +11,20 @@ import { User } from './entities/user.entity';
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) { }
+
+  @Get('profile')
+  @UseGuards(SessionGuard)
+  @ApiOperation({ summary: 'Get current user profile (email, phone, name, lastName)' })
+  @ApiCookieAuth('session')
+  @ApiResponse({ status: 200, description: 'User profile' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - session cookie required' })
+  async getProfile(@CurrentUser() user: CurrentUserData) {
+    const profile = await this.usersService.getProfile(user.id);
+    return {
+      user: profile,
+      stats: {}, // TODO: add stats, when orders are implemented
+    };
+  }
 
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
