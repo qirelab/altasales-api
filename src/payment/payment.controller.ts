@@ -9,18 +9,6 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) { }
 
-  @Post('robokassa/create')
-  @ApiOperation({
-    summary: 'Create Robokassa payment',
-    description:
-      'Creates a payment record and returns payment URL and form params.',
-  })
-  @ApiResponse({ status: 201, description: 'Payment created, returns paymentUrl and params' })
-  @ApiResponse({ status: 400, description: 'Invalid request or InvId already exists' })
-  async createRobokassaPayment(@Body() dto: CreatePaymentDto) {
-    return this.paymentService.create(dto);
-  }
-
   @Post('robokassa/result')
   @ApiOperation({
     summary: 'Robokassa Result URL (callback)',

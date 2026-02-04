@@ -5,6 +5,7 @@ import { DatabaseModule } from './config/database.module.js';
 import { AuthModule } from './auth/auth.module';
 import { ServicesModule } from './services/services.module';
 import { PaymentModule } from './payment/payment.module';
+import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PaymentModule } from './payment/payment.module';
     AuthModule,
     ServicesModule,
     PaymentModule,
+    OrdersModule,
   ],
 })
-export class AppModule {}
+export class AppModule { }

@@ -16,4 +16,10 @@ export class CreatePaymentDto {
   @IsNumber()
   @Min(1)
   invId?: number;
+
+  @ApiPropertyOptional({ example: 1, description: 'Order ID to link payment to' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  orderId?: number;
 }

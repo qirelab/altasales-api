@@ -23,6 +23,10 @@ export class Payment {
   @Column({ unique: true })
   invId: number;
 
+  @ApiProperty({ example: 1, description: 'Order ID this payment belongs to' })
+  @Column({ nullable: true })
+  orderId: number | null;
+
   @ApiProperty({ example: 990.5, description: 'Payment amount' })
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   outSum: number;

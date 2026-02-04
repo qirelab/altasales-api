@@ -1,40 +1,54 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RobokassaService } from './robokassa.service';
+import { Order } from '../orders/entities/order.entity';
+import { OrderStatus } from '../orders/entities/order-status.enum';
 
 @Injectable()
 export class PaymentService {
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly robokassaService: RobokassaService,
-  ) {}
+  ) { }
 
-  async create(dto: CreatePaymentDto): Promise<{ paymentUrl: string; params: Record<string, string | number> }> {
+  async createWithManager(
+    dto: CreatePaymentDto,
+    manager: EntityManager,
+  ): Promise<{ paymentUrl: string; params: Record<string, string | number> }> {
+    const paymentRepo = manager.getRepository(Payment);
+
     let invId = dto.invId;
     if (invId == null) {
-      const last = await this.paymentRepository
-        .createQueryBuilder('p')
-        .select('MAX(p.invId)', 'max')
-        .getRawOne<{ max: number | null }>();
-      invId = (last?.max ?? 0) + 1;
+      if (dto.orderId != null) {
+        invId = dto.orderId;
+      } else {
+        const last = await paymentRepo
+          .createQueryBuilder('p')
+          .select('MAX(p.invId)', 'max')
+          .getRawOne<{ max: number | null }>();
+        invId = (last?.max ?? 0) + 1;
+      }
     } else {
-      const existing = await this.paymentRepository.findOne({ where: { invId } });
+      const existing = await paymentRepo.findOne({ where: { invId } });
       if (existing) {
         throw new BadRequestException(`Payment with InvId ${invId} already exists`);
       }
     }
 
-    const payment = this.paymentRepository.create({
+    const payment = paymentRepo.create({
       invId,
+      orderId: dto.orderId ?? null,
       outSum: dto.outSum,
       description: dto.description,
       status: PaymentStatus.Pending,
     });
-    await this.paymentRepository.save(payment);
+    await paymentRepo.save(payment);
 
     const params = this.robokassaService.buildPaymentParams(
       Number(dto.outSum),
@@ -95,6 +109,13 @@ export class PaymentService {
 
     try {
       await this.markPaid(invIdNum);
+      const payment = await this.paymentRepository.findOne({ where: { invId: invIdNum } });
+      if (payment?.orderId != null) {
+        await this.orderRepository.update(
+          { id: payment.orderId },
+          { status: OrderStatus.InProgress },
+        );
+      }
     } catch {
       return { response: `error: order not found` };
     }
