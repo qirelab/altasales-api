@@ -10,7 +10,7 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-  ) {}
+  ) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
     const existingUser = await this.userRepository.findOne({
@@ -65,6 +65,7 @@ export class UsersService {
       phoneNumber: user.phoneNumber,
       name: user.name,
       lastName: user.lastName,
+      balance: Number(user.balance),
     };
   }
 }

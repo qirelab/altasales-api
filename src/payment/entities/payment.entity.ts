@@ -24,7 +24,7 @@ export class Payment {
   invId: number;
 
   @ApiProperty({ example: 1, description: 'Order ID this payment belongs to' })
-  @Column({ nullable: true })
+  @Column({ type: 'int', nullable: true })
   orderId: number | null;
 
   @ApiProperty({ example: 990.5, description: 'Payment amount' })

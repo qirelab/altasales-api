@@ -1,11 +1,11 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
+import { PaymentService } from '../payment/payment.service';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
-import { PaymentService } from '../payment/payment.service';
 
 @Injectable()
 export class OrdersService {

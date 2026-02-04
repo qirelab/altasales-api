@@ -8,9 +8,9 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
+import { User } from '../../users/entities/user.entity';
 import { OrderStatus } from './order-status.enum';
 import { OrderItem } from './order-item.entity';
-import { User } from '../../users/entities/user.entity';
 
 @Entity()
 export class Order {

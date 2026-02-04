@@ -1,11 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import { Order } from '../orders/entities/order.entity';
+import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RobokassaService } from './robokassa.service';
-import { Order } from '../orders/entities/order.entity';
-import { OrderStatus } from '../orders/entities/order-status.enum';
 
 @Injectable()
 export class PaymentService {
@@ -15,6 +15,7 @@ export class PaymentService {
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly robokassaService: RobokassaService,
+    private readonly dataSource: DataSource,
   ) { }
 
   async createWithManager(
@@ -107,17 +108,41 @@ export class PaymentService {
       return { response: `bad InvId` };
     }
 
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
-      await this.markPaid(invIdNum);
-      const payment = await this.paymentRepository.findOne({ where: { invId: invIdNum } });
-      if (payment?.orderId != null) {
-        await this.orderRepository.update(
+      const paymentRepo = queryRunner.manager.getRepository(Payment);
+      const orderRepo = queryRunner.manager.getRepository(Order);
+
+      const payment = await paymentRepo.findOne({ where: { invId: invIdNum } });
+      if (!payment) {
+        await queryRunner.rollbackTransaction();
+        return { response: `error: payment not found` };
+      }
+      if (payment.status === PaymentStatus.Paid) {
+        await queryRunner.rollbackTransaction();
+        return { response: `OK${invId}` };
+      }
+
+      payment.status = PaymentStatus.Paid;
+      await paymentRepo.save(payment);
+
+      if (payment.orderId != null) {
+        await orderRepo.update(
           { id: payment.orderId },
           { status: OrderStatus.InProgress },
         );
       }
-    } catch {
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      console.error(err);
+      await queryRunner.rollbackTransaction();
       return { response: `error: order not found` };
+    } finally {
+      await queryRunner.release();
     }
 
     return { response: `OK${invId}` };

@@ -2,7 +2,6 @@ import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { PaymentService } from './payment.service';
-import { CreatePaymentDto } from './dto/create-payment.dto';
 
 @ApiTags('payments')
 @Controller('payments')

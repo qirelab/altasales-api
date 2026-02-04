@@ -10,11 +10,13 @@ import { User } from './entities/user.entity';
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) { }
+  constructor(
+    private readonly usersService: UsersService,
+  ) { }
 
   @Get('profile')
   @UseGuards(SessionGuard)
-  @ApiOperation({ summary: 'Get current user profile (email, phone, name, lastName)' })
+  @ApiOperation({ summary: 'Get current user profile (email, phone, name, lastName, balance)' })
   @ApiCookieAuth('session')
   @ApiResponse({ status: 200, description: 'User profile' })
   @ApiResponse({ status: 401, description: 'Unauthorized - session cookie required' })
