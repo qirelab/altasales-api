@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { PaymentService } from '../payment/payment.service';
@@ -7,6 +7,7 @@ import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 @Injectable()
 export class OrdersService {
@@ -108,5 +109,21 @@ export class OrdersService {
       completed: map[OrderStatus.Completed] ?? 0,
       cancelled: map[OrderStatus.Cancelled] ?? 0,
     };
+  }
+
+  async updateStatus(
+    orderId: string,
+    userId: string,
+    dto: UpdateOrderStatusDto,
+  ): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId, userId },
+      relations: ['items', 'items.service'],
+    });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    order.status = dto.status;
+    return this.orderRepository.save(order);
   }
 }

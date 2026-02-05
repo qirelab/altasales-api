@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { CheckoutDto } from './dto/checkout.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -19,6 +20,20 @@ export class OrdersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getMyOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
     return this.ordersService.findByUserId(user.id, query);
+  }
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Update order status (own orders only)' })
+  @ApiParam({ name: 'id', description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Order updated' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateStatus(
+    @Param('id') orderId: string,
+    @Body() dto: UpdateOrderStatusDto,
+    @CurrentUser() user: CurrentUserData,
+  ) {
+    return this.ordersService.updateStatus(orderId, user.id, dto);
   }
 
   @Post('checkout')
