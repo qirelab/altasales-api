@@ -26,15 +26,11 @@ export class PaymentService {
 
     let invId = dto.invId;
     if (invId == null) {
-      if (dto.orderId != null) {
-        invId = dto.orderId;
-      } else {
-        const last = await paymentRepo
-          .createQueryBuilder('p')
-          .select('MAX(p.invId)', 'max')
-          .getRawOne<{ max: number | null }>();
-        invId = (last?.max ?? 0) + 1;
-      }
+      const last = await paymentRepo
+        .createQueryBuilder('p')
+        .select('MAX(p.invId)', 'max')
+        .getRawOne<{ max: number | null }>();
+      invId = (last?.max ?? 0) + 1;
     } else {
       const existing = await paymentRepo.findOne({ where: { invId } });
       if (existing) {

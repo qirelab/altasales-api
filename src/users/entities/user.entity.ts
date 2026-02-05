@@ -3,9 +3,12 @@ import { ApiProperty } from '@nestjs/swagger';
 
 @Entity()
 export class User {
-  @ApiProperty({ example: 1, description: 'User ID' })
-  @PrimaryGeneratedColumn()
-  id: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'User ID (UUID)',
+  })
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ApiProperty({ example: 'John', description: 'User first name' })
   @Column()

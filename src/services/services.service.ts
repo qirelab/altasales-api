@@ -11,7 +11,7 @@ export class ServicesService {
   constructor(
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
-  ) {}
+  ) { }
 
   async create(createServiceDto: CreateServiceDto): Promise<Service> {
     const service = this.serviceRepository.create({
@@ -49,7 +49,7 @@ export class ServicesService {
     return await qb.getMany();
   }
 
-  async findOne(id: number): Promise<Service> {
+  async findOne(id: string): Promise<Service> {
     const service = await this.serviceRepository.findOne({ where: { id } });
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
@@ -57,13 +57,13 @@ export class ServicesService {
     return service;
   }
 
-  async update(id: number, updateServiceDto: UpdateServiceDto): Promise<Service> {
+  async update(id: string, updateServiceDto: UpdateServiceDto): Promise<Service> {
     const service = await this.findOne(id);
     Object.assign(service, updateServiceDto);
     return await this.serviceRepository.save(service);
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     const service = await this.findOne(id);
     await this.serviceRepository.remove(service);
   }

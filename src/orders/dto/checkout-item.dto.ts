@@ -1,11 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsOptional, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CheckoutItemDto {
-  @ApiProperty({ example: 1, description: 'Service ID' })
-  @IsNumber()
-  @Min(1)
-  serviceId: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Service ID',
+  })
+  @IsString()
+  @IsUUID()
+  serviceId: string;
 
   @ApiPropertyOptional({ example: 10, description: 'Hours (for contractor)' })
   @IsOptional()

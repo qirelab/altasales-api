@@ -6,7 +6,7 @@ import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
 
 export interface AddToBalanceMeta {
-  orderId?: number | null;
+  orderId?: string | null;
   paymentInvId?: number | null;
   description?: string | null;
 }
@@ -20,7 +20,7 @@ export class BalanceService {
     private readonly balanceTransactionRepository: Repository<BalanceTransaction>,
   ) { }
 
-  async getBalance(userId: number): Promise<number> {
+  async getBalance(userId: string): Promise<number> {
     const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'balance'] });
     if (!user) {
       throw new NotFoundException(`Пользователь с ID ${userId} не найден`);
@@ -29,7 +29,7 @@ export class BalanceService {
   }
 
   async addToBalance(
-    userId: number,
+    userId: string,
     amount: number,
     type: BalanceTransactionType,
     meta: AddToBalanceMeta = {},
@@ -63,7 +63,7 @@ export class BalanceService {
     return txRepo.save(transaction);
   }
 
-  async getTransactions(userId: number): Promise<BalanceTransaction[]> {
+  async getTransactions(userId: string): Promise<BalanceTransaction[]> {
     return this.balanceTransactionRepository.find({
       where: { userId },
       order: { createdAt: 'DESC' },
@@ -71,10 +71,10 @@ export class BalanceService {
   }
 
   async creditFromPayment(
-    userId: number,
+    userId: string,
     amount: number,
     paymentInvId: number,
-    orderId: number | null,
+    orderId: string | null,
     description: string,
     manager?: EntityManager,
   ): Promise<BalanceTransaction> {

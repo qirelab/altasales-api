@@ -4,9 +4,12 @@ import { ServiceType } from './service-type.enum';
 
 @Entity()
 export class Service {
-  @ApiProperty({ example: 1, description: 'Service ID' })
-  @PrimaryGeneratedColumn()
-  id: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Service ID',
+  })
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @ApiProperty({
     enum: ServiceType,

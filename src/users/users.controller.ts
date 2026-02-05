@@ -21,11 +21,8 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User profile' })
   @ApiResponse({ status: 401, description: 'Unauthorized - session cookie required' })
   async getProfile(@CurrentUser() user: CurrentUserData) {
-    const profile = await this.usersService.getProfile(user.id);
-    return {
-      user: profile,
-      stats: {}, // TODO: add stats, when orders are implemented
-    };
+    const { profile, stats } = await this.usersService.getProfile(user.id);
+    return { user: profile, stats };
   }
 
   @Post()
@@ -49,7 +46,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User found', type: User })
   @ApiResponse({ status: 404, description: 'User not found' })
   async findOne(@Param('id') id: string): Promise<User> {
-    return this.usersService.findOne(+id);
+    return this.usersService.findOne(id);
   }
 
   @Patch(':id')
@@ -59,7 +56,7 @@ export class UsersController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 409, description: 'User with this email already exists' })
   async update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto): Promise<User> {
-    return this.usersService.update(+id, updateUserDto);
+    return this.usersService.update(id, updateUserDto);
   }
 
   @Delete(':id')
@@ -69,6 +66,6 @@ export class UsersController {
   @ApiResponse({ status: 204, description: 'User successfully deleted' })
   @ApiResponse({ status: 404, description: 'User not found' })
   async remove(@Param('id') id: string): Promise<void> {
-    return this.usersService.remove(+id);
+    return this.usersService.remove(id);
   }
 }

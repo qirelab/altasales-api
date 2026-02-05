@@ -1,9 +1,10 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { CheckoutDto } from './dto/checkout.dto';
+import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -11,6 +12,14 @@ import { OrdersService } from './orders.service';
 @UseGuards(SessionGuard)
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) { }
+
+  @Get()
+  @ApiOperation({ summary: 'Get current user orders (paginated, optional status filter)' })
+  @ApiResponse({ status: 200, description: 'Paginated list of user orders with items' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMyOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
+    return this.ordersService.findByUserId(user.id, query);
+  }
 
   @Post('checkout')
   @ApiOperation({
