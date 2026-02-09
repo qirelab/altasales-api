@@ -4,6 +4,7 @@ import { UsersModule } from './users/users.module';
 import { DatabaseModule } from './config/database.module.js';
 import { AuthModule } from './auth/auth.module';
 import { ServicesModule } from './services/services.module';
+import { WebSocketModule } from './websocket/websocket.module.js';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { ServicesModule } from './services/services.module';
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
     ServicesModule,
+    WebSocketModule,
   ],
 })
-export class AppModule {}
+export class AppModule { }
