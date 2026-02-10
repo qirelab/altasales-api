@@ -26,4 +26,8 @@ export class User {
   @ApiProperty({ example: 'firebase-uid-123', description: 'Firebase UID' })
   @Column({ unique: true, nullable: true })
   firebaseUid: string;
+
+  @ApiProperty({ example: 1500.5, description: 'User balance' })
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  balance: number;
 }
