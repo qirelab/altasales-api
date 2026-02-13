@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { ServicesModule } from './services/services.module';
 import { PaymentModule } from './payment/payment.module';
 import { OrdersModule } from './orders/orders.module';
+import { WebSocketModule } from './websocket/websocket.module.js';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { OrdersModule } from './orders/orders.module';
     ServicesModule,
     PaymentModule,
     OrdersModule,
+    WebSocketModule,
   ],
 })
 export class AppModule { }
