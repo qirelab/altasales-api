@@ -14,13 +14,19 @@ import { OrderItem } from './order-item.entity';
 
 @Entity()
 export class Order {
-  @ApiProperty({ example: 1, description: 'Order ID' })
-  @PrimaryGeneratedColumn()
-  id: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Order ID',
+  })
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @ApiProperty({ example: 1, description: 'User ID (order author)' })
-  @Column()
-  userId: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'User ID (order author)',
+  })
+  @Column({ type: 'uuid' })
+  userId: string;
 
   @ManyToOne(() => User, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'userId' })

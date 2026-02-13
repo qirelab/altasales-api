@@ -12,13 +12,19 @@ import { User } from './user.entity';
 
 @Entity()
 export class BalanceTransaction {
-  @ApiProperty({ example: 1, description: 'Transaction ID' })
-  @PrimaryGeneratedColumn()
-  id: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Transaction ID',
+  })
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @ApiProperty({ example: 1, description: 'User ID' })
-  @Column()
-  userId: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'User ID',
+  })
+  @Column({ type: 'uuid' })
+  userId: string;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
@@ -32,9 +38,12 @@ export class BalanceTransaction {
   @Column({ type: 'varchar', length: 20 })
   type: BalanceTransactionType;
 
-  @ApiProperty({ example: 1, description: 'Related order ID' })
-  @Column({ type: 'int', nullable: true })
-  orderId: number | null;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Related order ID',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  orderId: string | null;
 
   @ApiProperty({ example: 12345, description: 'Related payment InvId' })
   @Column({ type: 'int', nullable: true })

@@ -20,7 +20,7 @@ import { Service } from './entities/service.entity';
 @ApiTags('services')
 @Controller('services')
 export class ServicesController {
-  constructor(private readonly servicesService: ServicesService) {}
+  constructor(private readonly servicesService: ServicesService) { }
 
   @Post()
   @ApiOperation({ summary: 'Create a service' })
@@ -45,7 +45,7 @@ export class ServicesController {
   @ApiResponse({ status: 200, description: 'Service found', type: Service })
   @ApiResponse({ status: 404, description: 'Service not found' })
   async findOne(@Param('id') id: string): Promise<Service> {
-    return this.servicesService.findOne(+id);
+    return this.servicesService.findOne(id);
   }
 
   @Patch(':id')
@@ -57,7 +57,7 @@ export class ServicesController {
     @Param('id') id: string,
     @Body() updateServiceDto: UpdateServiceDto,
   ): Promise<Service> {
-    return this.servicesService.update(+id, updateServiceDto);
+    return this.servicesService.update(id, updateServiceDto);
   }
 
   @Delete(':id')
@@ -67,6 +67,6 @@ export class ServicesController {
   @ApiResponse({ status: 204, description: 'Service deleted' })
   @ApiResponse({ status: 404, description: 'Service not found' })
   async remove(@Param('id') id: string): Promise<void> {
-    return this.servicesService.remove(+id);
+    return this.servicesService.remove(id);
   }
 }

@@ -6,6 +6,7 @@ import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
+import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 
 @Injectable()
 export class OrdersService {
@@ -18,8 +19,8 @@ export class OrdersService {
     private readonly dataSource: DataSource,
   ) { }
 
-  async checkout(dto: CheckoutDto, userId: number): Promise<{
-    orderId: number;
+  async checkout(dto: CheckoutDto, userId: string): Promise<{
+    orderId: string;
     paymentUrl: string;
     params: Record<string, string | number>;
   }> {
@@ -68,5 +69,44 @@ export class OrdersService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async findByUserId(
+    userId: string,
+    query: GetOrdersQueryDto,
+  ): Promise<{ data: Order[]; total: number; offset: number; limit: number }> {
+    const { status, offset = 0, limit = 20 } = query;
+    const where: { userId: string; status?: OrderStatus } = { userId };
+    if (status) where.status = status;
+
+    const [data, total] = await this.orderRepository.findAndCount({
+      where,
+      relations: ['items', 'items.service'],
+      order: { createdAt: 'DESC' },
+      skip: offset,
+      take: limit,
+    });
+    return { data, total, offset, limit };
+  }
+
+  async getOrderCountsByUserId(userId: string): Promise<{
+    active: number;
+    completed: number;
+    cancelled: number;
+  }> {
+    const raw = await this.orderRepository
+      .createQueryBuilder('o')
+      .select('o.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .where('o.userId = :userId', { userId })
+      .groupBy('o.status')
+      .getRawMany<{ status: OrderStatus; count: string }>();
+    const map = Object.fromEntries(raw.map((r) => [r.status, Number(r.count)]));
+    return {
+      active:
+        (map[OrderStatus.PendingPayment] ?? 0) + (map[OrderStatus.InProgress] ?? 0),
+      completed: map[OrderStatus.Completed] ?? 0,
+      cancelled: map[OrderStatus.Cancelled] ?? 0,
+    };
   }
 }

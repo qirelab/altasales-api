@@ -11,21 +11,30 @@ import { Order } from './order.entity';
 
 @Entity()
 export class OrderItem {
-  @ApiProperty({ example: 1, description: 'Order item ID' })
-  @PrimaryGeneratedColumn()
-  id: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Order item ID',
+  })
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @ApiProperty({ example: 1, description: 'Order ID' })
-  @Column()
-  orderId: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Order ID',
+  })
+  @Column({ type: 'uuid' })
+  orderId: string;
 
   @ManyToOne(() => Order, (order) => order.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'orderId' })
   order: Order;
 
-  @ApiProperty({ example: 1, description: 'Service ID' })
-  @Column()
-  serviceId: number;
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Service ID',
+  })
+  @Column({ type: 'uuid' })
+  serviceId: string;
 
   @ManyToOne(() => Service, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'serviceId' })
