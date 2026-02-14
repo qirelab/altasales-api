@@ -1,0 +1,149 @@
+name: Deploy altasales-api to VPS
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm audit --audit-level=critical
+        continue-on-error: false
+
+      - name: Create .env file
+        run: |
+          echo "Creating .env file from secrets..."
+          cat > .env << 'EOF'
+          ${{ secrets.ENV_FILE }}
+          EOF
+          echo ".env file created successfully!"
+          echo "File size (bytes and lines):"
+          wc .env
+          echo "First 3 lines:"
+          head -n 3 .env
+
+      - name: Build project
+        run: |
+          set -a
+          source .env
+          set +a
+          npm run build
+        continue-on-error: true
+
+      - name: Prepare deployment archive
+        run: |
+          echo "Creating deployment directory..."
+          mkdir -p deploy
+
+          echo "Verifying .env file exists..."
+          ls -la .env
+          echo "Content of .env (checking if not empty):"
+          wc -l .env
+          if [ ! -s .env ]; then
+            echo "ERROR: .env file is empty! Check ENV_FILE secret."
+            exit 1
+          fi
+
+          echo "Creating archive with all project files..."
+          tar -czf deploy/altasales-api.tar.gz \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='deploy' \
+            .
+
+          echo "Archive created successfully!"
+          ls -lh deploy/
+          echo "Verifying .env in archive:"
+          tar -tzf deploy/altasales-api.tar.gz | grep "\.env"
+
+      - name: Copy archive to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "deploy/altasales-api.tar.gz"
+          target: "/tmp/"
+          strip_components: 1
+
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+
+            echo "Starting deployment..."
+
+            # Clean up old deployment
+            echo "Cleaning old deployment..."
+            rm -rf /var/www/altasales-api
+            mkdir -p /var/www/altasales-api
+
+            # Extract archive
+            echo "Extracting archive..."
+            tar -xzf /tmp/altasales-api.tar.gz -C /var/www/altasales-api/
+
+            # Clean up archive
+            rm -f /tmp/altasales-api.tar.gz
+
+            # Navigate to project directory
+            cd /var/www/altasales-api
+
+            # Verify .env file exists
+            echo "Verifying .env file..."
+            ls -la .env
+            echo "Content check:"
+            head -n 3 .env
+
+            # Load environment variables
+            echo "Loading environment variables from .env..."
+            set -a
+            source .env
+            set +a
+
+            # PM2 deployment
+            echo "Managing PM2 process..."
+            if pm2 describe altasales-api > /dev/null 2>&1; then
+              echo "Stopping existing PM2 process..."
+              pm2 delete altasales-api
+            fi
+
+            echo "Starting PM2 process with environment variables..."
+            pm2 start npm --name altasales-api -- run start
+
+            # Verify the process is running
+            pm2 show altasales-api
+
+            # Configure PM2 to start on system boot
+            echo "Configuring PM2 startup..."
+            pm2 startup || true
+
+            # Save PM2 process list
+            echo "Saving PM2 process list..."
+            pm2 save
+
+            # Show PM2 status
+            pm2 list
+
+            echo "Deployment completed successfully!"
