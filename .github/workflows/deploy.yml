@@ -130,7 +130,7 @@ jobs:
             fi
 
             echo "Starting PM2 process with environment variables..."
-            pm2 start npm --name altasales-api -- run start
+            pm2 start npm --name altasales-api --update-env -- run start
 
             # Verify the process is running
             pm2 show altasales-api
