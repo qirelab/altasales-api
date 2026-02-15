@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - develop
+      - master
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -29,9 +31,21 @@ jobs:
       - name: Create .env file
         run: |
           echo "Creating .env file from secrets..."
-          cat > .env << 'EOF'
-          ${{ secrets.ENV_FILE }}
+          BRANCH="${{ github.ref_name }}"
+          echo "Branch: $BRANCH"
+
+          if [ "$BRANCH" = "master" ]; then
+            echo "Using ENV_FILE_MASTER secret"
+            cat > .env << 'EOF'
+          ${{ secrets.ENV_FILE_MASTER }}
           EOF
+          else
+            echo "Using ENV_FILE_DEVELOP secret"
+            cat > .env << 'EOF'
+          ${{ secrets.ENV_FILE_DEVELOP }}
+          EOF
+          fi
+
           echo ".env file created successfully!"
           echo "File size (bytes and lines):"
           wc .env
@@ -60,8 +74,18 @@ jobs:
             exit 1
           fi
 
+          # Set archive name based on branch
+          BRANCH_NAME="${{ github.ref_name }}"
+          if [ "$BRANCH_NAME" = "master" ]; then
+            ARCHIVE_NAME="altasales-api-master.tar.gz"
+          else
+            ARCHIVE_NAME="altasales-api.tar.gz"
+          fi
+
           echo "Creating archive with all project files..."
-          tar -czf deploy/altasales-api.tar.gz \
+          echo "Branch: $BRANCH_NAME"
+          echo "Archive: $ARCHIVE_NAME"
+          tar -czf deploy/$ARCHIVE_NAME \
             --exclude='.git' \
             --exclude='.github' \
             --exclude='deploy' \
@@ -70,7 +94,7 @@ jobs:
           echo "Archive created successfully!"
           ls -lh deploy/
           echo "Verifying .env in archive:"
-          tar -tzf deploy/altasales-api.tar.gz | grep "\.env"
+          tar -tzf deploy/$ARCHIVE_NAME | grep "\.env"
 
       - name: Copy archive to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -79,7 +103,7 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
-          source: "deploy/altasales-api.tar.gz"
+          source: "deploy/altasales-api*.tar.gz"
           target: "/tmp/"
           strip_components: 1
 
@@ -95,20 +119,38 @@ jobs:
 
             echo "Starting deployment..."
 
+            # Determine branch-specific settings
+            BRANCH="${{ github.ref_name }}"
+            echo "Deploying branch: $BRANCH"
+
+            if [ "$BRANCH" = "master" ]; then
+              DEPLOY_DIR="/var/www/altasales-api-master"
+              PM2_NAME="altasales-api-master"
+              ARCHIVE_NAME="altasales-api-master.tar.gz"
+            else
+              DEPLOY_DIR="/var/www/altasales-api"
+              PM2_NAME="altasales-api"
+              ARCHIVE_NAME="altasales-api.tar.gz"
+            fi
+
+            echo "Deploy directory: $DEPLOY_DIR"
+            echo "PM2 process name: $PM2_NAME"
+            echo "Archive name: $ARCHIVE_NAME"
+
             # Clean up old deployment
             echo "Cleaning old deployment..."
-            rm -rf /var/www/altasales-api
-            mkdir -p /var/www/altasales-api
+            rm -rf $DEPLOY_DIR
+            mkdir -p $DEPLOY_DIR
 
             # Extract archive
             echo "Extracting archive..."
-            tar -xzf /tmp/altasales-api.tar.gz -C /var/www/altasales-api/
+            tar -xzf /tmp/$ARCHIVE_NAME -C $DEPLOY_DIR/
 
             # Clean up archive
-            rm -f /tmp/altasales-api.tar.gz
+            rm -f /tmp/$ARCHIVE_NAME
 
             # Navigate to project directory
-            cd /var/www/altasales-api
+            cd $DEPLOY_DIR
 
             # Verify .env file exists
             echo "Verifying .env file..."
@@ -124,16 +166,16 @@ jobs:
 
             # PM2 deployment
             echo "Managing PM2 process..."
-            if pm2 describe altasales-api > /dev/null 2>&1; then
+            if pm2 describe $PM2_NAME > /dev/null 2>&1; then
               echo "Stopping existing PM2 process..."
-              pm2 delete altasales-api
+              pm2 delete $PM2_NAME
             fi
 
             echo "Starting PM2 process with environment variables..."
-            pm2 start npm --name altasales-api --update-env -- run start
+            pm2 start npm --name $PM2_NAME --update-env -- run start
 
             # Verify the process is running
-            pm2 show altasales-api
+            pm2 show $PM2_NAME
 
             # Configure PM2 to start on system boot
             echo "Configuring PM2 startup..."
