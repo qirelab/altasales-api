@@ -29,8 +29,15 @@ async function bootstrap() {
       scheme: 'Bearer',
     })
     .build();
+  const allowedOrigins = process.env.CLIENT_URI?.split(',').map((o) => o.trim()).filter(Boolean) ?? [];
   app.enableCors({
-    origin: process.env.CLIENT_URI?.split(','),
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
     credentials: true,
   });
   const document = SwaggerModule.createDocument(app, config);
