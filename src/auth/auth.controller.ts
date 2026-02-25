@@ -54,7 +54,7 @@ export class AuthController {
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
       const isLocal = process.env.NODE_ENV === 'development';
-      res.cookie('session1', sessionCookie, {
+      res.cookie('session', sessionCookie, {
         maxAge: expiresIn,
         httpOnly: true,
         secure: !isLocal,
