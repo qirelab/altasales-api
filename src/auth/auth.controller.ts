@@ -53,13 +53,13 @@ export class AuthController {
       const auth = this.firebaseService.getAuth();
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
-      const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
+      const isLocal = process.env.NODE_ENV === 'development';
       res.cookie('session', sessionCookie, {
         maxAge: expiresIn,
         httpOnly: true,
-        secure: !!cookieDomain,
-        sameSite: cookieDomain ? 'none' : 'lax',
-        domain: cookieDomain,
+        secure: !isLocal,
+        sameSite: isLocal ? 'lax' : 'none',
+        domain: isLocal ? undefined : '.altasales.qirelab.com',
       });
 
       return {
