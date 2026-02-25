@@ -53,13 +53,13 @@ export class AuthController {
       const auth = this.firebaseService.getAuth();
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
-      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
       res.cookie('session', sessionCookie, {
         maxAge: expiresIn,
         httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? 'none' : 'lax',
-        domain: process.env.COOKIE_DOMAIN || undefined,
+        secure: !!cookieDomain,
+        sameSite: cookieDomain ? 'none' : 'lax',
+        domain: cookieDomain,
       });
 
       return {
