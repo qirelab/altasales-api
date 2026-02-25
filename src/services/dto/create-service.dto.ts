@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID } from 'class-validator';
 import { ServiceType } from '../entities/service-type.enum';
 
 export class CreateServiceDto {
@@ -37,4 +37,9 @@ export class CreateServiceDto {
   @IsArray()
   @IsString({ each: true })
   skills?: string[];
+
+  @ApiPropertyOptional({ description: 'Associated user ID (for contractors)' })
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
 }
