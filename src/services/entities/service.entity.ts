@@ -1,6 +1,7 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
-import { ApiProperty } from '@nestjs/swagger';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServiceType } from './service-type.enum';
+import { User } from '../../users/entities/user.entity';
 
 @Entity()
 export class Service {
@@ -46,6 +47,14 @@ export class Service {
   })
   @Column({ type: 'json', default: [] })
   skills: string[];
+
+  @ApiPropertyOptional({ description: 'Associated user ID (for contractors)' })
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'userId' })
+  user: User;
 
   @ApiProperty({ description: 'Creation date' })
   @CreateDateColumn()
