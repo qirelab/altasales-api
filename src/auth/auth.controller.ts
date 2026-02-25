@@ -54,12 +54,12 @@ export class AuthController {
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
       const isLocal = process.env.NODE_ENV === 'development';
-      res.cookie('session', sessionCookie, {
+      res.cookie('session1', sessionCookie, {
         maxAge: expiresIn,
         httpOnly: true,
         secure: !isLocal,
         sameSite: isLocal ? 'lax' : 'none',
-        domain: isLocal ? undefined : '.altasales.qirelab.com',
+        domain: '.altasales.qirelab.com',
       });
 
       return {
