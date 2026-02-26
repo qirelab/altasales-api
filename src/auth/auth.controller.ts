@@ -1,6 +1,6 @@
-import { Controller, Post, Body, Get, Headers, Res, HttpStatus, Logger, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Get, Headers, Res, Req, HttpStatus, Logger, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiCookieAuth } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { FirebaseService } from './firebase/firebase.service';
 import { RegisterDto } from './dto/register.dto';
@@ -34,6 +34,7 @@ export class AuthController {
   async login(
     @Headers('authorization') authorization: string,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
   ) {
     try {
       if (!authorization || !authorization.startsWith('Bearer ')) {
@@ -53,12 +54,13 @@ export class AuthController {
       const auth = this.firebaseService.getAuth();
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
+      const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
       res.cookie('session', sessionCookie, {
         maxAge: expiresIn,
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        secure: !isLocal,
+        sameSite: isLocal ? 'lax' : 'none',
+        domain: isLocal ? undefined : '.altasales.qirelab.com',
       });
 
       return {

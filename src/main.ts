@@ -30,7 +30,7 @@ async function bootstrap() {
     })
     .build();
   app.enableCors({
-    origin: process.env.CLIENT_URI?.split(','),
+    origin: true,
     credentials: true,
   });
   const document = SwaggerModule.createDocument(app, config);
