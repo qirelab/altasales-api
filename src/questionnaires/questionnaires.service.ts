@@ -9,7 +9,7 @@ export class QuestionnairesService {
   constructor(
     @InjectRepository(Questionnaire)
     private readonly repo: Repository<Questionnaire>,
-  ) {}
+  ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
     const questionnaire = this.repo.create({
@@ -28,6 +28,7 @@ export class QuestionnairesService {
   }
 
   async findByUserId(userId: string): Promise<Questionnaire | null> {
-    return this.repo.findOne({ where: { userId }, order: { createdAt: 'DESC' } });
+    const questionnaire = await this.repo.findOne({ where: { userId }, order: { createdAt: 'DESC' } });
+    return questionnaire ?? null;
   }
 }
