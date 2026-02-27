@@ -6,8 +6,11 @@ import {
   IsNumber,
   IsBoolean,
   IsOptional,
+  IsNotEmpty,
   ValidateNested,
   Min,
+  ArrayMinSize,
+  Matches,
   IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -22,6 +25,7 @@ class DesiredResultDto {
 
   @ApiProperty({ example: 'Хочу 50 клиентов в месяц' })
   @IsString()
+  @IsNotEmpty({ message: 'Описание результата обязательно' })
   description: string;
 }
 
@@ -44,23 +48,31 @@ class ComponentsDto {
 export class CreateQuestionnaireDto {
   @ApiProperty({ example: 'Иван Иванов' })
   @IsString()
+  @IsNotEmpty({ message: 'Имя обязательно' })
   name: string;
 
   @ApiProperty({ example: '+79001234567' })
   @IsString()
+  @IsNotEmpty({ message: 'Телефон обязателен' })
+  @Matches(/^\+7\s?\(?\d{3}\)?\s?\d{3}-?\d{2}-?\d{2}$/, {
+    message: 'Некорректный формат телефона',
+  })
   phone: string;
 
   @ApiProperty({ enum: SALES_DIRECTIONS, isArray: true })
   @IsArray()
+  @ArrayMinSize(1, { message: 'Выберите хотя бы одно направление продаж' })
   @IsIn(SALES_DIRECTIONS, { each: true })
   salesDirection: SalesDirection[];
 
   @ApiProperty({ example: 'IT-решения для бизнеса' })
   @IsString()
+  @IsNotEmpty({ message: 'Направление деятельности обязательно' })
   industry: string;
 
   @ApiProperty({ example: 'CRM-система' })
   @IsString()
+  @IsNotEmpty({ message: 'Продукт обязателен' })
   product: string;
 
   @ApiPropertyOptional({ example: 'https://example.com' })
@@ -85,11 +97,11 @@ export class CreateQuestionnaireDto {
 
   @ApiProperty({ example: 5000000, description: 'Желаемая выручка (руб)' })
   @IsNumber()
-  @Min(0)
+  @Min(1, { message: 'Желаемая выручка должна быть больше 0' })
   targetRevenue: number;
 
   @ApiProperty({ example: 50000, description: 'Средний чек (руб)' })
   @IsNumber()
-  @Min(0)
+  @Min(1, { message: 'Средний чек должен быть больше 0' })
   averageCheck: number;
 }
