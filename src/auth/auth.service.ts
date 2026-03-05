@@ -239,7 +239,7 @@ export class AuthService {
         id: dbUser.id,
         uid: decodedClaims.uid,
         email: firebaseUser.email || '',
-        displayName: firebaseUser.displayName,
+        displayName: [dbUser.name, dbUser.lastName].filter(Boolean).join(' ') || firebaseUser.displayName,
         emailVerified: firebaseUser.emailVerified,
       };
     } catch (error) {

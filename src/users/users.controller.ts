@@ -25,6 +25,21 @@ export class UsersController {
     return { user: profile, stats };
   }
 
+  @Patch('profile')
+  @UseGuards(SessionGuard)
+  @ApiOperation({ summary: 'Update current user profile' })
+  @ApiCookieAuth('session')
+  @ApiResponse({ status: 200, description: 'Profile updated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async updateProfile(
+    @CurrentUser() user: CurrentUserData,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    await this.usersService.update(user.id, updateUserDto);
+    const { profile, stats } = await this.usersService.getProfile(user.id);
+    return { user: profile, stats };
+  }
+
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
   @ApiResponse({ status: 201, description: 'User successfully created', type: User })
