@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { ChatConversation } from './entities/chat-conversation.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
+import { FilesService } from '../files/files.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
 import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
@@ -24,6 +25,7 @@ export class ChatService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly wsGateway: WebSocketGatewayService,
+    private readonly filesService: FilesService,
   ) {}
 
   async getConversations(userId: string, query: GetConversationsQueryDto) {
@@ -117,6 +119,20 @@ export class ChatService {
       take: limit,
     });
 
+    // Attach files to messages
+    const messageIds = messages.map((m) => m.id);
+    const allFiles = await this.filesService.findByMessageIds(messageIds);
+    const filesByMessageId = new Map<string, { id: string; name: string; size: number; type: string }[]>();
+    for (const f of allFiles) {
+      const arr = filesByMessageId.get(f.messageId!) ?? [];
+      arr.push({ id: f.id, name: f.originalName, size: f.size, type: f.mimeType });
+      filesByMessageId.set(f.messageId!, arr);
+    }
+    const messagesWithFiles = messages.map((m) => ({
+      ...m,
+      files: filesByMessageId.get(m.id) ?? [],
+    }));
+
     // Mark other user's unread messages as read
     const otherUserId =
       conversation.participantOneId === userId
@@ -137,7 +153,7 @@ export class ChatService {
       readBy: userId,
     });
 
-    return { data: messages, total, offset, limit };
+    return { data: messagesWithFiles, total, offset, limit };
   }
 
   async sendMessage(userId: string, dto: SendMessageDto) {
@@ -172,13 +188,28 @@ export class ChatService {
     });
     const savedMessage = await this.messageRepository.save(message);
 
+    // Link files to message
+    let files: { id: string; name: string; size: number; type: string }[] = [];
+    if (dto.fileIds?.length) {
+      await this.filesService.linkToMessage(dto.fileIds, savedMessage.id);
+      const fileEntities = await this.filesService.findByIds(dto.fileIds);
+      files = fileEntities.map((f) => ({
+        id: f.id,
+        name: f.originalName,
+        size: f.size,
+        type: f.mimeType,
+      }));
+    }
+
     // Touch conversation updatedAt
     await this.conversationRepository.update(conversation.id, {
       updatedAt: new Date(),
     });
 
+    const messageWithFiles = { ...savedMessage, files };
+
     const payload = {
-      message: savedMessage,
+      message: messageWithFiles,
       conversation: {
         id: conversation.id,
         updatedAt: new Date(),
@@ -189,7 +220,7 @@ export class ChatService {
     this.wsGateway.emitToUser(userId, 'chat:new_message', payload);
     this.wsGateway.emitToUser(dto.recipientId, 'chat:new_message', payload);
 
-    return savedMessage;
+    return messageWithFiles;
   }
 
   async markAsRead(userId: string, conversationId: string) {

@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID, IsString, MinLength, MaxLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsUUID, IsString, MinLength, MaxLength, IsOptional, IsArray } from 'class-validator';
 
 export class SendMessageDto {
   @ApiProperty({
@@ -14,4 +14,10 @@ export class SendMessageDto {
   @MinLength(1)
   @MaxLength(5000)
   text: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Attached file IDs' })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  fileIds?: string[];
 }

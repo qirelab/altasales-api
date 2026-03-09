@@ -9,6 +9,7 @@ import { OrdersModule } from './orders/orders.module';
 import { WebSocketModule } from './websocket/websocket.module.js';
 import { ChatModule } from './chat/chat.module';
 import { QuestionnairesModule } from './questionnaires/questionnaires.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { QuestionnairesModule } from './questionnaires/questionnaires.module';
     WebSocketModule,
     ChatModule,
     QuestionnairesModule,
+    FilesModule,
   ],
 })
 export class AppModule { }
