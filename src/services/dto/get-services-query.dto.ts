@@ -20,6 +20,11 @@ export class GetServicesQueryDto {
   @IsOptional()
   category?: string;
 
+  @ApiPropertyOptional({ example: 'CRM', description: 'Filter by skill (exact match in skills array)' })
+  @IsOptional()
+  @IsString()
+  skill?: string;
+
   @ApiPropertyOptional({
     enum: ['asc', 'desc'],
     description: 'Sort by price: asc — ascending, desc — descending',
