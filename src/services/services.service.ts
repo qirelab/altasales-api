@@ -35,6 +35,9 @@ export class ServicesService {
     if (query.category) {
       qb.andWhere('service.category = :category', { category: query.category });
     }
+    if (query.skill) {
+      qb.andWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([query.skill]) });
+    }
     if (query.dateOrder) {
       qb.orderBy('service.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
     }
@@ -47,6 +50,21 @@ export class ServicesService {
     }
 
     return await qb.getMany();
+  }
+
+  async getAllSkills(): Promise<string[]> {
+    const services = await this.serviceRepository
+      .createQueryBuilder('service')
+      .select('service.skills')
+      .getMany();
+
+    const skillsSet = new Set<string>();
+    for (const service of services) {
+      for (const skill of service.skills) {
+        skillsSet.add(skill);
+      }
+    }
+    return Array.from(skillsSet).sort();
   }
 
   async findOne(id: string): Promise<Service> {

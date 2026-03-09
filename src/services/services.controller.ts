@@ -39,6 +39,13 @@ export class ServicesController {
     return this.servicesService.findAll(query);
   }
 
+  @Get('skills')
+  @ApiOperation({ summary: 'Get all unique skills across services' })
+  @ApiResponse({ status: 200, description: 'List of unique skills', type: [String] })
+  async getSkills(): Promise<string[]> {
+    return this.servicesService.getAllSkills();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get service by ID' })
   @ApiParam({ name: 'id', description: 'Service ID' })
