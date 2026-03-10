@@ -54,6 +54,15 @@ export class AuthController {
       const auth = this.firebaseService.getAuth();
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
+      if (!emailVerified) {
+        return {
+          status: HttpStatus.FORBIDDEN,
+          body: {
+            message: 'Email not verified',
+          },
+        };
+      }
+
       const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
       res.cookie('session', sessionCookie, {
         maxAge: expiresIn,
