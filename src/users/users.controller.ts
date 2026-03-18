@@ -1,11 +1,14 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiCookieAuth } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/guards/session.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
+import { UserRole } from './entities/user-role.enum';
 
 @ApiTags('users')
 @Controller('users')
@@ -41,6 +44,8 @@ export class UsersController {
   }
 
   @Post()
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Create a new user' })
   @ApiResponse({ status: 201, description: 'User successfully created', type: User })
   @ApiResponse({ status: 409, description: 'User with this email already exists' })
@@ -49,6 +54,8 @@ export class UsersController {
   }
 
   @Get()
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({ status: 200, description: 'List of all users', type: [User] })
   async findAll(): Promise<User[]> {
@@ -56,6 +63,8 @@ export class UsersController {
   }
 
   @Get(':id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Get user by ID' })
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User found', type: User })
@@ -65,6 +74,8 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Update user' })
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User successfully updated', type: User })
@@ -75,6 +86,8 @@ export class UsersController {
   }
 
   @Delete(':id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete user' })
   @ApiParam({ name: 'id', description: 'User ID' })

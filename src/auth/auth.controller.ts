@@ -167,6 +167,7 @@ export class AuthController {
       email: user.email,
       displayName: user.displayName,
       emailVerified: user.emailVerified,
+      role: user.role,
     };
   }
 

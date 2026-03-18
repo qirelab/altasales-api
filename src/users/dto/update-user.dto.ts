@@ -1,7 +1,8 @@
 import { PartialType } from '@nestjs/swagger';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { CreateUserDto } from './create-user.dto.js';
+import { UserRole } from '../entities/user-role.enum';
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
   @ApiPropertyOptional({ example: 'Doe', description: 'User last name' })
@@ -13,4 +14,9 @@ export class UpdateUserDto extends PartialType(CreateUserDto) {
   @IsOptional()
   @IsString()
   phoneNumber?: string;
+
+  @ApiPropertyOptional({ enum: UserRole, example: UserRole.EXPERT, description: 'User role' })
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole;
 }

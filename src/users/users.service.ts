@@ -70,6 +70,7 @@ export class UsersService {
         name: user.name,
         lastName: user.lastName,
         balance: Number(user.balance),
+        role: user.role,
       },
       stats,
     };
