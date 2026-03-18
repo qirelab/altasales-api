@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { UserRecord } from 'firebase-admin/auth';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
+import { UserRole } from '../users/entities/user-role.enum';
 import { FirebaseService } from './firebase/firebase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -64,6 +65,7 @@ export class AuthService {
         email: firebaseUserRecord.email,
         displayName: firebaseUserRecord.displayName,
         emailVerified: firebaseUserRecord.emailVerified,
+        role: savedUser.role,
         customToken,
       };
     } catch (error) {
@@ -101,10 +103,12 @@ export class AuthService {
       const customToken = await auth.createCustomToken(user.uid);
 
       return {
+        id: dbUser.id,
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
         emailVerified: user.emailVerified,
+        role: dbUser.role,
         customToken,
       };
     } catch (error) {
@@ -132,6 +136,7 @@ export class AuthService {
         email: user.email,
         displayName: user.displayName,
         emailVerified: user.emailVerified,
+        role: dbUser?.role ?? UserRole.USER,
       };
     } catch (error) {
       if (error.code === 'auth/id-token-expired') {
@@ -204,6 +209,7 @@ export class AuthService {
       email: firebaseUser.email,
       displayName: firebaseUser.displayName,
       emailVerified: firebaseUser.emailVerified,
+      role: dbUser.role,
     };
   }
 
@@ -241,6 +247,7 @@ export class AuthService {
         email: firebaseUser.email || '',
         displayName: [dbUser.name, dbUser.lastName].filter(Boolean).join(' ') || firebaseUser.displayName,
         emailVerified: firebaseUser.emailVerified,
+        role: dbUser.role,
       };
     } catch (error) {
       if (error instanceof UnauthorizedException) {
