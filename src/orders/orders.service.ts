@@ -1,11 +1,13 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Brackets, DataSource, Repository } from 'typeorm';
 import { PaymentService } from '../payment/payment.service';
+import { User } from '../users/entities/user.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
+import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 
 @Injectable()
@@ -87,6 +89,109 @@ export class OrdersService {
       take: limit,
     });
     return { data, total, offset, limit };
+  }
+
+  async findAllForAdmin(query: GetAdminOrdersQueryDto): Promise<{
+    data: Array<{
+      id: string;
+      itemsCount: number;
+      clientName: string;
+      clientLastName: string;
+      date: Date;
+      amount: number;
+      status: OrderStatus;
+    }>;
+    total: number;
+    offset: number;
+    limit: number;
+  }> {
+    const { offset = 0, limit = 20 } = query;
+    const search = query.search?.trim();
+
+    const baseQb = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoin(User, 'user', 'user.id = order.userId');
+
+    if (search) {
+      baseQb.andWhere(
+        new Brackets((qb) => {
+          qb
+            .where('order.id::text ILIKE :search', { search: `%${search}%` })
+            .orWhere('order.status ILIKE :search', { search: `%${search}%` })
+            .orWhere('user.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('user.lastName ILIKE :search', { search: `%${search}%` })
+            .orWhere(`CONCAT(user.name, ' ', user.lastName) ILIKE :search`, {
+              search: `%${search}%`,
+            });
+        }),
+      );
+    }
+
+    const total = await baseQb.getCount();
+
+    const rows = await baseQb
+      .clone()
+      .leftJoin('order.items', 'item')
+      .select('order.id', 'id')
+      .addSelect('COUNT(item.id)', 'itemsCount')
+      .addSelect('user.name', 'clientName')
+      .addSelect('user.lastName', 'clientLastName')
+      .addSelect('order.createdAt', 'date')
+      .addSelect('order.amount', 'amount')
+      .addSelect('order.status', 'status')
+      .groupBy('order.id')
+      .addGroupBy('user.name')
+      .addGroupBy('user.lastName')
+      .orderBy('order.createdAt', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{
+        id: string;
+        itemsCount: string;
+        clientName: string;
+        clientLastName: string;
+        date: Date;
+        amount: string;
+        status: OrderStatus;
+      }>();
+
+    return {
+      data: rows.map((row) => ({
+        id: row.id,
+        itemsCount: Number(row.itemsCount),
+        clientName: row.clientName,
+        clientLastName: row.clientLastName,
+        date: row.date,
+        amount: Number(row.amount),
+        status: row.status,
+      })),
+      total,
+      offset,
+      limit,
+    };
+  }
+
+  async findOneForAdmin(id: string): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id },
+      relations: ['user', 'items', 'items.service'],
+      order: { items: { id: 'ASC' } },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order with id ${id} not found`);
+    }
+
+    return order;
+  }
+
+  async removeForAdmin(id: string): Promise<void> {
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id ${id} not found`);
+    }
+
+    await this.orderRepository.remove(order);
   }
 
   async getOrderCountsByUserId(userId: string): Promise<{
