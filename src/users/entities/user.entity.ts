@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from './user-role.enum';
 
@@ -38,4 +38,8 @@ export class User {
   @ApiProperty({ enum: UserRole, example: UserRole.USER, description: 'User role' })
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
+
+  @ApiProperty({ example: '2026-03-19T10:00:00.000Z', description: 'Registration date' })
+  @CreateDateColumn()
+  createdAt: Date;
 }
