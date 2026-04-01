@@ -9,10 +9,18 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { SessionGuard } from '../auth/guards/session.guard';
+import { UserRole } from '../users/entities/user-role.enum';
 import { ServicesService } from './services.service';
+import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
+import { GetAdminContractorsQueryDto } from './dto/get-admin-contractors-query.dto';
+import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
@@ -75,5 +83,71 @@ export class ServicesController {
   @ApiResponse({ status: 404, description: 'Service not found' })
   async remove(@Param('id') id: string): Promise<void> {
     return this.servicesService.remove(id);
+  }
+
+  @Post('admin/contractors')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Create contractor (old scenario via service)' })
+  @ApiResponse({ status: 201, description: 'Contractor created', type: Service })
+  async createContractor(@Body() dto: CreateAdminContractorDto): Promise<Service> {
+    return this.servicesService.createContractor(dto);
+  }
+
+  @Get('admin/contractors')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get contractors list for admin (paginated, with search)' })
+  @ApiResponse({ status: 200, description: 'Paginated contractors list' })
+  async findAllContractorsForAdmin(@Query() query: GetAdminContractorsQueryDto) {
+    return this.servicesService.findAllContractorsForAdmin(query);
+  }
+
+  @Get('admin/contractors/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get contractor by ID for admin (old scenario)' })
+  @ApiParam({ name: 'id', description: 'Contractor ID' })
+  @ApiResponse({ status: 200, description: 'Contractor found with orders' })
+  @ApiResponse({ status: 404, description: 'Contractor not found' })
+  async findOneContractorForAdmin(@Param('id') id: string) {
+    return this.servicesService.findOneContractorForAdmin(id);
+  }
+
+  @Get('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get service by ID for admin with stats and orders' })
+  @ApiParam({ name: 'id', description: 'Service ID' })
+  @ApiResponse({ status: 200, description: 'Service found with stats and orders' })
+  @ApiResponse({ status: 404, description: 'Service not found' })
+  async findOneServiceForAdmin(@Param('id') id: string) {
+    return this.servicesService.findOneServiceForAdmin(id);
+  }
+
+  @Patch('admin/contractors/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update contractor by ID for admin (old scenario)' })
+  @ApiParam({ name: 'id', description: 'Contractor ID' })
+  @ApiResponse({ status: 200, description: 'Contractor updated', type: Service })
+  @ApiResponse({ status: 404, description: 'Contractor not found' })
+  async updateContractorForAdmin(
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminContractorDto,
+  ): Promise<Service> {
+    return this.servicesService.updateContractorForAdmin(id, dto);
+  }
+
+  @Delete('admin/contractors/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete contractor by ID for admin (old scenario)' })
+  @ApiParam({ name: 'id', description: 'Contractor ID' })
+  @ApiResponse({ status: 204, description: 'Contractor deleted' })
+  @ApiResponse({ status: 404, description: 'Contractor not found' })
+  async removeContractorForAdmin(@Param('id') id: string): Promise<void> {
+    return this.servicesService.removeContractorForAdmin(id);
   }
 }

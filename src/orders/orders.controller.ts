@@ -7,6 +7,7 @@
   UseGuards,
   Param,
   Delete,
+  Patch,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { UserRole } from '../users/entities/user-role.enum';
 import { CheckoutDto } from './dto/checkout.dto';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
+import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -78,6 +80,22 @@ export class OrdersController {
   @ApiResponse({ status: 404, description: 'Order not found' })
   async deleteAdminOrder(@Param('id') id: string): Promise<void> {
     return this.ordersService.removeForAdmin(id);
+  }
+
+  @Patch('admin/:id/contractor-chat-access')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update contractor chat access for order (admin)' })
+  @ApiParam({ name: 'id', description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Order updated with contractor chat access flag' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  async updateContractorChatAccess(
+    @Param('id') id: string,
+    @Body() dto: UpdateContractorChatAccessDto,
+  ) {
+    return this.ordersService.updateContractorChatAccessForAdmin(id, dto);
   }
 
   @Post('checkout')

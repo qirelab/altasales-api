@@ -52,6 +52,13 @@ export class Order {
   @Column({ type: 'text' })
   comments?: string;
 
+  @ApiProperty({
+    example: false,
+    description: 'Whether assigned contractor has access to order chat',
+  })
+  @Column({ type: 'boolean', default: false })
+  contractorChatAccess: boolean;
+
   @OneToMany(() => OrderItem, (item: OrderItem) => item.order)
   items: OrderItem[];
 }

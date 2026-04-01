@@ -9,6 +9,7 @@ import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
+import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
 
 @Injectable()
 export class OrdersService {
@@ -100,6 +101,7 @@ export class OrdersService {
       date: Date;
       amount: number;
       status: OrderStatus;
+      contractorChatAccess: boolean;
     }>;
     total: number;
     offset: number;
@@ -139,6 +141,7 @@ export class OrdersService {
       .addSelect('order.createdAt', 'date')
       .addSelect('order.amount', 'amount')
       .addSelect('order.status', 'status')
+      .addSelect('order."contractorChatAccess"', 'contractorChatAccess')
       .groupBy('order.id')
       .addGroupBy('user.name')
       .addGroupBy('user.lastName')
@@ -153,6 +156,7 @@ export class OrdersService {
         date: Date;
         amount: string;
         status: OrderStatus;
+        contractorChatAccess: boolean;
       }>();
 
     return {
@@ -164,6 +168,7 @@ export class OrdersService {
         date: row.date,
         amount: Number(row.amount),
         status: row.status,
+        contractorChatAccess: row.contractorChatAccess,
       })),
       total,
       offset,
@@ -192,6 +197,19 @@ export class OrdersService {
     }
 
     await this.orderRepository.remove(order);
+  }
+
+  async updateContractorChatAccessForAdmin(
+    id: string,
+    dto: UpdateContractorChatAccessDto,
+  ): Promise<Order> {
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id ${id} not found`);
+    }
+
+    order.contractorChatAccess = dto.contractorChatAccess;
+    return this.orderRepository.save(order);
   }
 
   async getOrderCountsByUserId(userId: string): Promise<{
