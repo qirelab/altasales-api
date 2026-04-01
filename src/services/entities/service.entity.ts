@@ -37,7 +37,7 @@ export class Service {
   price: number;
 
   @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL' })
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   image: string | null;
 
   @ApiProperty({
