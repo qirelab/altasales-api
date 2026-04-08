@@ -8,11 +8,13 @@ import { UserRole } from '../users/entities/user-role.enum';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { GetAdminContractorsQueryDto } from './dto/get-admin-contractors-query.dto';
+import { GetAdminServicesQueryDto } from './dto/get-admin-services-query.dto';
 import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
+import { OrderItem } from '../orders/entities/order-item.entity';
 
 @Injectable()
 export class ServicesService {
@@ -62,6 +64,100 @@ export class ServicesService {
     }
 
     return await qb.getMany();
+  }
+
+  async findAllServicesForAdmin(query: GetAdminServicesQueryDto): Promise<{
+    data: Array<{
+      id: string;
+      type: ServiceType;
+      name: string;
+      description: string;
+      category: string;
+      price: number;
+      image: string | null;
+      skills: string[];
+      createdAt: Date;
+      userId: string | null;
+      contractorRatePerHour: number | null;
+      contractorExperienceYears: number | null;
+      ordersCount: number;
+    }>;
+    total: number;
+    offset: number;
+    limit: number;
+  }> {
+    const { offset = 0, limit = 20 } = query;
+    const search = query.search?.trim();
+
+    const baseQb = this.serviceRepository
+      .createQueryBuilder('s')
+      .where('s.type = :type', { type: ServiceType.Service });
+
+    if (search) {
+      baseQb.andWhere(
+        new Brackets((qb) => {
+          qb
+            .where('s.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('s.category ILIKE :search', { search: `%${search}%` })
+            .orWhere('s.description ILIKE :search', { search: `%${search}%` });
+        }),
+      );
+    }
+
+    const total = await baseQb.getCount();
+
+    const rows = await baseQb
+      .clone()
+      .leftJoin(OrderItem, 'oi', 'oi."serviceId" = s.id')
+      .select('s.id', 'id')
+      .addSelect('s.type', 'type')
+      .addSelect('s.name', 'name')
+      .addSelect('s.description', 'description')
+      .addSelect('s.category', 'category')
+      .addSelect('s.price', 'price')
+      .addSelect('s.image', 'image')
+      .addSelect('s.skills', 'skills')
+      .addSelect('s."createdAt"', 'createdAt')
+      .addSelect('s."userId"', 'userId')
+      .addSelect('COUNT(oi.id)', 'ordersCount')
+      .groupBy('s.id')
+      .orderBy('s."createdAt"', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{
+        id: string;
+        type: string;
+        name: string;
+        description: string;
+        category: string;
+        price: string;
+        image: string | null;
+        skills: string[] | string;
+        createdAt: Date;
+        userId: string | null;
+        ordersCount: string;
+      }>();
+
+    return {
+      data: rows.map((row) => ({
+        id: row.id,
+        type: row.type as ServiceType,
+        name: row.name,
+        description: row.description,
+        category: row.category,
+        price: Number(row.price),
+        image: row.image,
+        skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
+        createdAt: row.createdAt,
+        userId: row.userId,
+        contractorRatePerHour: null,
+        contractorExperienceYears: null,
+        ordersCount: Number(row.ordersCount),
+      })),
+      total,
+      offset,
+      limit,
+    };
   }
 
   async getAllSkills(): Promise<string[]> {
@@ -133,7 +229,7 @@ export class ServicesService {
   }
 
   async findAllContractorsForAdmin(query: GetAdminContractorsQueryDto): Promise<{
-    data: Service[];
+    data: Array<Service & { ordersCount: number }>;
     total: number;
     offset: number;
     limit: number;
@@ -142,30 +238,44 @@ export class ServicesService {
     const search = query.search?.trim();
     const qb = this.serviceRepository
       .createQueryBuilder('service')
-      .leftJoinAndSelect('service.user', 'user')
+      .leftJoinAndSelect('service.user', 'u')
       .where('service.type = :type', { type: ServiceType.Contractor });
 
     if (search) {
       qb.andWhere(
         new Brackets((subQb) => {
           subQb
-            .where('user.name ILIKE :search', { search: `%${search}%` })
-            .orWhere('user."lastName" ILIKE :search', { search: `%${search}%` })
-            .orWhere(`CONCAT(user.name, ' ', user."lastName") ILIKE :search`, {
+            .where('u.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('u."lastName" ILIKE :search', { search: `%${search}%` })
+            .orWhere(`CONCAT(u.name, ' ', u."lastName") ILIKE :search`, {
               search: `%${search}%`,
             })
-            .orWhere('user.email ILIKE :search', { search: `%${search}%` })
-            .orWhere('user."phoneNumber" ILIKE :search', { search: `%${search}%` })
+            .orWhere('u.email ILIKE :search', { search: `%${search}%` })
+            .orWhere('u."phoneNumber" ILIKE :search', { search: `%${search}%` })
             .orWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([search]) });
         }),
       );
     }
 
-    const [data, total] = await qb
+    const total = await qb.clone().getCount();
+
+    const { entities, raw } = await qb
+      .addSelect(
+        (subQb) => subQb
+          .select('COUNT(ord.id)')
+          .from(Order, 'ord')
+          .where('ord."userId" = service."userId"'),
+        'ordersCount',
+      )
       .orderBy('service.createdAt', 'DESC')
       .offset(offset)
       .limit(limit)
-      .getManyAndCount();
+      .getRawAndEntities();
+
+    const data = entities.map((service, index) => ({
+      ...service,
+      ordersCount: Number(raw[index]?.ordersCount ?? 0),
+    }));
 
     return { data, total, offset, limit };
   }

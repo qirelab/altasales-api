@@ -20,6 +20,7 @@ import { ServicesService } from './services.service';
 import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { GetAdminContractorsQueryDto } from './dto/get-admin-contractors-query.dto';
+import { GetAdminServicesQueryDto } from './dto/get-admin-services-query.dto';
 import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
@@ -54,37 +55,6 @@ export class ServicesController {
     return this.servicesService.getAllSkills();
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get service by ID' })
-  @ApiParam({ name: 'id', description: 'Service ID' })
-  @ApiResponse({ status: 200, description: 'Service found', type: Service })
-  @ApiResponse({ status: 404, description: 'Service not found' })
-  async findOne(@Param('id') id: string): Promise<Service> {
-    return this.servicesService.findOne(id);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Update service' })
-  @ApiParam({ name: 'id', description: 'Service ID' })
-  @ApiResponse({ status: 200, description: 'Service updated', type: Service })
-  @ApiResponse({ status: 404, description: 'Service not found' })
-  async update(
-    @Param('id') id: string,
-    @Body() updateServiceDto: UpdateServiceDto,
-  ): Promise<Service> {
-    return this.servicesService.update(id, updateServiceDto);
-  }
-
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete service' })
-  @ApiParam({ name: 'id', description: 'Service ID' })
-  @ApiResponse({ status: 204, description: 'Service deleted' })
-  @ApiResponse({ status: 404, description: 'Service not found' })
-  async remove(@Param('id') id: string): Promise<void> {
-    return this.servicesService.remove(id);
-  }
-
   @Post('admin/contractors')
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -101,6 +71,15 @@ export class ServicesController {
   @ApiResponse({ status: 200, description: 'Paginated contractors list' })
   async findAllContractorsForAdmin(@Query() query: GetAdminContractorsQueryDto) {
     return this.servicesService.findAllContractorsForAdmin(query);
+  }
+
+  @Get('admin')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get services list for admin (paginated, with search)' })
+  @ApiResponse({ status: 200, description: 'Paginated services list with orders count' })
+  async findAllServicesForAdmin(@Query() query: GetAdminServicesQueryDto) {
+    return this.servicesService.findAllServicesForAdmin(query);
   }
 
   @Get('admin/contractors/:id')
@@ -149,5 +128,36 @@ export class ServicesController {
   @ApiResponse({ status: 404, description: 'Contractor not found' })
   async removeContractorForAdmin(@Param('id') id: string): Promise<void> {
     return this.servicesService.removeContractorForAdmin(id);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get service by ID' })
+  @ApiParam({ name: 'id', description: 'Service ID' })
+  @ApiResponse({ status: 200, description: 'Service found', type: Service })
+  @ApiResponse({ status: 404, description: 'Service not found' })
+  async findOne(@Param('id') id: string): Promise<Service> {
+    return this.servicesService.findOne(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update service' })
+  @ApiParam({ name: 'id', description: 'Service ID' })
+  @ApiResponse({ status: 200, description: 'Service updated', type: Service })
+  @ApiResponse({ status: 404, description: 'Service not found' })
+  async update(
+    @Param('id') id: string,
+    @Body() updateServiceDto: UpdateServiceDto,
+  ): Promise<Service> {
+    return this.servicesService.update(id, updateServiceDto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete service' })
+  @ApiParam({ name: 'id', description: 'Service ID' })
+  @ApiResponse({ status: 204, description: 'Service deleted' })
+  @ApiResponse({ status: 404, description: 'Service not found' })
+  async remove(@Param('id') id: string): Promise<void> {
+    return this.servicesService.remove(id);
   }
 }

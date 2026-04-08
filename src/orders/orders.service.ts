@@ -111,18 +111,18 @@ export class OrdersService {
     const search = query.search?.trim();
 
     const baseQb = this.orderRepository
-      .createQueryBuilder('order')
-      .leftJoin(User, 'user', 'user.id = order.userId');
+      .createQueryBuilder('o')
+      .leftJoin(User, 'u', 'u.id = o."userId"');
 
     if (search) {
       baseQb.andWhere(
         new Brackets((qb) => {
           qb
-            .where('order.id::text ILIKE :search', { search: `%${search}%` })
-            .orWhere('order.status ILIKE :search', { search: `%${search}%` })
-            .orWhere('user.name ILIKE :search', { search: `%${search}%` })
-            .orWhere('user.lastName ILIKE :search', { search: `%${search}%` })
-            .orWhere(`CONCAT(user.name, ' ', user.lastName) ILIKE :search`, {
+            .where('o.id::text ILIKE :search', { search: `%${search}%` })
+            .orWhere('o.status ILIKE :search', { search: `%${search}%` })
+            .orWhere('u.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('u."lastName" ILIKE :search', { search: `%${search}%` })
+            .orWhere(`CONCAT(u.name, ' ', u."lastName") ILIKE :search`, {
               search: `%${search}%`,
             });
         }),
@@ -133,19 +133,19 @@ export class OrdersService {
 
     const rows = await baseQb
       .clone()
-      .leftJoin('order.items', 'item')
-      .select('order.id', 'id')
+      .leftJoin('o.items', 'item')
+      .select('o.id', 'id')
       .addSelect('COUNT(item.id)', 'itemsCount')
-      .addSelect('user.name', 'clientName')
-      .addSelect('user.lastName', 'clientLastName')
-      .addSelect('order.createdAt', 'date')
-      .addSelect('order.amount', 'amount')
-      .addSelect('order.status', 'status')
-      .addSelect('order."contractorChatAccess"', 'contractorChatAccess')
-      .groupBy('order.id')
-      .addGroupBy('user.name')
-      .addGroupBy('user.lastName')
-      .orderBy('order.createdAt', 'DESC')
+      .addSelect('u.name', 'clientName')
+      .addSelect('u."lastName"', 'clientLastName')
+      .addSelect('o."createdAt"', 'date')
+      .addSelect('o.amount', 'amount')
+      .addSelect('o.status', 'status')
+      .addSelect('o."contractorChatAccess"', 'contractorChatAccess')
+      .groupBy('o.id')
+      .addGroupBy('u.name')
+      .addGroupBy('u."lastName"')
+      .orderBy('o."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
       .getRawMany<{
