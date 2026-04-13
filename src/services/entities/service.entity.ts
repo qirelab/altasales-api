@@ -37,8 +37,8 @@ export class Service {
   price: number;
 
   @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL' })
-  @Column({ nullable: true })
-  image: string;
+  @Column({ type: 'varchar', nullable: true })
+  image: string | null;
 
   @ApiProperty({
     example: ['AmoCRM', 'Bitrix24', 'API'],
@@ -47,6 +47,14 @@ export class Service {
   })
   @Column({ type: 'json', default: [] })
   skills: string[];
+
+  @ApiPropertyOptional({ example: 2500, description: 'Contractor hourly rate' })
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  contractorRatePerHour: number | null;
+
+  @ApiPropertyOptional({ example: 5, description: 'Contractor years of experience' })
+  @Column({ type: 'int', nullable: true })
+  contractorExperienceYears: number | null;
 
   @ApiPropertyOptional({ description: 'Associated user ID (for contractors)' })
   @Column({ type: 'uuid', nullable: true })

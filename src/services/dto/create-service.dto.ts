@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID, IsInt, Min, IsEmail } from 'class-validator';
 import { ServiceType } from '../entities/service-type.enum';
 
 export class CreateServiceDto {
@@ -42,4 +42,36 @@ export class CreateServiceDto {
   @IsOptional()
   @IsUUID()
   userId?: string;
+
+  @ApiPropertyOptional({ example: 'Иван', description: 'Contractor first name' })
+  @IsOptional()
+  @IsString()
+  contractorName?: string;
+
+  @ApiPropertyOptional({ example: 'Петров', description: 'Contractor last name' })
+  @IsOptional()
+  @IsString()
+  contractorLastName?: string;
+
+  @ApiPropertyOptional({ example: 'contractor@example.com', description: 'Contractor email' })
+  @IsOptional()
+  @IsEmail()
+  contractorEmail?: string;
+
+  @ApiPropertyOptional({ example: '+7 (999) 111-22-33', description: 'Contractor phone number' })
+  @IsOptional()
+  @IsString()
+  contractorPhoneNumber?: string;
+
+  @ApiPropertyOptional({ example: 2500, description: 'Contractor hourly rate' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  contractorRatePerHour?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Contractor years of experience' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  contractorExperienceYears?: number;
 }

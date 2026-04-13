@@ -24,7 +24,6 @@ export class SessionGuard implements CanActivate {
       const user = await this.authService.verifySessionCookie(sessionCookie);
 
       request.user = user;
-
       return true;
     } catch (error) {
       response.clearCookie('session', {

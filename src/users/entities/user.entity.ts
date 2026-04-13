@@ -1,5 +1,6 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
+import { UserRole } from './user-role.enum';
 
 @Entity()
 export class User {
@@ -33,4 +34,12 @@ export class User {
   @ApiProperty({ example: 1500.5, description: 'User balance' })
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   balance: number;
+
+  @ApiProperty({ enum: UserRole, example: UserRole.USER, description: 'User role' })
+  @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
+  role: UserRole;
+
+  @ApiProperty({ example: '2026-03-19T10:00:00.000Z', description: 'Registration date' })
+  @CreateDateColumn()
+  createdAt: Date;
 }

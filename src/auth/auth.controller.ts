@@ -54,6 +54,15 @@ export class AuthController {
       const auth = this.firebaseService.getAuth();
       const { emailVerified } = await auth.getUser(userInfo.uid);
 
+      if (!emailVerified) {
+        return {
+          status: HttpStatus.FORBIDDEN,
+          body: {
+            message: 'Email not verified',
+          },
+        };
+      }
+
       const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
       res.cookie('session', sessionCookie, {
         maxAge: expiresIn,
@@ -125,6 +134,26 @@ export class AuthController {
   }
 
 
+  @Post('logout')
+  @ApiOperation({ summary: 'Logout and clear session cookie' })
+  @ApiResponse({ status: 200, description: 'Successfully logged out' })
+  async logout(
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+  ) {
+    const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+
+    res.clearCookie('session', {
+      httpOnly: true,
+      secure: !isLocal,
+      sameSite: isLocal ? 'lax' : 'none',
+      domain: isLocal ? undefined : '.altasales.qirelab.com',
+      path: '/',
+    });
+
+    return { message: 'Logged out successfully' };
+  }
+
   @Get('me')
   @UseGuards(SessionGuard)
   @ApiOperation({ summary: 'Get current user information (protected route)' })
@@ -138,6 +167,7 @@ export class AuthController {
       email: user.email,
       displayName: user.displayName,
       emailVerified: user.emailVerified,
+      role: user.role,
     };
   }
 
