@@ -133,6 +133,15 @@ export class AuthController {
     return this.authService.resetPassword(resetPasswordDto);
   }
 
+  @Post('dev-email-verification-link')
+  @ApiOperation({ summary: 'Generate email verification link (dev only)' })
+  @ApiResponse({ status: 200, description: 'Email verification link generated' })
+  @ApiResponse({ status: 400, description: 'User not found' })
+  @ApiResponse({ status: 403, description: 'Forbidden in production' })
+  async generateDevEmailVerificationLink(@Body() payload: ResetPasswordDto) {
+    return this.authService.generateEmailVerificationLink(payload.email);
+  }
+
 
   @Post('logout')
   @ApiOperation({ summary: 'Logout and clear session cookie' })

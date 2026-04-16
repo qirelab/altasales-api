@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserRecord } from 'firebase-admin/auth';
 import { DataSource, Repository } from 'typeorm';
@@ -165,6 +165,32 @@ export class AuthService {
         throw new BadRequestException('User with this email not found');
       }
       throw new BadRequestException(error.message || 'Password reset error');
+    }
+  }
+
+  async generateEmailVerificationLink(email: string) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException('Endpoint is available only outside production');
+    }
+
+    try {
+      const auth = this.firebaseService.getAuth();
+      await auth.getUserByEmail(email);
+
+      const verificationLink = await auth.generateEmailVerificationLink(email, {
+        url: process.env.CLIENT_URI?.split(',')[0] || 'http://localhost:3000',
+        handleCodeInApp: false,
+      });
+
+      return {
+        message: 'Email verification link generated',
+        verificationLink,
+      };
+    } catch (error) {
+      if (error.code === 'auth/user-not-found') {
+        throw new BadRequestException('User with this email not found');
+      }
+      throw new BadRequestException(error.message || 'Email verification link generation error');
     }
   }
 
