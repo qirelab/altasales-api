@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
@@ -53,6 +54,15 @@ export class ServicesController {
   @ApiResponse({ status: 200, description: 'List of unique skills', type: [String] })
   async getSkills(): Promise<string[]> {
     return this.servicesService.getAllSkills();
+  }
+
+  @Get('expert/profile')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.EXPERT)
+  @ApiOperation({ summary: 'Get expert personal cabinet data' })
+  @ApiResponse({ status: 200, description: 'Expert profile with stats and orders' })
+  async findExpertProfile(@CurrentUser() user: CurrentUserData) {
+    return this.servicesService.findExpertProfile(user.id);
   }
 
   @Post('admin/contractors')
