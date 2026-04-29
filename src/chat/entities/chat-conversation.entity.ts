@@ -12,9 +12,10 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { ChatMessage } from './chat-message.entity';
+import { Order } from '../../orders/entities/order.entity';
 
 @Entity()
-@Unique(['participantOneId', 'participantTwoId'])
+@Unique(['participantOneId', 'participantTwoId', 'orderId'])
 export class ChatConversation {
   @ApiProperty({ description: 'Conversation ID (UUID)' })
   @PrimaryGeneratedColumn('uuid')
@@ -35,6 +36,18 @@ export class ChatConversation {
   @ManyToOne(() => User, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'participantTwoId' })
   participantTwo: User;
+
+  @ApiProperty({
+    description: 'Related order ID for order-specific conversation',
+    required: false,
+    nullable: true,
+  })
+  @Column({ type: 'uuid', nullable: true })
+  orderId: string | null;
+
+  @ManyToOne(() => Order, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'orderId' })
+  order: Order | null;
 
   @ApiProperty({ description: 'Creation date' })
   @CreateDateColumn()

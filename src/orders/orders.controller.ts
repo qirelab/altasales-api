@@ -38,6 +38,17 @@ export class OrdersController {
     return this.ordersService.findByUserId(user.id, query);
   }
 
+  @Get('expert')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.EXPERT)
+  @ApiOperation({ summary: 'Get orders assigned to current expert' })
+  @ApiResponse({ status: 200, description: 'Paginated list of expert-assigned orders with items' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async getExpertOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
+    return this.ordersService.findAssignedToExpert(user.id, query);
+  }
+
   @Get('admin')
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
