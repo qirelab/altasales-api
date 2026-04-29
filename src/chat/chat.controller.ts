@@ -19,6 +19,7 @@ import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
 import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
+import { StartConversationDto } from './dto/start-conversation.dto';
 
 @ApiTags('chat')
 @ApiCookieAuth('session')
@@ -68,8 +69,8 @@ export class ChatController {
   @ApiOperation({ summary: 'Find or create a conversation with a user' })
   startConversation(
     @CurrentUser() user: CurrentUserData,
-    @Body('recipientId', ParseUUIDPipe) recipientId: string,
+    @Body() dto: StartConversationDto,
   ) {
-    return this.chatService.findOrCreateConversation(user.id, recipientId);
+    return this.chatService.findOrCreateConversation(user.id, dto);
   }
 }

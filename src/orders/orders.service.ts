@@ -1,8 +1,9 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, Repository } from 'typeorm';
+import { Brackets, DataSource, In, Repository } from 'typeorm';
 import { PaymentService } from '../payment/payment.service';
 import { User } from '../users/entities/user.entity';
+import { ServiceType } from '../services/entities/service-type.enum';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
@@ -89,6 +90,55 @@ export class OrdersService {
       skip: offset,
       take: limit,
     });
+    return { data, total, offset, limit };
+  }
+
+  async findAssignedToExpert(
+    expertUserId: string,
+    query: GetOrdersQueryDto,
+  ): Promise<{ data: Order[]; total: number; offset: number; limit: number }> {
+    const { status, offset = 0, limit = 20 } = query;
+
+    const baseQb = this.orderRepository
+      .createQueryBuilder('o')
+      .innerJoin('o.items', 'item')
+      .innerJoin('item.service', 'service')
+      .where('service.type = :contractorType', {
+        contractorType: ServiceType.Contractor,
+      })
+      .andWhere('service."userId" = :expertUserId', { expertUserId });
+
+    if (status) {
+      baseQb.andWhere('o.status = :status', { status });
+    }
+
+    const totalRaw = await baseQb
+      .clone()
+      .select('COUNT(DISTINCT o.id)', 'total')
+      .getRawOne<{ total: string | null }>();
+    const total = Number(totalRaw?.total ?? 0);
+
+    const idRows = await baseQb
+      .clone()
+      .select('o.id', 'id')
+      .addSelect('MAX(o."createdAt")', 'createdAt')
+      .groupBy('o.id')
+      .orderBy('MAX(o."createdAt")', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string; createdAt: string }>();
+
+    const ids = idRows.map((row) => row.id);
+    if (!ids.length) {
+      return { data: [], total, offset, limit };
+    }
+
+    const data = await this.orderRepository.find({
+      where: { id: In(ids) },
+      relations: ['items', 'items.service'],
+      order: { createdAt: 'DESC' },
+    });
+
     return { data, total, offset, limit };
   }
 
