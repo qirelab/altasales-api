@@ -6,6 +6,7 @@ import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RobokassaService } from './robokassa.service';
+import { CartService } from '../cart/cart.service';
 
 @Injectable()
 export class PaymentService {
@@ -16,6 +17,7 @@ export class PaymentService {
     private readonly orderRepository: Repository<Order>,
     private readonly robokassaService: RobokassaService,
     private readonly dataSource: DataSource,
+    private readonly cartService: CartService,
   ) { }
 
   async createWithManager(
@@ -126,10 +128,14 @@ export class PaymentService {
       await paymentRepo.save(payment);
 
       if (payment.orderId != null) {
+        const order = await orderRepo.findOne({ where: { id: payment.orderId } });
         await orderRepo.update(
           { id: payment.orderId },
           { status: OrderStatus.InProgress },
         );
+        if (order) {
+          await this.cartService.clearAndArchiveActiveCart(order.userId);
+        }
       }
 
       await queryRunner.commitTransaction();

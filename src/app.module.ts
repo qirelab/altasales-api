@@ -10,6 +10,7 @@ import { WebSocketModule } from './websocket/websocket.module.js';
 import { ChatModule } from './chat/chat.module';
 import { QuestionnairesModule } from './questionnaires/questionnaires.module';
 import { FilesModule } from './files/files.module';
+import { CartModule } from './cart/cart.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { FilesModule } from './files/files.module';
     ChatModule,
     QuestionnairesModule,
     FilesModule,
+    CartModule,
   ],
 })
 export class AppModule { }
