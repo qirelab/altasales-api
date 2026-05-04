@@ -1,7 +1,10 @@
 import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/guards/session.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-user.decorator';
+import { UserRole } from '../users/entities/user-role.enum';
 import { QuestionnairesService } from './questionnaires.service';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 
@@ -35,6 +38,16 @@ export class QuestionnairesController {
     console.log(user);
     console.log(await this.questionnairesService.findByUserId(user.id));
     return this.questionnairesService.findByUserId(user.id);
+  }
+
+  @Get('user/:userId')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get questionnaire by user ID (admin only)' })
+  @ApiParam({ name: 'userId', description: 'User ID' })
+  @ApiResponse({ status: 200, description: 'Questionnaire or null' })
+  async findByUserId(@Param('userId') userId: string) {
+    return this.questionnairesService.findByUserId(userId);
   }
 
   @Get(':id')
