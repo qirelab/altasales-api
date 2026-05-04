@@ -5,15 +5,12 @@ import { User } from './entities/user.entity';
 import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
 import { BalancePocket } from './entities/balance-pocket.enum';
+import { REGISTRATION_GIFT_RUB } from './balance.constants';
 
 export interface AddToBalanceMeta {
   orderId?: string | null;
   paymentInvId?: number | null;
   description?: string | null;
-  /**
-   * Только смысл для начислений (amount > 0): отметить основной или подарочный источник.
-   * Не дублирует отдельный кошелёк — меняется один общий balance.
-   */
   pocket?: BalancePocket | null;
 }
 
@@ -78,6 +75,19 @@ export class BalanceService {
       where: { userId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async creditRegistrationGift(userId: string, manager?: EntityManager): Promise<BalanceTransaction> {
+    return this.addToBalance(
+      userId,
+      REGISTRATION_GIFT_RUB,
+      BalanceTransactionType.RegistrationBonus,
+      {
+        description: 'Приветственный подарочный баланс при регистрации',
+        pocket: BalancePocket.Gift,
+      },
+      manager,
+    );
   }
 
   async creditFromPayment(
