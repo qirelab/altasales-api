@@ -4,11 +4,17 @@ import { EntityManager, Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
+import { BalancePocket } from './entities/balance-pocket.enum';
 
 export interface AddToBalanceMeta {
   orderId?: string | null;
   paymentInvId?: number | null;
   description?: string | null;
+  /**
+   * Только смысл для начислений (amount > 0): отметить основной или подарочный источник.
+   * Не дублирует отдельный кошелёк — меняется один общий balance.
+   */
+  pocket?: BalancePocket | null;
 }
 
 @Injectable()
@@ -52,9 +58,13 @@ export class BalanceService {
 
     await userRepo.update({ id: userId }, { balance: newBalance });
 
+    const pocket =
+      amount > 0 ? meta.pocket ?? BalancePocket.Main : meta.pocket ?? null;
+
     const transaction = txRepo.create({
       userId,
       amount,
+      pocket,
       type,
       orderId: meta.orderId ?? null,
       paymentInvId: meta.paymentInvId ?? null,
@@ -77,12 +87,13 @@ export class BalanceService {
     orderId: string | null,
     description: string,
     manager?: EntityManager,
+    pocket: BalancePocket = BalancePocket.Main,
   ): Promise<BalanceTransaction> {
     return this.addToBalance(
       userId,
       amount,
       BalanceTransactionType.TopUp,
-      { orderId, paymentInvId, description },
+      { orderId, paymentInvId, description, pocket },
       manager,
     );
   }

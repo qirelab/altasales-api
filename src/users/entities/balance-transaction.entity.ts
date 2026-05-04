@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { BalanceTransactionType } from './balance-transaction-type.enum';
+import { BalancePocket } from './balance-pocket.enum';
 import { User } from './user.entity';
 
 @Entity()
@@ -30,9 +31,21 @@ export class BalanceTransaction {
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @ApiProperty({ example: 500.5, description: 'Amount (positive = credit, negative = debit)' })
+  @ApiProperty({
+    example: 500.5,
+    description: 'Сумма: >0 начисление на общий баланс, <0 списание',
+  })
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
+
+  @ApiProperty({
+    enum: BalancePocket,
+    nullable: true,
+    description:
+      'Для начислений (amount > 0): основной или подарочный источник. Для списаний обычно null.',
+  })
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  pocket: BalancePocket | null;
 
   @ApiProperty({ enum: BalanceTransactionType, description: 'Transaction type' })
   @Column({ type: 'varchar', length: 20 })
