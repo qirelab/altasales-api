@@ -4,7 +4,7 @@ import { UserRecord } from 'firebase-admin/auth';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
-import { BalanceService } from '../users/balance.service';
+import { BalanceService } from '../balance-transactions/balance.service';
 import { FirebaseService } from './firebase/firebase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';

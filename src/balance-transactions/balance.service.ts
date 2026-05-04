@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { User } from '../users/entities/user.entity';
 import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
 import { BalancePocket } from './entities/balance-pocket.enum';
@@ -37,30 +37,26 @@ export class BalanceService {
     return Number(user.balance);
   }
 
-  /**
-   * total — из `User.balance`. main/gift — из журнала: сумма начислений с pocket=gift минус списания
-   * (списания без pocket считаются как съедающие сначала подарочный пул до исчерпания).
-   */
   async getBalanceBreakdown(userId: string): Promise<UserBalanceBreakdown> {
     const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'balance'] });
     if (!user) {
       throw new NotFoundException(`Пользователь с ID ${userId} не найден`);
     }
     const total = Number(user.balance);
-
     const raw = await this.balanceTransactionRepository
       .createQueryBuilder('t')
       .select(
-        `COALESCE(SUM(CASE WHEN t.amount > 0 AND t.pocket = :gift THEN t.amount ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN t."amount" > 0 AND (t."pocket" = :gift OR t."type" = :registrationBonus) THEN t."amount" ELSE 0 END), 0)`,
         'giftCredits',
       )
       .addSelect(
-        `COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN t."amount" < 0 THEN -t."amount" ELSE 0 END), 0)`,
         'debitVolume',
       )
-      .where('t.userId = :userId', { userId })
+      .where('t."userId" = :userId', { userId })
       .setParameter('gift', BalancePocket.Gift)
-      .getRawOne<{ giftCredits: string; debitVolume: string }>();
+      .setParameter('registrationBonus', BalanceTransactionType.RegistrationBonus)
+      .getRawOne<{ giftCredits: string | number; debitVolume: string | number }>();
 
     const giftCredits = Number(raw?.giftCredits ?? 0);
     const debitVolume = Number(raw?.debitVolume ?? 0);

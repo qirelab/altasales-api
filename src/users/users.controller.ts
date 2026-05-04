@@ -23,7 +23,7 @@ import { GetAdminUsersQueryDto } from './dto/get-admin-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
 import { UserRole } from './entities/user-role.enum';
-import { BalanceService } from './balance.service';
+import { BalanceService } from '../balance-transactions/balance.service';
 import { UserBalanceBreakdownResponseDto } from './dto/user-balance-breakdown.dto';
 
 @ApiTags('users')
