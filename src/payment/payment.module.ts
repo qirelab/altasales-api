@@ -6,9 +6,10 @@ import { Payment } from './entities/payment.entity';
 import { PaymentService } from './payment.service';
 import { PaymentController } from './payment.controller';
 import { RobokassaService } from './robokassa.service';
+import { CartModule } from '../cart/cart.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Order]), ConfigModule],
+  imports: [TypeOrmModule.forFeature([Payment, Order]), ConfigModule, CartModule],
   controllers: [PaymentController],
   providers: [PaymentService, RobokassaService],
   exports: [PaymentService],
