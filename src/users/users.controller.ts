@@ -1,4 +1,17 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+  Query,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiCookieAuth } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -10,12 +23,15 @@ import { GetAdminUsersQueryDto } from './dto/get-admin-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
 import { UserRole } from './entities/user-role.enum';
+import { BalanceService } from '../balance-transactions/balance.service';
+import { UserBalanceBreakdownResponseDto } from './dto/user-balance-breakdown.dto';
 
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
+    private readonly balanceService: BalanceService,
   ) { }
 
   @Get('profile')
@@ -27,6 +43,18 @@ export class UsersController {
   async getProfile(@CurrentUser() user: CurrentUserData) {
     const { profile, stats } = await this.usersService.getProfile(user.id);
     return { user: profile, stats };
+  }
+
+  @Get('profile/balance')
+  @UseGuards(SessionGuard)
+  @ApiOperation({
+    summary: 'Баланс текущего пользователя с разбивкой основной / подарочный',
+  })
+  @ApiCookieAuth('session')
+  @ApiResponse({ status: 200, description: 'Актуальный баланс', type: UserBalanceBreakdownResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMyBalanceBreakdown(@CurrentUser() user: CurrentUserData): Promise<UserBalanceBreakdownResponseDto> {
+    return this.balanceService.getBalanceBreakdown(user.id);
   }
 
   @Patch('profile')
@@ -78,6 +106,24 @@ export class UsersController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async findAllForAdmin(@Query() query: GetAdminUsersQueryDto) {
     return this.usersService.findAllForAdmin(query);
+  }
+
+  @Get('admin/:id/balance')
+  // @UseGuards(SessionGuard, RolesGuard)
+  // @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Баланс пользователя по ID (админ) с разбивкой основной / подарочный',
+  })
+  @ApiCookieAuth('session')
+  @ApiParam({ name: 'id', description: 'User ID (UUID)' })
+  @ApiResponse({ status: 200, description: 'Актуальный баланс', type: UserBalanceBreakdownResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async getUserBalanceBreakdownForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<UserBalanceBreakdownResponseDto> {
+    return this.balanceService.getBalanceBreakdown(id);
   }
 
   @Get('admin/:id')
