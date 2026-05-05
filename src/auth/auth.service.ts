@@ -148,17 +148,18 @@ export class AuthService {
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
     try {
+      const dbUser = await this.userRepository.findOne({
+        where: { email: resetPasswordDto.email },
+      });
+      if (!dbUser) {
+        throw new BadRequestException('User with this email not found');
+      }
+
       const auth = this.firebaseService.getAuth();
       await auth.getUserByEmail(resetPasswordDto.email);
 
-      const resetLink = await auth.generatePasswordResetLink(resetPasswordDto.email, {
-        url: process.env.CLIENT_URI?.split(',')[0] || 'http://localhost:3000',
-        handleCodeInApp: false,
-      });
-
       return {
-        message: 'Password reset link sent to email',
-        resetLink,
+        message: 'User email validated for password reset',
       };
     } catch (error) {
       if (error.code === 'auth/user-not-found') {

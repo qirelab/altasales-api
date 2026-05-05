@@ -32,7 +32,7 @@ export class ChatMessage {
   @Column({ type: 'uuid' })
   senderId: string;
 
-  @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'senderId' })
   sender: User;
 

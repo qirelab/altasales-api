@@ -289,7 +289,7 @@ export class ServicesService {
     };
     orders: Array<{
       id: string;
-      positions: number;
+      hours: number;
       createdAt: Date;
       amount: number;
       status: string;
@@ -330,7 +330,7 @@ export class ServicesService {
       .createQueryBuilder('o')
       .leftJoin('o.items', 'item')
       .select('o.id', 'id')
-      .addSelect('COUNT(item.id)', 'positions')
+      .addSelect('COALESCE(SUM(item.hours), 0)', 'hours')
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
@@ -342,7 +342,7 @@ export class ServicesService {
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
-        positions: string;
+        hours: string;
         createdAt: Date;
         amount: string;
         status: string;
@@ -357,7 +357,86 @@ export class ServicesService {
       },
       orders: ordersRaw.map((order) => ({
         id: order.id,
-        positions: Number(order.positions),
+        hours: Number(order.hours),
+        createdAt: order.createdAt,
+        amount: Number(order.amount),
+        status: order.status,
+      })),
+    };
+  }
+
+  async findExpertProfile(userId: string): Promise<{
+    contractor: Service;
+    stats: {
+      totalProjects: number;
+      activeOrders: number;
+      totalIncome: number;
+    };
+    orders: Array<{
+      id: string;
+      hours: number;
+      createdAt: Date;
+      amount: number;
+      status: string;
+    }>;
+  }> {
+    const contractor = await this.serviceRepository.findOne({
+      where: { type: ServiceType.Contractor, userId },
+      relations: ['user'],
+    });
+
+    if (!contractor) {
+      throw new NotFoundException('Профиль эксперта не найден');
+    }
+
+    const aggregateRaw = await this.orderRepository
+      .createQueryBuilder('o')
+      .select('COUNT(o.id)', 'totalProjects')
+      .addSelect(
+        `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
+        'activeOrders',
+      )
+      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .where('o."userId" = :userId', { userId })
+      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
+      .getRawOne<{
+        totalProjects: string | null;
+        activeOrders: string | null;
+        totalIncome: string | null;
+      }>();
+
+    const ordersRaw = await this.orderRepository
+      .createQueryBuilder('o')
+      .leftJoin('o.items', 'item')
+      .select('o.id', 'id')
+      .addSelect('COALESCE(SUM(item.hours), 0)', 'hours')
+      .addSelect('o."createdAt"', 'createdAt')
+      .addSelect('o.amount', 'amount')
+      .addSelect('o.status', 'status')
+      .where('o."userId" = :userId', { userId })
+      .groupBy('o.id')
+      .addGroupBy('o."createdAt"')
+      .addGroupBy('o.amount')
+      .addGroupBy('o.status')
+      .orderBy('o."createdAt"', 'DESC')
+      .getRawMany<{
+        id: string;
+        hours: string;
+        createdAt: Date;
+        amount: string;
+        status: string;
+      }>();
+
+    return {
+      contractor,
+      stats: {
+        totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
+        activeOrders: Number(aggregateRaw?.activeOrders ?? 0),
+        totalIncome: Number(aggregateRaw?.totalIncome ?? 0),
+      },
+      orders: ordersRaw.map((order) => ({
+        id: order.id,
+        hours: Number(order.hours),
         createdAt: order.createdAt,
         amount: Number(order.amount),
         status: order.status,

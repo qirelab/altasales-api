@@ -24,7 +24,7 @@ export class ChatConversation {
   @Column({ type: 'uuid' })
   participantOneId: string;
 
-  @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'participantOneId' })
   participantOne: User;
 
@@ -32,7 +32,7 @@ export class ChatConversation {
   @Column({ type: 'uuid' })
   participantTwoId: string;
 
-  @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'participantTwoId' })
   participantTwo: User;
 
