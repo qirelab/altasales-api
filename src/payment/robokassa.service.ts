@@ -76,6 +76,28 @@ export class RobokassaService {
   }
 
   /**
+   * Verify signature from Success/Fail URL redirect.
+   * Formula: OutSum:InvId:Password1[:Shp_param=value...] (Shp_ params sorted alphabetically)
+   */
+  verifySuccessFailSignature(
+    outSum: string,
+    invId: string,
+    signatureValue: string,
+    shpParams?: Record<string, string>,
+  ): boolean {
+    const shpPart = shpParams && Object.keys(shpParams).length > 0
+      ? ':' +
+        Object.keys(shpParams)
+          .sort()
+          .map((k) => `Shp_${k}=${shpParams[k]}`)
+          .join(':')
+      : '';
+    const str = `${outSum}:${invId}:${this.password1}${shpPart}`;
+    const expected = createHash('md5').update(str).digest('hex').toUpperCase();
+    return expected === signatureValue.toUpperCase();
+  }
+
+  /**
    * Extract Shp_* params from request body (e.g. Shp_order -> order).
    */
   extractShpParams(body: Record<string, string>): Record<string, string> {

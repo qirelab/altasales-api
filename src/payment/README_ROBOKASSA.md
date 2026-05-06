@@ -25,21 +25,20 @@ ROBOKASSA_IS_TEST=1
 
 ## API
 
-### Создание платежа
+### Создание платежа на пополнение баланса
 
-**POST** `/payments/robokassa/create`
+**POST** `/payments/robokassa/topup/create`
 
 Тело (JSON):
 
 ```json
 {
-  "outSum": 990.5,
-  "description": "Оплата заказа №12",
-  "invId": 12
+  "amount": 990.5,
+  "description": "Пополнение внутреннего баланса"
 }
 ```
 
-- **invId** — необязателен; если не передан, генерируется автоматически.
+- Требуется авторизация (session cookie).
 - Ответ: `{ "paymentUrl": "https://auth.robokassa.ru/Merchant/Index.aspx", "params": { "MerchantLogin", "OutSum", "InvId", "Description", "SignatureValue", "IsTest" } }`.
 
 Фронт может отправить форму **POST** на `paymentUrl` с полями из `params` либо собрать ссылку **GET** вида  
@@ -54,6 +53,17 @@ ROBOKASSA_IS_TEST=1
 - OutSum, InvId, SignatureValue, Fee, EMail, PaymentMethod, IncCurrLabel и т.д.
 
 Сервер проверяет подпись (Password #2), обновляет платёж в БД и отвечает **текстом** `OK{InvId}` (например, `OK12`). Другой ответ считается ошибкой, Робокасса может повторять запрос.
+
+После успешного подтверждения:
+
+- если платёж связан с заказом — заказ переводится в `in_progress`;
+- если платёж связан с пользователем (пополнение) — средства зачисляются во внутренний баланс пользователя.
+
+### Fail URL
+
+**POST** `/payments/robokassa/fail`
+
+Этот endpoint можно указать как Fail URL. Сервер помечает платёж как `failed`, если он еще не был подтвержден как `paid`.
 
 ## Чек-лист
 
