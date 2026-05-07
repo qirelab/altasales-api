@@ -8,6 +8,7 @@ import { PaymentController } from './payment.controller';
 import { RobokassaService } from './robokassa.service';
 import { CartModule } from '../cart/cart.module';
 import { BalanceTransactionsModule } from '../balance-transactions/balance-transactions.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { BalanceTransactionsModule } from '../balance-transactions/balance-trans
     ConfigModule,
     CartModule,
     BalanceTransactionsModule,
+    AuthModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService, RobokassaService],
