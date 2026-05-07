@@ -52,7 +52,7 @@ export class FileEntity {
   message: ChatMessage | null;
 
   @ApiProperty({ description: 'ROP document ID for external storage', nullable: true })
-  @Column({ type: 'uuid', nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   ropDocumentId: string | null;
 
   @ApiProperty({ description: 'Order item ID', nullable: true })

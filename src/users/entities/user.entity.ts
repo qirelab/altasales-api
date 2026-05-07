@@ -43,7 +43,7 @@ export class User {
   @CreateDateColumn()
   createdAt: Date;
 
-  @ApiProperty({ example: 'rop-project-uuid', description: 'ROP project ID for file storage', nullable: true })
-  @Column({ type: 'uuid', nullable: true })
+  @ApiProperty({ example: '40', description: 'ROP project ID for file storage', nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   ropProjectId: string | null;
 }

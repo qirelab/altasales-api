@@ -12,6 +12,36 @@ import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
 
+export interface OrderFileDto {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+}
+
+export interface OrderItemDto {
+  id: string;
+  orderId: string;
+  serviceId: string;
+  service: OrderItem['service'];
+  hours: number | null;
+  amount: number;
+  files: OrderFileDto[];
+}
+
+export interface OrderDto {
+  id: string;
+  userId: string;
+  createdAt: Date;
+  amount: number;
+  status: OrderStatus;
+  deadline: Date;
+  comments?: string | null;
+  contractorChatAccess: boolean;
+  items: OrderItemDto[];
+  user?: User;
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -22,6 +52,34 @@ export class OrdersService {
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
   ) { }
+
+  private transformOrderFiles(order: Order): OrderDto {
+    return {
+      id: order.id,
+      userId: order.userId,
+      createdAt: order.createdAt,
+      amount: order.amount,
+      status: order.status,
+      deadline: order.deadline,
+      comments: order.comments,
+      contractorChatAccess: order.contractorChatAccess,
+      user: order.user,
+      items: (order.items ?? []).map((item): OrderItemDto => ({
+        id: item.id,
+        orderId: item.orderId,
+        serviceId: item.serviceId,
+        service: item.service,
+        hours: item.hours,
+        amount: item.amount,
+        files: (item.files ?? []).map((file): OrderFileDto => ({
+          id: file.id,
+          name: file.originalName,
+          size: file.size,
+          type: file.mimeType,
+        })),
+      })),
+    };
+  }
 
   async checkout(dto: CheckoutDto, userId: string): Promise<{
     orderId: string;
@@ -78,7 +136,7 @@ export class OrdersService {
   async findByUserId(
     userId: string,
     query: GetOrdersQueryDto,
-  ): Promise<{ data: Order[]; total: number; offset: number; limit: number }> {
+  ): Promise<{ data: OrderDto[]; total: number; offset: number; limit: number }> {
     const { status, offset = 0, limit = 20 } = query;
     const where: { userId: string; status?: OrderStatus } = { userId };
     if (status) where.status = status;
@@ -90,13 +148,13 @@ export class OrdersService {
       skip: offset,
       take: limit,
     });
-    return { data, total, offset, limit };
+    return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
   async findAssignedToExpert(
     expertUserId: string,
     query: GetOrdersQueryDto,
-  ): Promise<{ data: Order[]; total: number; offset: number; limit: number }> {
+  ): Promise<{ data: OrderDto[]; total: number; offset: number; limit: number }> {
     const { status, offset = 0, limit = 20 } = query;
 
     const baseQb = this.orderRepository
@@ -139,7 +197,7 @@ export class OrdersService {
       order: { createdAt: 'DESC' },
     });
 
-    return { data, total, offset, limit };
+    return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
   async findAllForAdmin(query: GetAdminOrdersQueryDto): Promise<{
@@ -226,7 +284,7 @@ export class OrdersService {
     };
   }
 
-  async findOneForAdmin(id: string): Promise<Order> {
+  async findOneForAdmin(id: string): Promise<OrderDto> {
     const order = await this.orderRepository.findOne({
       where: { id },
       relations: ['user', 'items', 'items.service', 'items.files'],
@@ -237,7 +295,7 @@ export class OrdersService {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
 
-    return order;
+    return this.transformOrderFiles(order);
   }
 
   async removeForAdmin(id: string): Promise<void> {

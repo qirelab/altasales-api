@@ -27,7 +27,6 @@ export class FilesService {
 
     const project = await this.ropService.createProject(
       `altasales-user-${userId}`,
-      userId,
     );
 
     await this.userRepository.update(userId, { ropProjectId: project.id });
@@ -46,7 +45,6 @@ export class FilesService {
     const ropDocument = await this.ropService.createDocument(
       ropProjectId,
       file.originalname,
-      'client_document',
     );
 
     await this.ropService.uploadFile(ropProjectId, ropDocument.id, file);
@@ -117,25 +115,5 @@ export class FilesService {
     }
 
     return this.ropService.getDownloadUrl(file.user.ropProjectId, file.ropDocumentId);
-  }
-
-  async delete(id: string, userId: string): Promise<void> {
-    const file = await this.fileRepository.findOne({
-      where: { id, userId },
-    });
-    if (!file) throw new NotFoundException('File not found');
-
-    if (file.ropDocumentId) {
-      const user = await this.userRepository.findOne({ where: { id: userId } });
-      if (user?.ropProjectId) {
-        try {
-          await this.ropService.deleteDocument(user.ropProjectId, file.ropDocumentId);
-        } catch (error) {
-          this.logger.error(`Failed to delete file from ROP: ${error}`);
-        }
-      }
-    }
-
-    await this.fileRepository.remove(file);
   }
 }
