@@ -111,11 +111,11 @@ export class OrdersController {
 
   @Post('checkout')
   @ApiOperation({
-    summary: 'Checkout (create order + payment, one request)',
+    summary: 'Checkout с выбором способа оплаты',
     description:
-      'Creates order with items, creates Robokassa payment. Returns orderId, paymentUrl and params for redirect.',
+      'Создает заказ и обрабатывает оплату выбранным способом: Robokassa (возвращает paymentUrl/params) или внутренний баланс (моментальное списание и перевод в in_progress).',
   })
-  @ApiResponse({ status: 201, description: 'Order and payment created' })
+  @ApiResponse({ status: 201, description: 'Order created and payment flow started/completed' })
   @ApiResponse({ status: 400, description: 'Validation or business error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async checkout(@Body() dto: CheckoutDto, @CurrentUser() user: CurrentUserData) {
