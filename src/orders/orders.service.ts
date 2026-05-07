@@ -85,7 +85,7 @@ export class OrdersService {
 
     const [data, total] = await this.orderRepository.findAndCount({
       where,
-      relations: ['items', 'items.service'],
+      relations: ['items', 'items.service', 'items.files'],
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -135,7 +135,7 @@ export class OrdersService {
 
     const data = await this.orderRepository.find({
       where: { id: In(ids) },
-      relations: ['items', 'items.service'],
+      relations: ['items', 'items.service', 'items.files'],
       order: { createdAt: 'DESC' },
     });
 
@@ -229,7 +229,7 @@ export class OrdersService {
   async findOneForAdmin(id: string): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['user', 'items', 'items.service'],
+      relations: ['user', 'items', 'items.service', 'items.files'],
       order: { items: { id: 'ASC' } },
     });
 
