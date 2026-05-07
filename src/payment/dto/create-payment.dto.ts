@@ -24,4 +24,12 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   orderId?: string;
+
+  @ApiPropertyOptional({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'User ID to link balance top-up payment to',
+  })
+  @IsOptional()
+  @IsString()
+  userId?: string;
 }

@@ -33,6 +33,14 @@ export class Payment {
   @Column({ type: 'uuid', nullable: true })
   orderId: string | null;
 
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'User ID для пополнения баланса',
+    nullable: true,
+  })
+  @Column({ type: 'uuid', nullable: true })
+  userId: string | null;
+
   @ApiProperty({ example: 990.5, description: 'Payment amount' })
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   outSum: number;

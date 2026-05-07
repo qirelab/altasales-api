@@ -7,6 +7,8 @@ import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RobokassaService } from './robokassa.service';
 import { CartService } from '../cart/cart.service';
+import { BalanceService } from '../balance-transactions/balance.service';
+import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
 
 @Injectable()
 export class PaymentService {
@@ -18,6 +20,7 @@ export class PaymentService {
     private readonly robokassaService: RobokassaService,
     private readonly dataSource: DataSource,
     private readonly cartService: CartService,
+    private readonly balanceService: BalanceService,
   ) { }
 
   async createWithManager(
@@ -43,6 +46,7 @@ export class PaymentService {
     const payment = paymentRepo.create({
       invId,
       orderId: dto.orderId ?? null,
+      userId: dto.userId ?? null,
       outSum: dto.outSum,
       description: dto.description,
       status: PaymentStatus.Pending,
@@ -64,6 +68,21 @@ export class PaymentService {
       IsTest: params.IsTest,
     };
     return { paymentUrl, params: formParams };
+  }
+
+  async createTopUpPayment(
+    userId: string,
+    dto: CreateTopUpPaymentDto,
+  ): Promise<{ paymentUrl: string; params: Record<string, string | number> }> {
+    const description = dto.description?.trim() || 'Пополнение внутреннего баланса';
+    return this.createWithManager(
+      {
+        userId,
+        outSum: dto.amount,
+        description,
+      },
+      this.dataSource.manager,
+    );
   }
 
   async findByInvId(invId: number): Promise<Payment> {
@@ -124,6 +143,11 @@ export class PaymentService {
         return { response: `OK${invId}` };
       }
 
+      if (Number(payment.outSum).toFixed(2) !== Number(outSum).toFixed(2)) {
+        await queryRunner.rollbackTransaction();
+        return { response: `bad amount` };
+      }
+
       payment.status = PaymentStatus.Paid;
       await paymentRepo.save(payment);
 
@@ -138,6 +162,17 @@ export class PaymentService {
         }
       }
 
+      if (payment.userId != null) {
+        await this.balanceService.creditFromPayment(
+          payment.userId,
+          Number(payment.outSum),
+          payment.invId,
+          payment.orderId ?? null,
+          payment.description,
+          queryRunner.manager,
+        );
+      }
+
       await queryRunner.commitTransaction();
     } catch (err) {
       console.error(err);
@@ -147,6 +182,48 @@ export class PaymentService {
       await queryRunner.release();
     }
 
+    return { response: `OK${invId}` };
+  }
+
+  async handleFailCallback(body: Record<string, string>): Promise<{ response: string }> {
+    const outSum = body.OutSum;
+    const invId = body.InvId;
+    const signatureValue = body.SignatureValue;
+
+    if (!invId) {
+      return { response: 'bad request: missing InvId' };
+    }
+
+    const invIdNum = parseInt(invId, 10);
+    if (Number.isNaN(invIdNum)) {
+      return { response: 'bad InvId' };
+    }
+
+    if (outSum && signatureValue) {
+      const shpParams = this.robokassaService.extractShpParams(body);
+      const isValid = this.robokassaService.verifySuccessFailSignature(
+        outSum,
+        invId,
+        signatureValue,
+        Object.keys(shpParams).length > 0 ? shpParams : undefined,
+      );
+
+      if (!isValid) {
+        return { response: 'bad signature' };
+      }
+    }
+
+    const payment = await this.paymentRepository.findOne({ where: { invId: invIdNum } });
+    if (!payment) {
+      return { response: 'error: payment not found' };
+    }
+
+    if (payment.status === PaymentStatus.Paid) {
+      return { response: `OK${invId}` };
+    }
+
+    payment.status = PaymentStatus.Failed;
+    await this.paymentRepository.save(payment);
     return { response: `OK${invId}` };
   }
 }
