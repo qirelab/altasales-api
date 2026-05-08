@@ -7,9 +7,11 @@ import {
   Min,
   IsOptional,
   IsDateString,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CheckoutItemDto } from './checkout-item.dto';
+import { CheckoutPaymentMethod } from './checkout-payment-method.enum';
 
 export class CheckoutDto {
   @ApiProperty({ example: 125000, description: 'Total order amount' })
@@ -31,4 +33,13 @@ export class CheckoutDto {
   @ValidateNested({ each: true })
   @Type(() => CheckoutItemDto)
   items: CheckoutItemDto[];
+
+  @ApiPropertyOptional({
+    enum: CheckoutPaymentMethod,
+    description: 'Способ оплаты: Robokassa или внутренний баланс',
+    default: CheckoutPaymentMethod.Robokassa,
+  })
+  @IsOptional()
+  @IsEnum(CheckoutPaymentMethod)
+  paymentMethod?: CheckoutPaymentMethod;
 }
