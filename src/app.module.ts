@@ -11,7 +11,11 @@ import { ChatModule } from './chat/chat.module';
 import { QuestionnairesModule } from './questionnaires/questionnaires.module';
 import { FilesModule } from './files/files.module';
 import { CartModule } from './cart/cart.module';
+<<<<<<< palinahlushenia/qir-220-api-poluchenie-rekomendacii-polzovatelya
+import { RecommendationsModule } from './recommendations/recommendations.module';
+=======
 import { AiModule } from './ai/ai.module';
+>>>>>>> develop
 
 @Module({
   imports: [
@@ -27,7 +31,11 @@ import { AiModule } from './ai/ai.module';
     QuestionnairesModule,
     FilesModule,
     CartModule,
+<<<<<<< palinahlushenia/qir-220-api-poluchenie-rekomendacii-polzovatelya
+    RecommendationsModule,
+=======
     AiModule,
+>>>>>>> develop
   ],
 })
 export class AppModule {}
