@@ -3,4 +3,5 @@ export enum BalanceTransactionType {
   OrderPayment = 'order_payment',
   Refund = 'refund',
   Adjustment = 'adjustment',
+  RegistrationBonus = 'registration_bonus',
 }

@@ -31,7 +31,7 @@ export class User {
   @Column({ unique: true, nullable: true })
   firebaseUid: string;
 
-  @ApiProperty({ example: 1500.5, description: 'User balance' })
+  @ApiProperty({ example: 1500.5, description: 'Общий баланс (основные + подарочные начисления)' })
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   balance: number;
 

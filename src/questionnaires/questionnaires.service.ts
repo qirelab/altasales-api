@@ -3,12 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Questionnaire } from './entities/questionnaire.entity';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
+import { RecommendationsService } from '../recommendations/recommendations.service';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
 
 @Injectable()
 export class QuestionnairesService {
   constructor(
     @InjectRepository(Questionnaire)
     private readonly repo: Repository<Questionnaire>,
+    private readonly recommendationsService: RecommendationsService,
   ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
@@ -30,5 +33,19 @@ export class QuestionnairesService {
   async findByUserId(userId: string): Promise<Questionnaire | null> {
     const questionnaire = await this.repo.findOne({ where: { userId }, order: { createdAt: 'DESC' } });
     return questionnaire ?? null;
+  }
+
+  async findByUserIdForAdmin(
+    userId: string,
+  ): Promise<{ questionnaire: Questionnaire | null; recommendations: Recommendation[] }> {
+    const [questionnaire, recommendations] = await Promise.all([
+      this.findByUserId(userId),
+      this.recommendationsService.findAssignedToUserForAdmin(userId),
+    ]);
+
+    return {
+      questionnaire,
+      recommendations,
+    };
   }
 }

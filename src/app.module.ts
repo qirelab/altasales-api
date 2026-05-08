@@ -11,6 +11,9 @@ import { ChatModule } from './chat/chat.module';
 import { QuestionnairesModule } from './questionnaires/questionnaires.module';
 import { FilesModule } from './files/files.module';
 import { CartModule } from './cart/cart.module';
+import { RecommendationsModule } from './recommendations/recommendations.module';
+import { AiModule } from './ai/ai.module';
+
 
 @Module({
   imports: [
@@ -26,6 +29,8 @@ import { CartModule } from './cart/cart.module';
     QuestionnairesModule,
     FilesModule,
     CartModule,
+    RecommendationsModule,
+    AiModule,
   ],
 })
-export class AppModule { }
+export class AppModule {}

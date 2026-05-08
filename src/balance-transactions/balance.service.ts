@@ -1,14 +1,23 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import { User } from '../users/entities/user.entity';
 import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
+import { BalancePocket } from './entities/balance-pocket.enum';
+import { REGISTRATION_GIFT_RUB } from './balance.constants';
+
+export interface UserBalanceBreakdown {
+  total: number;
+  main: number;
+  gift: number;
+}
 
 export interface AddToBalanceMeta {
   orderId?: string | null;
   paymentInvId?: number | null;
   description?: string | null;
+  pocket?: BalancePocket | null;
 }
 
 @Injectable()
@@ -26,6 +35,41 @@ export class BalanceService {
       throw new NotFoundException(`Пользователь с ID ${userId} не найден`);
     }
     return Number(user.balance);
+  }
+
+  async getBalanceBreakdown(userId: string): Promise<UserBalanceBreakdown> {
+    const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'balance'] });
+    if (!user) {
+      throw new NotFoundException(`Пользователь с ID ${userId} не найден`);
+    }
+    const total = Number(user.balance);
+    const raw = await this.balanceTransactionRepository
+      .createQueryBuilder('t')
+      .select(
+        `COALESCE(SUM(CASE WHEN t."amount" > 0 AND (t."pocket" = :gift OR t."type" = :registrationBonus) THEN t."amount" ELSE 0 END), 0)`,
+        'giftCredits',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN t."amount" < 0 THEN -t."amount" ELSE 0 END), 0)`,
+        'debitVolume',
+      )
+      .where('t."userId" = :userId', { userId })
+      .setParameter('gift', BalancePocket.Gift)
+      .setParameter('registrationBonus', BalanceTransactionType.RegistrationBonus)
+      .getRawOne<{ giftCredits: string | number; debitVolume: string | number }>();
+
+    const giftCredits = Number(raw?.giftCredits ?? 0);
+    const debitVolume = Number(raw?.debitVolume ?? 0);
+    const giftConsumed = Math.min(debitVolume, giftCredits);
+    const giftRemainingRaw = Math.max(0, giftCredits - giftConsumed);
+    const giftRemaining = Math.min(giftRemainingRaw, total);
+    const mainRemaining = total - giftRemaining;
+
+    return {
+      total,
+      main: mainRemaining,
+      gift: giftRemaining,
+    };
   }
 
   async addToBalance(
@@ -52,9 +96,13 @@ export class BalanceService {
 
     await userRepo.update({ id: userId }, { balance: newBalance });
 
+    const pocket =
+      amount > 0 ? meta.pocket ?? BalancePocket.Main : meta.pocket ?? null;
+
     const transaction = txRepo.create({
       userId,
       amount,
+      pocket,
       type,
       orderId: meta.orderId ?? null,
       paymentInvId: meta.paymentInvId ?? null,
@@ -70,6 +118,19 @@ export class BalanceService {
     });
   }
 
+  async creditRegistrationGift(userId: string, manager?: EntityManager): Promise<BalanceTransaction> {
+    return this.addToBalance(
+      userId,
+      REGISTRATION_GIFT_RUB,
+      BalanceTransactionType.RegistrationBonus,
+      {
+        description: 'Приветственный подарочный баланс при регистрации',
+        pocket: BalancePocket.Gift,
+      },
+      manager,
+    );
+  }
+
   async creditFromPayment(
     userId: string,
     amount: number,
@@ -77,12 +138,13 @@ export class BalanceService {
     orderId: string | null,
     description: string,
     manager?: EntityManager,
+    pocket: BalancePocket = BalancePocket.Main,
   ): Promise<BalanceTransaction> {
     return this.addToBalance(
       userId,
       amount,
       BalanceTransactionType.TopUp,
-      { orderId, paymentInvId, description },
+      { orderId, paymentInvId, description, pocket },
       manager,
     );
   }
