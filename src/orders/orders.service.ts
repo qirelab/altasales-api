@@ -8,9 +8,13 @@ import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
+import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
+import { BalanceService } from '../balance-transactions/balance.service';
+import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
+import { CartService } from '../cart/cart.service';
 
 @Injectable()
 export class OrdersService {
@@ -21,17 +25,22 @@ export class OrdersService {
     private readonly orderItemRepository: Repository<OrderItem>,
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
+    private readonly balanceService: BalanceService,
+    private readonly cartService: CartService,
   ) { }
 
   async checkout(dto: CheckoutDto, userId: string): Promise<{
     orderId: string;
-    paymentUrl: string;
-    params: Record<string, string | number>;
+    status: OrderStatus;
+    paymentMethod: CheckoutPaymentMethod;
+    paymentUrl?: string;
+    params?: Record<string, string | number>;
   }> {
     if (!dto.items?.length) {
       throw new BadRequestException('Order must have at least one item');
     }
 
+    const paymentMethod = dto.paymentMethod ?? CheckoutPaymentMethod.Robokassa;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -56,6 +65,31 @@ export class OrdersService {
       );
       await queryRunner.manager.save(OrderItem, items);
 
+      if (paymentMethod === CheckoutPaymentMethod.Balance) {
+        await this.balanceService.addToBalance(
+          userId,
+          -Number(dto.amount),
+          BalanceTransactionType.OrderPayment,
+          {
+            orderId: order.id,
+            description: `Оплата заказа №${order.id} с внутреннего баланса`,
+          },
+          queryRunner.manager,
+        );
+        await queryRunner.manager.update(
+          Order,
+          { id: order.id },
+          { status: OrderStatus.InProgress },
+        );
+        await this.cartService.clearAndArchiveActiveCart(userId);
+        await queryRunner.commitTransaction();
+        return {
+          orderId: order.id,
+          status: OrderStatus.InProgress,
+          paymentMethod: CheckoutPaymentMethod.Balance,
+        };
+      }
+
       const { paymentUrl, params } = await this.paymentService.createWithManager(
         {
           orderId: order.id,
@@ -66,7 +100,13 @@ export class OrdersService {
       );
 
       await queryRunner.commitTransaction();
-      return { orderId: order.id, paymentUrl, params };
+      return {
+        orderId: order.id,
+        status: OrderStatus.PendingPayment,
+        paymentMethod: CheckoutPaymentMethod.Robokassa,
+        paymentUrl,
+        params,
+      };
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw err;
