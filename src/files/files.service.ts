@@ -116,4 +116,10 @@ export class FilesService {
 
     return this.ropService.getDownloadUrl(file.user.ropProjectId, file.ropDocumentId);
   }
+
+  async delete(id: string): Promise<void> {
+    const file = await this.fileRepository.findOne({ where: { id } });
+    if (!file) throw new NotFoundException('File not found');
+    await this.fileRepository.remove(file);
+  }
 }

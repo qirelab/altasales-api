@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Param,
   Res,
   UseGuards,
@@ -93,5 +94,13 @@ export class FilesController {
   ) {
     const downloadUrl = await this.filesService.getDownloadUrl(id);
     res.redirect(downloadUrl);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a file' })
+  @ApiResponse({ status: 200, description: 'File deleted' })
+  async delete(@Param('id', ParseUUIDPipe) id: string) {
+    await this.filesService.delete(id);
+    return { success: true };
   }
 }
