@@ -150,6 +150,15 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Req() req: Request,
   ) {
+    const sessionCookie = req.cookies?.session;
+    if (sessionCookie) {
+      try {
+        await this.authService.revokeSessionCookie(sessionCookie);
+      } catch {
+        this.logger.warn('Failed to revoke session during logout');
+      }
+    }
+
     const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
 
     res.clearCookie('session', {
