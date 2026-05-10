@@ -5,6 +5,7 @@ import { Questionnaire } from './entities/questionnaire.entity';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { RecommendationsService } from '../recommendations/recommendations.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class QuestionnairesService {
@@ -12,6 +13,7 @@ export class QuestionnairesService {
     @InjectRepository(Questionnaire)
     private readonly repo: Repository<Questionnaire>,
     private readonly recommendationsService: RecommendationsService,
+    private readonly usersService: UsersService,
   ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
@@ -38,6 +40,8 @@ export class QuestionnairesService {
   async findByUserIdForAdmin(
     userId: string,
   ): Promise<{ questionnaire: Questionnaire | null; recommendations: Recommendation[] }> {
+    await this.usersService.findOne(userId);
+
     const [questionnaire, recommendations] = await Promise.all([
       this.findByUserId(userId),
       this.recommendationsService.findAssignedToUserForAdmin(userId),
