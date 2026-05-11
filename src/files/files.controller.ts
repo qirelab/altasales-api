@@ -10,19 +10,17 @@ import {
   UploadedFile,
   ParseUUIDPipe,
   BadRequestException,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { randomUUID } from 'crypto';
+import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { FilesService } from './files.service';
-
-const UPLOADS_DIR = join(process.cwd(), 'uploads');
+import { FileSource } from './entities/file.entity';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -50,24 +48,20 @@ export class FilesController {
   constructor(private readonly filesService: FilesService) {}
 
   @Post('upload')
-  @ApiOperation({ summary: 'Upload a file' })
+  @ApiOperation({ summary: 'Upload a file to ROP storage' })
   @ApiConsumes('multipart/form-data')
+  @ApiQuery({ name: 'orderItemId', required: false, description: 'Order item ID to attach file to' })
+  @ApiQuery({ name: 'source', required: false, enum: FileSource, description: 'File source (client or admin)' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: { file: { type: 'string', format: 'binary' } },
     },
   })
-  @ApiResponse({ status: 201, description: 'File uploaded' })
+  @ApiResponse({ status: 201, description: 'File uploaded to ROP' })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: UPLOADS_DIR,
-        filename: (_req, file, cb) => {
-          const uniqueName = `${randomUUID()}${extname(file.originalname)}`;
-          cb(null, uniqueName);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: MAX_FILE_SIZE },
       fileFilter: (_req, file, cb) => {
         if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
@@ -81,37 +75,42 @@ export class FilesController {
   async upload(
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: CurrentUserData,
+    @Query('orderItemId') orderItemId?: string,
+    @Query('source') source?: FileSource,
   ) {
     if (!file) throw new BadRequestException('Файл не предоставлен');
-    const entity = await this.filesService.create(user.id, file);
+
+    // Only admin can upload files with source=admin
+    const fileSource = source === FileSource.ADMIN && user.role === 'admin'
+      ? FileSource.ADMIN
+      : FileSource.CLIENT;
+
+    const entity = await this.filesService.create(user.id, file, orderItemId, fileSource);
     return {
       id: entity.id,
       name: entity.originalName,
       size: entity.size,
       type: entity.mimeType,
+      source: entity.source,
     };
   }
 
   @Get(':id/download')
-  @ApiOperation({ summary: 'Download a file' })
+  @ApiOperation({ summary: 'Get download URL for a file' })
+  @ApiResponse({ status: 302, description: 'Redirect to presigned download URL' })
   async download(
     @Param('id', ParseUUIDPipe) id: string,
     @Res() res: Response,
   ) {
-    const file = await this.filesService.findById(id);
-    const filePath = join(UPLOADS_DIR, file.storedName);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
-    res.setHeader('Content-Type', file.mimeType);
-    res.sendFile(filePath);
+    const downloadUrl = await this.filesService.getDownloadUrl(id);
+    res.redirect(downloadUrl);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a file' })
-  async remove(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentUser() user: CurrentUserData,
-  ) {
-    await this.filesService.delete(id, user.id);
+  @ApiResponse({ status: 200, description: 'File deleted' })
+  async delete(@Param('id', ParseUUIDPipe) id: string) {
+    await this.filesService.delete(id);
     return { success: true };
   }
 }

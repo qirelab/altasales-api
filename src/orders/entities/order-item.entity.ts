@@ -3,11 +3,13 @@ import {
   Column,
   PrimaryGeneratedColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
 import { Order } from './order.entity';
+import { FileEntity } from '../../files/entities/file.entity';
 
 @Entity()
 export class OrderItem {
@@ -47,4 +49,7 @@ export class OrderItem {
   @ApiProperty({ example: 50000, description: 'Line total amount' })
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
+
+  @OneToMany(() => FileEntity, (file) => file.orderItem)
+  files: FileEntity[];
 }
