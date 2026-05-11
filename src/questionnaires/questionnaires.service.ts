@@ -7,6 +7,7 @@ import {
 } from '../recommendations/recommendations.service';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { Questionnaire } from './entities/questionnaire.entity';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class QuestionnairesService {
@@ -14,6 +15,7 @@ export class QuestionnairesService {
     @InjectRepository(Questionnaire)
     private readonly repo: Repository<Questionnaire>,
     private readonly recommendationsService: RecommendationsService,
+    private readonly usersService: UsersService,
   ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
