@@ -64,7 +64,9 @@ export class RecommendationsController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  async getUserRecommendationsForAdmin(@Param('userId') userId: string) {
+  async getUserRecommendationsForAdmin(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ) {
     return this.recommendationsService.findAssignedToUserForAdmin(userId);
   }
 
