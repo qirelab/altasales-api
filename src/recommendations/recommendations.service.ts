@@ -2,9 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { Service } from '../services/entities/service.entity';
@@ -97,6 +98,7 @@ export class RecommendationsService {
   async createForAdmin(dto: CreateAdminRecommendationDto): Promise<Recommendation> {
     await this.ensureUserExists(dto.userId);
     await this.ensureServiceCanBeRecommended(dto.serviceId);
+    await this.ensureRecommendationIsUnique(dto.userId, dto.serviceId);
 
     const recommendation = this.recommendationRepository.create({
       userId: dto.userId,
@@ -122,6 +124,13 @@ export class RecommendationsService {
 
     if (dto.serviceId) {
       await this.ensureServiceCanBeRecommended(dto.serviceId);
+      if (dto.serviceId !== recommendation.serviceId) {
+        await this.ensureRecommendationIsUnique(
+          recommendation.userId,
+          dto.serviceId,
+          recommendation.id,
+        );
+      }
       recommendation.serviceId = dto.serviceId;
     }
 
@@ -168,6 +177,26 @@ export class RecommendationsService {
     });
     if (!order) {
       throw new NotFoundException(`Order with id ${orderId} not found`);
+    }
+  }
+
+  private async ensureRecommendationIsUnique(
+    userId: string,
+    serviceId: string,
+    excludeRecommendationId?: string,
+  ): Promise<void> {
+    const where = excludeRecommendationId
+      ? { userId, serviceId, id: Not(excludeRecommendationId) }
+      : { userId, serviceId };
+
+    const existingRecommendation = await this.recommendationRepository.findOne({
+      where,
+    });
+
+    if (existingRecommendation) {
+      throw new ConflictException(
+        'This service is already recommended to this user',
+      );
     }
   }
 }

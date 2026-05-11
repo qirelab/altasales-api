@@ -80,6 +80,10 @@ export class RecommendationsController {
   @ApiResponse({ status: 400, description: 'Invalid recommendation payload' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({
+    status: 409,
+    description: 'This service is already recommended to this user',
+  })
   @ApiResponse({ status: 404, description: 'User or service not found' })
   async createForAdmin(@Body() dto: CreateAdminRecommendationDto) {
     return this.recommendationsService.createForAdmin(dto);
@@ -96,6 +100,10 @@ export class RecommendationsController {
   @ApiResponse({ status: 400, description: 'Invalid recommendation payload' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({
+    status: 409,
+    description: 'This service is already recommended to this user',
+  })
   @ApiResponse({ status: 404, description: 'Recommendation/service/order not found' })
   async updateForAdmin(
     @Param('id', new ParseUUIDPipe()) id: string,
