@@ -6,12 +6,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ServiceType } from '../services/entities/service-type.enum';
-import { Recommendation } from './entities/recommendation.entity';
 import { User } from '../users/entities/user.entity';
 import { Service } from '../services/entities/service.entity';
 import { Order } from '../orders/entities/order.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
+import { Recommendation } from './entities/recommendation.entity';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 
 @Injectable()
@@ -85,6 +85,14 @@ export class RecommendationsService {
     }
 
     return this.recommendationRepository.save(recommendation);
+  }
+
+  async removeForAdmin(id: string): Promise<void> {
+    const result = await this.recommendationRepository.delete({ id });
+
+    if (!result.affected) {
+      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    }
   }
 
   private async ensureUserExists(userId: string): Promise<void> {
