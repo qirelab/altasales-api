@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { Service } from '../services/entities/service.entity';
@@ -193,13 +193,18 @@ export class RecommendationsService {
     serviceId: string,
     excludeRecommendationId?: string,
   ): Promise<void> {
-    const where = excludeRecommendationId
-      ? { userId, serviceId, id: Not(excludeRecommendationId) }
-      : { userId, serviceId };
+    const qb = this.recommendationRepository
+      .createQueryBuilder('recommendation')
+      .where('recommendation."userId" = :userId', { userId })
+      .andWhere('recommendation."serviceId" = :serviceId', { serviceId });
 
-    const existingRecommendation = await this.recommendationRepository.findOne({
-      where,
-    });
+    if (excludeRecommendationId) {
+      qb.andWhere('recommendation.id != :excludeRecommendationId', {
+        excludeRecommendationId,
+      });
+    }
+
+    const existingRecommendation = await qb.getOne();
 
     if (existingRecommendation) {
       throw new ConflictException(
