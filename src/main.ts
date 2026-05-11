@@ -10,6 +10,8 @@ async function bootstrap() {
   const trustedOrigins = new Set([
     'https://staging.altasales.qirelab.com',
     'https://altasales.qirelab.com',
+    'https://api.staging.altasales.qirelab.com',
+    'https://api.altasales.qirelab.com',
   ]);
   const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 
