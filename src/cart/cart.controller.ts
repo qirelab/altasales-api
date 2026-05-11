@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -41,7 +42,7 @@ export class CartController {
   @ApiOperation({ summary: 'Update cart item quantity by service ID' })
   updateItemQuantity(
     @CurrentUser() user: CurrentUserData,
-    @Param('serviceId') serviceId: string,
+    @Param('serviceId', ParseUUIDPipe) serviceId: string,
     @Body() dto: UpdateCartItemDto,
   ) {
     return this.cartService.updateItemQuantity(user.id, serviceId, dto);
@@ -51,7 +52,7 @@ export class CartController {
   @ApiOperation({ summary: 'Remove cart item by service ID' })
   removeItem(
     @CurrentUser() user: CurrentUserData,
-    @Param('serviceId') serviceId: string,
+    @Param('serviceId', ParseUUIDPipe) serviceId: string,
   ) {
     return this.cartService.removeItem(user.id, serviceId);
   }
