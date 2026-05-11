@@ -1,7 +1,11 @@
+import { ParseUUIDPipe } from '@nestjs/common';
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -63,7 +67,9 @@ export class RecommendationsController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
-  async getUserRecommendationsForAdmin(@Param('userId') userId: string) {
+  async getUserRecommendationsForAdmin(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
     return this.recommendationsService.findAssignedToUserForAdmin(userId);
   }
 
@@ -103,9 +109,25 @@ export class RecommendationsController {
   })
   @ApiResponse({ status: 404, description: 'Recommendation/service/order not found' })
   async updateForAdmin(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAdminRecommendationDto,
   ) {
     return this.recommendationsService.updateForAdmin(id, dto);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete recommendation (admin)',
+  })
+  @ApiParam({ name: 'id', description: 'Recommendation ID' })
+  @ApiResponse({ status: 204, description: 'Recommendation deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Recommendation not found' })
+  async removeForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    return this.recommendationsService.removeForAdmin(id);
   }
 }

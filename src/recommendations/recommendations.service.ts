@@ -96,6 +96,14 @@ export class RecommendationsService {
     return this.recommendationRepository.save(recommendation);
   }
 
+  async removeForAdmin(id: string): Promise<void> {
+    const result = await this.recommendationRepository.delete({ id });
+
+    if (!result.affected) {
+      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    }
+  }
+
   private async ensureUserExists(userId: string): Promise<void> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
