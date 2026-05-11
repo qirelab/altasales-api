@@ -42,4 +42,8 @@ export class User {
   @ApiProperty({ example: '2026-03-19T10:00:00.000Z', description: 'Registration date' })
   @CreateDateColumn()
   createdAt: Date;
+
+  @ApiProperty({ example: '40', description: 'ROP project ID for file storage', nullable: true })
+  @Column({ type: 'varchar', nullable: true })
+  ropProjectId: string | null;
 }
