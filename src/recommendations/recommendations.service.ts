@@ -17,6 +17,7 @@ import { RecommendationStatus } from './entities/recommendation-status.enum';
 
 export type UserRecommendationListItem = {
   id: string;
+  serviceId: string;
   name: string;
   type: ServiceType;
   category: string;
@@ -64,6 +65,7 @@ export class RecommendationsService {
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
       .select('recommendation.id', 'id')
+      .addSelect('service.id', 'serviceId')
       .addSelect('service.name', 'name')
       .addSelect('service.type', 'type')
       .addSelect('service.category', 'category')

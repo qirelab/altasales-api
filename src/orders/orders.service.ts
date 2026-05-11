@@ -5,6 +5,8 @@ import { PaymentService } from '../payment/payment.service';
 import { User } from '../users/entities/user.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { FileSource } from '../files/entities/file.entity';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
@@ -55,6 +57,8 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(Recommendation)
+    private readonly recommendationRepository: Repository<Recommendation>,
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
     private readonly balanceService: BalanceService,
@@ -140,13 +144,29 @@ export class OrdersService {
         await queryRunner.manager.update(
           Order,
           { id: order.id },
-          { status: OrderStatus.InProgress },
+          { status: OrderStatus.Planned },
         );
+
+        // Update recommendations status for purchased services
+        const serviceIds = dto.items.map((item) => item.serviceId);
+        await queryRunner.manager.update(
+          Recommendation,
+          {
+            userId,
+            serviceId: In(serviceIds),
+            status: RecommendationStatus.Recommended,
+          },
+          {
+            status: RecommendationStatus.Planned,
+            orderId: order.id,
+          },
+        );
+
         await this.cartService.clearAndArchiveActiveCart(userId);
         await queryRunner.commitTransaction();
         return {
           orderId: order.id,
-          status: OrderStatus.InProgress,
+          status: OrderStatus.Planned,
           paymentMethod: CheckoutPaymentMethod.Balance,
         };
       }
@@ -378,7 +398,9 @@ export class OrdersService {
     const map = Object.fromEntries(raw.map((r) => [r.status, Number(r.count)]));
     return {
       active:
-        (map[OrderStatus.PendingPayment] ?? 0) + (map[OrderStatus.InProgress] ?? 0),
+        (map[OrderStatus.PendingPayment] ?? 0) +
+        (map[OrderStatus.Planned] ?? 0) +
+        (map[OrderStatus.InProgress] ?? 0),
       completed: map[OrderStatus.Completed] ?? 0,
       cancelled: map[OrderStatus.Cancelled] ?? 0,
     };

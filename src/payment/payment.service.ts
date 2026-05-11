@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RobokassaService } from './robokassa.service';
@@ -152,13 +154,33 @@ export class PaymentService {
       await paymentRepo.save(payment);
 
       if (payment.orderId != null) {
-        const order = await orderRepo.findOne({ where: { id: payment.orderId } });
+        const order = await orderRepo.findOne({
+          where: { id: payment.orderId },
+          relations: ['items'],
+        });
         await orderRepo.update(
           { id: payment.orderId },
-          { status: OrderStatus.InProgress },
+          { status: OrderStatus.Planned },
         );
         if (order) {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
+
+          // Update recommendations status for purchased services
+          const serviceIds = order.items?.map((item) => item.serviceId) ?? [];
+          if (serviceIds.length > 0) {
+            const recommendationRepo = queryRunner.manager.getRepository(Recommendation);
+            await recommendationRepo.update(
+              {
+                userId: order.userId,
+                serviceId: In(serviceIds),
+                status: RecommendationStatus.Recommended,
+              },
+              {
+                status: RecommendationStatus.Planned,
+                orderId: order.id,
+              },
+            );
+          }
         }
       }
 
