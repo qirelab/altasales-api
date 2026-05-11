@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { FileEntity } from './entities/file.entity';
+import { FileEntity, FileSource } from './entities/file.entity';
 import { User } from '../users/entities/user.entity';
 import { RopService } from '../rop/rop.service';
 
@@ -39,6 +39,7 @@ export class FilesService {
     userId: string,
     file: Express.Multer.File,
     orderItemId?: string,
+    source: FileSource = FileSource.CLIENT,
   ): Promise<FileEntity> {
     const ropProjectId = await this.getOrCreateRopProject(userId);
 
@@ -57,6 +58,7 @@ export class FilesService {
       size: file.size,
       ropDocumentId: ropDocument.id,
       orderItemId: orderItemId ?? null,
+      source,
     });
 
     return this.fileRepository.save(entity);

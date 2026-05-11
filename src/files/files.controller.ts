@@ -20,6 +20,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { FilesService } from './files.service';
+import { FileSource } from './entities/file.entity';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -50,6 +51,7 @@ export class FilesController {
   @ApiOperation({ summary: 'Upload a file to ROP storage' })
   @ApiConsumes('multipart/form-data')
   @ApiQuery({ name: 'orderItemId', required: false, description: 'Order item ID to attach file to' })
+  @ApiQuery({ name: 'source', required: false, enum: FileSource, description: 'File source (client or admin)' })
   @ApiBody({
     schema: {
       type: 'object',
@@ -74,14 +76,22 @@ export class FilesController {
     @UploadedFile() file: Express.Multer.File,
     @CurrentUser() user: CurrentUserData,
     @Query('orderItemId') orderItemId?: string,
+    @Query('source') source?: FileSource,
   ) {
     if (!file) throw new BadRequestException('Файл не предоставлен');
-    const entity = await this.filesService.create(user.id, file, orderItemId);
+
+    // Only admin can upload files with source=admin
+    const fileSource = source === FileSource.ADMIN && user.role === 'admin'
+      ? FileSource.ADMIN
+      : FileSource.CLIENT;
+
+    const entity = await this.filesService.create(user.id, file, orderItemId, fileSource);
     return {
       id: entity.id,
       name: entity.originalName,
       size: entity.size,
       type: entity.mimeType,
+      source: entity.source,
     };
   }
 

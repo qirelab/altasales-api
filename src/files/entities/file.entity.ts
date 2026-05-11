@@ -11,6 +11,11 @@ import { User } from '../../users/entities/user.entity';
 import { ChatMessage } from '../../chat/entities/chat-message.entity';
 import { OrderItem } from '../../orders/entities/order-item.entity';
 
+export enum FileSource {
+  CLIENT = 'client',
+  ADMIN = 'admin',
+}
+
 @Entity()
 export class FileEntity {
   @ApiProperty({ description: 'File ID' })
@@ -62,4 +67,8 @@ export class FileEntity {
   @ManyToOne(() => OrderItem, (orderItem) => orderItem.files, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'orderItemId' })
   orderItem: OrderItem | null;
+
+  @ApiProperty({ enum: FileSource, description: 'File source (client or admin)', default: FileSource.CLIENT })
+  @Column({ type: 'enum', enum: FileSource, default: FileSource.CLIENT })
+  source: FileSource;
 }

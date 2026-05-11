@@ -4,6 +4,7 @@ import { Brackets, DataSource, In, Repository } from 'typeorm';
 import { PaymentService } from '../payment/payment.service';
 import { User } from '../users/entities/user.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { FileSource } from '../files/entities/file.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
@@ -21,6 +22,7 @@ export interface OrderFileDto {
   name: string;
   size: number;
   type: string;
+  source: FileSource;
 }
 
 export interface OrderItemDto {
@@ -82,6 +84,7 @@ export class OrdersService {
           name: file.originalName,
           size: file.size,
           type: file.mimeType,
+          source: file.source ?? FileSource.CLIENT,
         })),
       })),
     };
