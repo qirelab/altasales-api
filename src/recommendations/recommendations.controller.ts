@@ -48,7 +48,7 @@ export class RecommendationsController {
   async getMyRecommendations(
     @CurrentUser() user: CurrentUserData,
   ) {
-    return this.recommendationsService.findAssignedToUser(user.id);
+    return this.recommendationsService.findAssignedToUserList(user.id);
   }
 
   @Get('admin/user/:userId')
