@@ -17,13 +17,13 @@ import { SessionGuard } from '../auth/guards/session.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { BalanceService } from '../balance-transactions/balance.service';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { GetAdminUsersQueryDto } from './dto/get-admin-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
 import { UserRole } from './entities/user-role.enum';
-import { BalanceService } from '../balance-transactions/balance.service';
 import { UserBalanceBreakdownResponseDto } from './dto/user-balance-breakdown.dto';
 
 @ApiTags('users')
@@ -142,7 +142,7 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async findOneForAdmin(@Param('id') id: string) {
+  async findOneForAdmin(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findOneForAdmin(id);
   }
 
@@ -153,7 +153,7 @@ export class UsersController {
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User found', type: User })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async findOne(@Param('id') id: string): Promise<User> {
+  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<User> {
     return this.usersService.findOne(id);
   }
 
@@ -165,7 +165,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'User successfully updated', type: User })
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 409, description: 'User with this email already exists' })
-  async update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto): Promise<User> {
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserDto: UpdateUserDto): Promise<User> {
     return this.usersService.update(id, updateUserDto);
   }
 
@@ -179,7 +179,7 @@ export class UsersController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 409, description: 'User with this email already exists' })
-  async updateForAdmin(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto): Promise<User> {
+  async updateForAdmin(@Param('id', ParseUUIDPipe) id: string, @Body() updateUserDto: UpdateUserDto): Promise<User> {
     return this.usersService.update(id, updateUserDto);
   }
 
@@ -191,7 +191,7 @@ export class UsersController {
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 204, description: 'User successfully deleted' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.usersService.remove(id);
   }
 
@@ -205,7 +205,7 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async removeForAdmin(@Param('id') id: string): Promise<void> {
+  async removeForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.usersService.remove(id);
   }
 }
