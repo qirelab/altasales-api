@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Questionnaire } from './entities/questionnaire.entity';
+import {
+  RecommendationsService,
+  type UserRecommendationListItem,
+} from '../recommendations/recommendations.service';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
-import { RecommendationsService } from '../recommendations/recommendations.service';
-import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { Questionnaire } from './entities/questionnaire.entity';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
@@ -39,12 +41,13 @@ export class QuestionnairesService {
 
   async findByUserIdForAdmin(
     userId: string,
-  ): Promise<{ questionnaire: Questionnaire | null; recommendations: Recommendation[] }> {
-    await this.usersService.findOne(userId);
-
+  ): Promise<{
+    questionnaire: Questionnaire | null;
+    recommendations: UserRecommendationListItem[];
+  }> {
     const [questionnaire, recommendations] = await Promise.all([
       this.findByUserId(userId),
-      this.recommendationsService.findAssignedToUserForAdmin(userId),
+      this.recommendationsService.findAssignedToUserList(userId),
     ]);
 
     return {

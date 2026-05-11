@@ -9,6 +9,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
@@ -99,7 +100,7 @@ export class ServicesController {
   @ApiParam({ name: 'id', description: 'Contractor ID' })
   @ApiResponse({ status: 200, description: 'Contractor found with orders' })
   @ApiResponse({ status: 404, description: 'Contractor not found' })
-  async findOneContractorForAdmin(@Param('id') id: string) {
+  async findOneContractorForAdmin(@Param('id', ParseUUIDPipe) id: string) {
     return this.servicesService.findOneContractorForAdmin(id);
   }
 
@@ -110,7 +111,7 @@ export class ServicesController {
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 200, description: 'Service found with stats and orders' })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async findOneServiceForAdmin(@Param('id') id: string) {
+  async findOneServiceForAdmin(@Param('id', ParseUUIDPipe) id: string) {
     return this.servicesService.findOneServiceForAdmin(id);
   }
 
@@ -122,7 +123,7 @@ export class ServicesController {
   @ApiResponse({ status: 200, description: 'Contractor updated', type: Service })
   @ApiResponse({ status: 404, description: 'Contractor not found' })
   async updateContractorForAdmin(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAdminContractorDto,
   ): Promise<Service> {
     return this.servicesService.updateContractorForAdmin(id, dto);
@@ -136,7 +137,7 @@ export class ServicesController {
   @ApiParam({ name: 'id', description: 'Contractor ID' })
   @ApiResponse({ status: 204, description: 'Contractor deleted' })
   @ApiResponse({ status: 404, description: 'Contractor not found' })
-  async removeContractorForAdmin(@Param('id') id: string): Promise<void> {
+  async removeContractorForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.servicesService.removeContractorForAdmin(id);
   }
 
@@ -145,7 +146,7 @@ export class ServicesController {
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 200, description: 'Service found', type: Service })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async findOne(@Param('id') id: string): Promise<Service> {
+  async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<Service> {
     return this.servicesService.findOne(id);
   }
 
@@ -155,7 +156,7 @@ export class ServicesController {
   @ApiResponse({ status: 200, description: 'Service updated', type: Service })
   @ApiResponse({ status: 404, description: 'Service not found' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateServiceDto: UpdateServiceDto,
   ): Promise<Service> {
     return this.servicesService.update(id, updateServiceDto);
@@ -167,7 +168,7 @@ export class ServicesController {
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 204, description: 'Service deleted' })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async remove(@Param('id') id: string): Promise<void> {
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.servicesService.remove(id);
   }
 }

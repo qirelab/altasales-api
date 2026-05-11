@@ -256,6 +256,12 @@ export class AuthService {
     };
   }
 
+  async revokeSessionCookie(sessionCookie: string) {
+    const auth = this.firebaseService.getAuth();
+    const decodedClaims = await auth.verifySessionCookie(sessionCookie, false);
+    await auth.revokeRefreshTokens(decodedClaims.uid);
+  }
+
   async verifySessionCookie(sessionCookie: string) {
     try {
       const auth = this.firebaseService.getAuth();
