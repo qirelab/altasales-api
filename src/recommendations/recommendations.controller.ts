@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -19,10 +20,10 @@ import {
 } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
-import { SessionGuard } from '../auth/guards/session.guard';
 import { RecommendationsService } from './recommendations.service';
 
 @ApiTags('recommendations')
@@ -47,7 +48,7 @@ export class RecommendationsController {
   async getMyRecommendations(
     @CurrentUser() user: CurrentUserData,
   ) {
-    return this.recommendationsService.findAssignedToUser(user.id);
+    return this.recommendationsService.findAssignedToUserList(user.id);
   }
 
   @Get('admin/user/:userId')
@@ -95,7 +96,7 @@ export class RecommendationsController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Recommendation/service/order not found' })
   async updateForAdmin(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateAdminRecommendationDto,
   ) {
     return this.recommendationsService.updateForAdmin(id, dto);

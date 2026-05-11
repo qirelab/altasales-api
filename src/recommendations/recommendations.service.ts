@@ -6,13 +6,21 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ServiceType } from '../services/entities/service-type.enum';
-import { Recommendation } from './entities/recommendation.entity';
 import { User } from '../users/entities/user.entity';
 import { Service } from '../services/entities/service.entity';
 import { Order } from '../orders/entities/order.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
+import { Recommendation } from './entities/recommendation.entity';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
+
+export type UserRecommendationListItem = {
+  id: string;
+  name: string;
+  type: ServiceType;
+  category: string;
+  price: number;
+};
 
 @Injectable()
 export class RecommendationsService {
@@ -38,6 +46,25 @@ export class RecommendationsService {
       })
       .orderBy('recommendation."createdAt"', 'DESC')
       .getMany();
+  }
+
+  async findAssignedToUserList(
+    userId: string,
+  ): Promise<UserRecommendationListItem[]> {
+    return this.recommendationRepository
+      .createQueryBuilder('recommendation')
+      .leftJoin('recommendation.service', 'service')
+      .select('recommendation.id', 'id')
+      .addSelect('service.name', 'name')
+      .addSelect('service.type', 'type')
+      .addSelect('service.category', 'category')
+      .addSelect('service.price', 'price')
+      .where('recommendation."userId" = :userId', { userId })
+      .andWhere('service.type IN (:...serviceTypes)', {
+        serviceTypes: [ServiceType.Service, ServiceType.Document],
+      })
+      .orderBy('recommendation."createdAt"', 'DESC')
+      .getRawMany<UserRecommendationListItem>();
   }
 
   async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
