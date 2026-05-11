@@ -20,6 +20,14 @@ export type UserRecommendationListItem = {
   type: ServiceType;
   category: string;
   price: number;
+  status: RecommendationStatus;
+};
+
+export type AdminRecommendationListItem = {
+  id: string;
+  category: string;
+  status: RecommendationStatus;
+  price: number;
 };
 
 @Injectable()
@@ -59,6 +67,7 @@ export class RecommendationsService {
       .addSelect('service.type', 'type')
       .addSelect('service.category', 'category')
       .addSelect('service.price', 'price')
+      .addSelect('recommendation.status', 'status')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
@@ -67,8 +76,22 @@ export class RecommendationsService {
       .getRawMany<UserRecommendationListItem>();
   }
 
-  async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
-    return this.findAssignedToUser(userId);
+  async findAssignedToUserForAdmin(
+    userId: string,
+  ): Promise<AdminRecommendationListItem[]> {
+    return this.recommendationRepository
+      .createQueryBuilder('recommendation')
+      .leftJoin('recommendation.service', 'service')
+      .select('recommendation.id', 'id')
+      .addSelect('service.category', 'category')
+      .addSelect('recommendation.status', 'status')
+      .addSelect('service.price', 'price')
+      .where('recommendation."userId" = :userId', { userId })
+      .andWhere('service.type IN (:...serviceTypes)', {
+        serviceTypes: [ServiceType.Service, ServiceType.Document],
+      })
+      .orderBy('recommendation."createdAt"', 'DESC')
+      .getRawMany<AdminRecommendationListItem>();
   }
 
   async createForAdmin(dto: CreateAdminRecommendationDto): Promise<Recommendation> {
