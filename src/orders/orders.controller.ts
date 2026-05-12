@@ -23,6 +23,7 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
+import { UpdateOrderItemStatusDto } from './dto/update-order-item-status.dto';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
@@ -123,5 +124,21 @@ export class OrdersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async checkout(@Body() dto: CheckoutDto, @CurrentUser() user: CurrentUserData) {
     return this.ordersService.checkout(dto, user.id);
+  }
+
+  @Patch('admin/items/:itemId/status')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update order item status (admin)' })
+  @ApiParam({ name: 'itemId', description: 'Order Item ID' })
+  @ApiResponse({ status: 200, description: 'Order item status updated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Order item not found' })
+  async updateOrderItemStatus(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: UpdateOrderItemStatusDto,
+  ) {
+    return this.ordersService.updateOrderItemStatusForAdmin(itemId, dto);
   }
 }

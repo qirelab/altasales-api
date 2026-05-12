@@ -10,6 +10,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
 import { Order } from './order.entity';
 import { FileEntity } from '../../files/entities/file.entity';
+import { OrderStatus } from './order-status.enum';
 
 @Entity()
 export class OrderItem {
@@ -49,6 +50,18 @@ export class OrderItem {
   @ApiProperty({ example: 50000, description: 'Line total amount' })
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
+
+  @ApiProperty({
+    enum: OrderStatus,
+    example: OrderStatus.Planned,
+    description: 'Order item status',
+  })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: OrderStatus.Planned,
+  })
+  status: OrderStatus;
 
   @OneToMany(() => FileEntity, (file) => file.orderItem)
   files: FileEntity[];

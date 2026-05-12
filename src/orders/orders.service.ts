@@ -15,6 +15,7 @@ import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
+import { UpdateOrderItemStatusDto } from './dto/update-order-item-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
 import { CartService } from '../cart/cart.service';
@@ -34,6 +35,7 @@ export interface OrderItemDto {
   service: OrderItem['service'];
   hours: number | null;
   amount: number;
+  status: OrderStatus;
   files: OrderFileDto[];
 }
 
@@ -83,6 +85,7 @@ export class OrdersService {
         service: item.service,
         hours: item.hours,
         amount: item.amount,
+        status: item.status ?? order.status,
         files: (item.files ?? []).map((file): OrderFileDto => ({
           id: file.id,
           name: file.originalName,
@@ -404,5 +407,83 @@ export class OrdersService {
       completed: map[OrderStatus.Completed] ?? 0,
       cancelled: map[OrderStatus.Cancelled] ?? 0,
     };
+  }
+
+  async updateOrderItemStatusForAdmin(
+    orderItemId: string,
+    dto: UpdateOrderItemStatusDto,
+  ): Promise<OrderItem> {
+    const orderItem = await this.orderItemRepository.findOne({
+      where: { id: orderItemId },
+    });
+    if (!orderItem) {
+      throw new NotFoundException(`Order item with id ${orderItemId} not found`);
+    }
+
+    orderItem.status = dto.status;
+    const savedItem = await this.orderItemRepository.save(orderItem);
+
+    // Recalculate order status based on all item statuses
+    await this.recalculateOrderStatus(orderItem.orderId);
+
+    // Sync recommendation status with order item status
+    await this.syncRecommendationStatus(orderItem.orderId, orderItem.serviceId, dto.status);
+
+    return savedItem;
+  }
+
+  private async syncRecommendationStatus(
+    orderId: string,
+    serviceId: string,
+    orderItemStatus: OrderStatus,
+  ): Promise<void> {
+    // Map OrderStatus to RecommendationStatus
+    const statusMap: Partial<Record<OrderStatus, RecommendationStatus>> = {
+      [OrderStatus.Planned]: RecommendationStatus.Planned,
+      [OrderStatus.InProgress]: RecommendationStatus.InProgress,
+      [OrderStatus.Completed]: RecommendationStatus.Completed,
+    };
+
+    const newRecommendationStatus = statusMap[orderItemStatus];
+    if (!newRecommendationStatus) {
+      // No mapping for PendingPayment or Cancelled
+      return;
+    }
+
+    await this.recommendationRepository.update(
+      { orderId, serviceId },
+      { status: newRecommendationStatus },
+    );
+  }
+
+  private async recalculateOrderStatus(orderId: string): Promise<void> {
+    const items = await this.orderItemRepository.find({
+      where: { orderId },
+    });
+
+    if (items.length === 0) return;
+
+    const statuses = items.map((item) => item.status);
+
+    let newStatus: OrderStatus;
+
+    // If any item is in_progress, order is in_progress
+    if (statuses.some((s) => s === OrderStatus.InProgress)) {
+      newStatus = OrderStatus.InProgress;
+    }
+    // If all items are completed, order is completed
+    else if (statuses.every((s) => s === OrderStatus.Completed)) {
+      newStatus = OrderStatus.Completed;
+    }
+    // If all items are cancelled, order is cancelled
+    else if (statuses.every((s) => s === OrderStatus.Cancelled)) {
+      newStatus = OrderStatus.Cancelled;
+    }
+    // Otherwise (has planned items), order is planned
+    else {
+      newStatus = OrderStatus.Planned;
+    }
+
+    await this.orderRepository.update({ id: orderId }, { status: newStatus });
   }
 }
