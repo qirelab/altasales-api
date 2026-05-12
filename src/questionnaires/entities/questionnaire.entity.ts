@@ -27,6 +27,7 @@ export interface QuestionnaireComponents {
 export interface QuestionnaireAnswers {
   name: string;
   phone: string;
+  companyName: string;
   salesDirection: SalesDirection[];
   industry: string;
   product: string;
