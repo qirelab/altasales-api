@@ -1,4 +1,4 @@
-                                     import {
+import {
   Controller,
   Get,
   Post,
@@ -10,6 +10,7 @@
   Patch,
   HttpCode,
   HttpStatus,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -64,7 +65,7 @@ export class OrdersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Order not found' })
-  async getAdminOrderById(@Param('id') id: string) {
+  async getAdminOrderById(@Param('id', ParseUUIDPipe) id: string) {
     return this.ordersService.findOneForAdmin(id);
   }
 
@@ -78,7 +79,7 @@ export class OrdersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Order not found' })
-  async deleteAdminOrder(@Param('id') id: string): Promise<void> {
+  async deleteAdminOrder(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.ordersService.removeForAdmin(id);
   }
 
@@ -92,7 +93,7 @@ export class OrdersController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Order not found' })
   async updateContractorChatAccess(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateContractorChatAccessDto,
   ) {
     return this.ordersService.updateContractorChatAccessForAdmin(id, dto);
@@ -102,7 +103,9 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Checkout (create order + payment, one request)',
     description:
-      'Creates order with items, creates Robokassa payment. Returns orderId, paymentUrl and params for redirect.',
+      'Создает заказ и обрабатывает оплату выбранным способом: Robokassa ' +
+      '(возвращает paymentUrl/params) или внутренний баланс (моментальное ' +
+      'списание и перевод в in_progress).',
   })
   @ApiResponse({ status: 201, description: 'Order and payment created' })
   @ApiResponse({ status: 400, description: 'Validation or business error' })
