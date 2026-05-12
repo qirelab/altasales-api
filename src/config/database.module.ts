@@ -13,7 +13,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         url: config.get<string>('DATABASE_URL'),
         ssl: false,
         entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-        synchronize: true,
+        synchronize: false,
       }),
     }),
   ],
