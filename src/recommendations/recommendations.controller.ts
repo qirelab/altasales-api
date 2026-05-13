@@ -23,10 +23,10 @@ import {
 } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
-import { SessionGuard } from '../auth/guards/session.guard';
 import { RecommendationsService } from './recommendations.service';
 
 @ApiTags('recommendations')
@@ -51,7 +51,7 @@ export class RecommendationsController {
   async getMyRecommendations(
     @CurrentUser() user: CurrentUserData,
   ) {
-    return this.recommendationsService.findAssignedToUser(user.id);
+    return this.recommendationsService.findAssignedToUserList(user.id);
   }
 
   @Get('admin/user/:userId')
