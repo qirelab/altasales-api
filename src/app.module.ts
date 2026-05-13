@@ -12,6 +12,8 @@ import { QuestionnairesModule } from './questionnaires/questionnaires.module';
 import { FilesModule } from './files/files.module';
 import { CartModule } from './cart/cart.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
+import { MailModule } from './mail/mail.module';
+
 
 @Module({
   imports: [
@@ -28,6 +30,7 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
     FilesModule,
     CartModule,
     RecommendationsModule,
+    MailModule,
   ],
 })
 export class AppModule { }
