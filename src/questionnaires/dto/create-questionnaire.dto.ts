@@ -59,6 +59,11 @@ export class CreateQuestionnaireDto {
   })
   phone: string;
 
+  @ApiProperty({ example: 'ООО "ТехноСтарт"' })
+  @IsString()
+  @IsNotEmpty({ message: 'Название компании обязательно' })
+  companyName: string;
+
   @ApiProperty({ enum: SALES_DIRECTIONS, isArray: true })
   @IsArray()
   @ArrayMinSize(1, { message: 'Выберите хотя бы одно направление продаж' })
