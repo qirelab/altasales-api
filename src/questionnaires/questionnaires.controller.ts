@@ -42,9 +42,6 @@ export class QuestionnairesController {
   @ApiOperation({ summary: 'Get current user questionnaire' })
   @ApiResponse({ status: 200, description: 'Questionnaire or null' })
   async findMine(@CurrentUser() user: CurrentUserData) {
-    console.log('Запрос пришел на сервер');
-    console.log(user);
-    console.log(await this.questionnairesService.findByUserId(user.id));
     return this.questionnairesService.findByUserId(user.id);
   }
 
@@ -53,9 +50,12 @@ export class QuestionnairesController {
   @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Get questionnaire by user ID (admin only)' })
   @ApiParam({ name: 'userId', description: 'User ID' })
-  @ApiResponse({ status: 200, description: 'Questionnaire or null' })
+  @ApiResponse({
+    status: 200,
+    description: 'Questionnaire with assigned recommendations',
+  })
   async findByUserId(@Param('userId', ParseUUIDPipe) userId: string) {
-    return this.questionnairesService.findByUserId(userId);
+    return this.questionnairesService.findByUserIdForAdmin(userId);
   }
 
   @Get(':id')
