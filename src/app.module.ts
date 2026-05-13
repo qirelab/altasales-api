@@ -13,6 +13,7 @@ import { FilesModule } from './files/files.module';
 import { CartModule } from './cart/cart.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { AiModule } from './ai/ai.module';
+import { MailModule } from './mail/mail.module';
 
 
 @Module({
@@ -31,6 +32,7 @@ import { AiModule } from './ai/ai.module';
     CartModule,
     RecommendationsModule,
     AiModule,
+    MailModule,
   ],
 })
 export class AppModule {}
