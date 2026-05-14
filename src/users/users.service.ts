@@ -7,6 +7,7 @@ import { OrderStatus } from '../orders/entities/order-status.enum';
 import { CreateUserDto } from './dto/create-user.dto';
 import { GetAdminUsersQueryDto } from './dto/get-admin-users-query.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserRole } from './entities/user-role.enum';
 import { User } from './entities/user.entity';
 
 @Injectable()
@@ -51,7 +52,9 @@ export class UsersService {
     const { offset = 0, limit = 20 } = query;
     const search = query.search?.trim();
 
-    const baseQb = this.userRepository.createQueryBuilder('u');
+    const baseQb = this.userRepository
+      .createQueryBuilder('u')
+      .where('u.role = :role', { role: UserRole.USER });
 
     if (search) {
       baseQb.andWhere(
