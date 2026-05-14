@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { Service } from './service.entity';
+import { FAQ } from './faq.entity';
 
 @Entity()
 export class Category {
@@ -18,7 +19,6 @@ export class Category {
   @OneToMany(() => Service, (service) => service.category)
   services: Service[];
 
-  @ApiProperty({ description: 'Creation date' })
-  @CreateDateColumn()
-  createdAt: Date;
+  @OneToMany(() => FAQ, (faq) => faq.category)
+  faqs: FAQ[];
 }

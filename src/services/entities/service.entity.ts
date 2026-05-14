@@ -84,11 +84,4 @@ export class Service {
   })
   @Column({ type: 'json', default: [] })
   contentSections: { id: string; title: string; content: string }[];
-
-  @ApiPropertyOptional({
-    description: 'FAQ items for service page',
-    type: 'array',
-  })
-  @Column({ type: 'json', default: [] })
-  faqItems: { id: string; question: string; answer: string }[];
 }

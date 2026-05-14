@@ -88,9 +88,4 @@ export class CreateServiceDto {
   @IsOptional()
   @IsArray()
   contentSections?: { id: string; title: string; content: string }[];
-
-  @ApiPropertyOptional({ description: 'FAQ items for service page', type: 'array' })
-  @IsOptional()
-  @IsArray()
-  faqItems?: { id: string; question: string; answer: string }[];
 }
