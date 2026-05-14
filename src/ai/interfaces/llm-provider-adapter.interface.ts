@@ -9,5 +9,6 @@ export interface LlmProviderResponse {
 export interface LlmProviderAdapter {
   providerId: string;
   modelId: string;
+  isExternal?: boolean;
   chat(messages: LlmMessage[]): Promise<LlmProviderResponse>;
 }

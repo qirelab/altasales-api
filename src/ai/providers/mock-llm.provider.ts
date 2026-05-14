@@ -10,6 +10,7 @@ import { LlmMessage } from '../interfaces/llm-message.interface';
 export class MockLlmProvider implements LlmProviderAdapter {
   readonly providerId = LlmProvider.Mock;
   readonly modelId = 'mock-llm-v1';
+  readonly isExternal = false;
 
   async chat(messages: LlmMessage[]): Promise<LlmProviderResponse> {
     const startedAt = Date.now();
