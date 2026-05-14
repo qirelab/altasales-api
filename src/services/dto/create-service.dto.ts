@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID, IsInt, Min, IsEmail } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID, IsInt, Min, IsEmail, IsBoolean } from 'class-validator';
 import { ServiceType } from '../entities/service-type.enum';
 
 export class CreateServiceDto {
@@ -26,6 +26,11 @@ export class CreateServiceDto {
   @ApiProperty({ example: 50000, description: 'Service price' })
   @IsNumber()
   price: number;
+
+  @ApiPropertyOptional({ example: false, description: 'Whether the service is a package offer' })
+  @IsOptional()
+  @IsBoolean()
+  isPackage?: boolean;
 
   @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL', required: false })
   @IsOptional()

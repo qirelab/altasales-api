@@ -36,6 +36,10 @@ export class Service {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   price: number;
 
+  @ApiProperty({ example: false, description: 'Whether the service is a package offer' })
+  @Column({ type: 'boolean', default: false })
+  isPackage: boolean;
+
   @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
