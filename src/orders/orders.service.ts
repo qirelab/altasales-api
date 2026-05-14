@@ -140,13 +140,13 @@ export class OrdersService {
         await queryRunner.manager.update(
           Order,
           { id: order.id },
-          { status: OrderStatus.InProgress },
+          { status: OrderStatus.Planned },
         );
         await this.cartService.clearAndArchiveActiveCart(userId);
         await queryRunner.commitTransaction();
         return {
           orderId: order.id,
-          status: OrderStatus.InProgress,
+          status: OrderStatus.Planned,
           paymentMethod: CheckoutPaymentMethod.Balance,
         };
       }
@@ -378,7 +378,9 @@ export class OrdersService {
     const map = Object.fromEntries(raw.map((r) => [r.status, Number(r.count)]));
     return {
       active:
-        (map[OrderStatus.PendingPayment] ?? 0) + (map[OrderStatus.InProgress] ?? 0),
+        (map[OrderStatus.PendingPayment] ?? 0) +
+        (map[OrderStatus.Planned] ?? 0) +
+        (map[OrderStatus.InProgress] ?? 0),
       completed: map[OrderStatus.Completed] ?? 0,
       cancelled: map[OrderStatus.Cancelled] ?? 0,
     };
