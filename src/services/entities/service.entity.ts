@@ -2,6 +2,7 @@ import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, Jo
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServiceType } from './service-type.enum';
 import { User } from '../../users/entities/user.entity';
+import { Category } from './category.entity';
 
 @Entity()
 export class Service {
@@ -28,9 +29,14 @@ export class Service {
   @Column({ type: 'text' })
   description: string;
 
-  @ApiProperty({ example: 'Интеграции', description: 'Service category' })
-  @Column()
-  category: string;
+  @ApiPropertyOptional({ description: 'Category ID for service/document' })
+  @Column({ type: 'uuid', nullable: true })
+  categoryId: string | null;
+
+  @ApiPropertyOptional({ type: () => Category, description: 'Linked category entity' })
+  @ManyToOne(() => Category, (category) => category.services, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'categoryId' })
+  category: Category | null;
 
   @ApiProperty({ example: 50000, description: 'Service price' })
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })

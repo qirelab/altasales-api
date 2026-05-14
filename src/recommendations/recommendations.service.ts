@@ -63,10 +63,11 @@ export class RecommendationsService {
     return this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
+      .leftJoin('service.category', 'category')
       .select('recommendation.id', 'id')
       .addSelect('service.name', 'name')
       .addSelect('service.type', 'type')
-      .addSelect('service.category', 'category')
+      .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('service.price', 'price')
       .addSelect('recommendation.status', 'status')
       .where('recommendation."userId" = :userId', { userId })
@@ -83,8 +84,9 @@ export class RecommendationsService {
     return this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
+      .leftJoin('service.category', 'category')
       .select('recommendation.id', 'id')
-      .addSelect('service.category', 'category')
+      .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('recommendation.status', 'status')
       .addSelect('service.price', 'price')
       .where('recommendation."userId" = :userId', { userId })
