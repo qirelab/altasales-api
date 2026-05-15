@@ -14,6 +14,7 @@ import { CartModule } from './cart/cart.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { AiModule } from './ai/ai.module';
 import { MailModule } from './mail/mail.module';
+import { PackagesModule } from './packages/packages.module';
 
 
 @Module({
@@ -33,6 +34,7 @@ import { MailModule } from './mail/mail.module';
     RecommendationsModule,
     AiModule,
     MailModule,
+    PackagesModule,
   ],
 })
 export class AppModule {}

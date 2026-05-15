@@ -1,8 +1,9 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn, ManyToMany } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServiceType } from './service-type.enum';
 import { User } from '../../users/entities/user.entity';
 import { Category } from './category.entity';
+import { ServicePackage } from '../../packages/entities/package.entity';
 
 @Entity()
 export class Service {
@@ -42,10 +43,6 @@ export class Service {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   price: number;
 
-  @ApiProperty({ example: false, description: 'Whether the service is a package offer' })
-  @Column({ type: 'boolean', default: false })
-  isPackage: boolean;
-
   @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
@@ -84,4 +81,11 @@ export class Service {
   })
   @Column({ type: 'json', default: [] })
   contentSections: { id: string; title: string; content: string }[];
+
+  @ApiPropertyOptional({
+    description: 'Packages containing this service',
+    type: () => [ServicePackage],
+  })
+  @ManyToMany(() => ServicePackage, (servicePackage) => servicePackage.services)
+  packages: ServicePackage[];
 }
