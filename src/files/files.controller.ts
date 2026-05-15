@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
+import { extname } from 'path';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
@@ -24,7 +25,12 @@ import { FileSource } from './entities/file.entity';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-const ALLOWED_MIME_TYPES = [
+type UploadFileMetadata = {
+  originalname: string;
+  mimetype: string;
+};
+
+const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -37,9 +43,32 @@ const ALLOWED_MIME_TYPES = [
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/heic-sequence',
+  'image/heif-sequence',
+  'image/x-heic',
+  'image/x-heif',
   'application/zip',
   'application/x-rar-compressed',
-];
+]);
+
+const APPLE_IMAGE_EXTENSIONS = new Set(['.heic', '.heif']);
+const APPLE_IMAGE_FALLBACK_MIME_TYPES = new Set([
+  'application/octet-stream',
+  '',
+]);
+
+function isAllowedAppleImageFallback(file: UploadFileMetadata): boolean {
+  const extension = extname(file.originalname).toLowerCase();
+
+  return APPLE_IMAGE_EXTENSIONS.has(extension)
+    && APPLE_IMAGE_FALLBACK_MIME_TYPES.has(file.mimetype);
+}
+
+function isAllowedFileType(file: UploadFileMetadata): boolean {
+  return ALLOWED_MIME_TYPES.has(file.mimetype) || isAllowedAppleImageFallback(file);
+}
 
 @ApiTags('files')
 @Controller('files')
@@ -64,7 +93,7 @@ export class FilesController {
       storage: memoryStorage(),
       limits: { fileSize: MAX_FILE_SIZE },
       fileFilter: (_req, file, cb) => {
-        if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+        if (isAllowedFileType(file)) {
           cb(null, true);
         } else {
           cb(new BadRequestException('Недопустимый тип файла'), false);
