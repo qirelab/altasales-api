@@ -15,7 +15,7 @@ import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
 import { OrderItem } from '../orders/entities/order-item.entity';
-import { Category } from './entities/category.entity';
+import { Category } from '../categories/entities/category.entity';
 
 @Injectable()
 export class ServicesService {

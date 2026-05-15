@@ -2,7 +2,7 @@ import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, Jo
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServiceType } from './service-type.enum';
 import { User } from '../../users/entities/user.entity';
-import { Category } from './category.entity';
+import { Category } from '../../categories/entities/category.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
 
 @Entity()
