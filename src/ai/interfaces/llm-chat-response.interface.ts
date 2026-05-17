@@ -7,4 +7,5 @@ export interface LlmChatResponse {
   content: string;
   usage: LlmUsage;
   dataClass: DataClass;
+  anonymizationStats?: Record<string, number>;
 }
