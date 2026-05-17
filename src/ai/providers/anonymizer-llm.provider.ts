@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { AiMonitoringService } from '../ai-monitoring.service';
+import { AiMonitoringEventName } from '../enums/ai-monitoring-event-name.enum';
+import { AiMonitoringOperation } from '../enums/ai-monitoring-operation.enum';
+import { AiMonitoringStage } from '../enums/ai-monitoring-stage.enum';
+import { AiMonitoringStatus } from '../enums/ai-monitoring-status.enum';
 import {
   AnonymizerProvider,
   AnonymizerProviderRequest,
@@ -12,7 +17,13 @@ const DEFAULT_BACKOFF_MAX_MS = 1_000;
 
 @Injectable()
 export class AnonymizerLlmProvider implements AnonymizerProvider {
+  constructor(
+    @Optional()
+    private readonly monitoring?: AiMonitoringService,
+  ) {}
+
   async anonymize(request: AnonymizerProviderRequest): Promise<string> {
+    const startedAt = Date.now();
     const baseUrl = process.env.LLM_ANONYMIZER_BASE_URL;
     const apiKey = process.env.LLM_ANONYMIZER_API_KEY;
     const model = process.env.LLM_ANONYMIZER_MODEL;
@@ -34,11 +45,12 @@ export class AnonymizerLlmProvider implements AnonymizerProvider {
     );
 
     if (!baseUrl || !apiKey || !model) {
+      this.logStageFailure(startedAt, false);
       throw new Error('anonymizer_unavailable');
     }
 
     try {
-      return await executeWithResilience(
+      const response = await executeWithResilience(
         async (signal) => {
           const response = await fetch(baseUrl, {
             method: 'POST',
@@ -66,9 +78,31 @@ export class AnonymizerLlmProvider implements AnonymizerProvider {
           maxAttempts,
           backoffBaseMs,
           backoffMaxMs,
+          onAttemptFailure: ({ attempt, maxAttempts, error, latencyMs }) =>
+            this.monitoring?.log({
+              eventName: AiMonitoringEventName.AiRetryAttemptFailed,
+              operation: AiMonitoringOperation.AnonymizerLlm,
+              stage: AiMonitoringStage.Retry,
+              status: AiMonitoringStatus.Failure,
+              errorCode: error.code,
+              latencyMs,
+              attempt,
+              maxAttempts,
+              providerConfigured: true,
+            }),
         },
       );
+      this.monitoring?.log({
+        eventName: AiMonitoringEventName.AiStageSucceeded,
+        operation: AiMonitoringOperation.AnonymizerLlm,
+        stage: AiMonitoringStage.ProviderCall,
+        status: AiMonitoringStatus.Success,
+        latencyMs: Date.now() - startedAt,
+        providerConfigured: true,
+      });
+      return response;
     } catch {
+      this.logStageFailure(startedAt, true);
       throw new Error('anonymizer_unavailable');
     }
   }
@@ -80,5 +114,17 @@ export class AnonymizerLlmProvider implements AnonymizerProvider {
     }
 
     return parsed;
+  }
+
+  private logStageFailure(startedAt: number, providerConfigured: boolean): void {
+    this.monitoring?.log({
+      eventName: AiMonitoringEventName.AiStageFailed,
+      operation: AiMonitoringOperation.AnonymizerLlm,
+      stage: AiMonitoringStage.ProviderCall,
+      status: AiMonitoringStatus.Failure,
+      errorCode: 'AI_ANONYMIZATION_FAILED',
+      latencyMs: Date.now() - startedAt,
+      providerConfigured,
+    });
   }
 }

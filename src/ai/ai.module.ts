@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiMonitoringService } from './ai-monitoring.service';
 import { LlmProxyService } from './llm-proxy.service';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
 import { AnonymizerLlmProvider } from './providers/anonymizer-llm.provider';
@@ -8,6 +9,7 @@ import { MockLlmProvider } from './providers/mock-llm.provider';
 @Module({
   providers: [
     LlmProxyService,
+    AiMonitoringService,
     PiiAnonymizerService,
     MockLlmProvider,
     AnonymizerLlmProvider,

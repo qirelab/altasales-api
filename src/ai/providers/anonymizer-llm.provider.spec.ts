@@ -1,9 +1,16 @@
+import { Logger } from '@nestjs/common';
+import { AiMonitoringService } from '../ai-monitoring.service';
+import { AiMonitoringEventName } from '../enums/ai-monitoring-event-name.enum';
+import { AiMonitoringOperation } from '../enums/ai-monitoring-operation.enum';
+import { AiMonitoringStage } from '../enums/ai-monitoring-stage.enum';
+import { AiMonitoringStatus } from '../enums/ai-monitoring-status.enum';
 import { AnonymizerLlmProvider } from './anonymizer-llm.provider';
 
 describe('AnonymizerLlmProvider', () => {
   let provider: AnonymizerLlmProvider;
   let originalEnv: Record<string, string | undefined>;
   let fetchSpy: jest.SpyInstance;
+  let loggerLogSpy: jest.SpyInstance;
 
   const request = {
     messages: [{ role: 'user' as const, content: 'Email user@example.com' }],
@@ -31,7 +38,8 @@ describe('AnonymizerLlmProvider', () => {
     process.env.LLM_ANONYMIZER_BACKOFF_MAX_MS = '1';
     process.env.LLM_FALLBACK_ENABLED = 'true';
     process.env.LLM_FALLBACK_PROVIDER = 'mock';
-    provider = new AnonymizerLlmProvider();
+    loggerLogSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    provider = new AnonymizerLlmProvider(new AiMonitoringService());
     fetchSpy = jest.spyOn(global, 'fetch');
   });
 
@@ -59,6 +67,16 @@ describe('AnonymizerLlmProvider', () => {
 
     expect(response).toBe('{"messages":[]}');
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(loggerLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: AiMonitoringEventName.AiRetryAttemptFailed,
+        operation: AiMonitoringOperation.AnonymizerLlm,
+        stage: AiMonitoringStage.Retry,
+        status: AiMonitoringStatus.Failure,
+        attempt: 1,
+        maxAttempts: 2,
+      }),
+    );
   });
 
   it.each([500, 429])('retries transient HTTP %s responses', async (status) => {
@@ -82,6 +100,15 @@ describe('AnonymizerLlmProvider', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(fetchSpy.mock.calls[0][0]).toBe('https://anonymizer.test');
     expect(fetchSpy.mock.calls[1][0]).toBe('https://anonymizer.test');
+    expect(loggerLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: AiMonitoringEventName.AiStageFailed,
+        operation: AiMonitoringOperation.AnonymizerLlm,
+        stage: AiMonitoringStage.ProviderCall,
+        status: AiMonitoringStatus.Failure,
+        errorCode: 'AI_ANONYMIZATION_FAILED',
+      }),
+    );
   });
 
   it('does not leak raw provider errors in thrown errors', async () => {
@@ -94,6 +121,34 @@ describe('AnonymizerLlmProvider', () => {
     await expect(provider.anonymize(request)).rejects.not.toThrow(
       'user@example.com',
     );
+  });
+
+  it('does not leak anonymizer URL, headers, body, mode, or raw text in logs', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = 'required';
+    fetchSpy.mockRejectedValueOnce(
+      new Error(
+        'https://anonymizer.test Authorization Bearer secret body user@example.com',
+      ),
+    );
+
+    await expect(provider.anonymize(request)).rejects.toThrow(
+      'anonymizer_unavailable',
+    );
+
+    const serializedLogs = loggerLogSpy.mock.calls
+      .flat()
+      .map((entry) => JSON.stringify(entry))
+      .join(' ');
+    expect(serializedLogs).toContain('ANONYMIZER_LLM');
+    expect(serializedLogs).not.toContain('https://anonymizer.test');
+    expect(serializedLogs).not.toContain('Authorization');
+    expect(serializedLogs).not.toContain('secret');
+    expect(serializedLogs).not.toContain('body');
+    expect(serializedLogs).not.toContain('user@example.com');
+    expect(serializedLogs).not.toContain('required');
+    expect(serializedLogs).not.toContain('baseUrl');
+    expect(serializedLogs).not.toContain('endpoint');
+    expect(serializedLogs).not.toContain('host');
   });
 
   function okResponse(body: string): Response {

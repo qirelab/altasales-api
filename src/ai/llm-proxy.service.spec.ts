@@ -6,7 +6,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AiMonitoringService } from './ai-monitoring.service';
 import { AgentId } from './enums/agent-id.enum';
+import { AiMonitoringEventName } from './enums/ai-monitoring-event-name.enum';
+import { AiMonitoringOperation } from './enums/ai-monitoring-operation.enum';
+import { AiMonitoringStage } from './enums/ai-monitoring-stage.enum';
+import { AiMonitoringStatus } from './enums/ai-monitoring-status.enum';
 import { AnonymizationMode } from './enums/anonymization-mode.enum';
 import { DataClass } from './enums/data-class.enum';
 import { LlmProvider } from './enums/llm-provider.enum';
@@ -70,6 +75,7 @@ describe('LlmProxyService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LlmProxyService,
+        AiMonitoringService,
         PiiAnonymizerService,
         MockLlmProvider,
         {
@@ -328,6 +334,23 @@ describe('LlmProxyService', () => {
     expect(serializedLogs).not.toContain('placeholderMap');
   });
 
+  it('success path logs a safe AI flow monitoring event with latency', async () => {
+    await service.chat(baseRequest);
+
+    expect(loggerLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: AiMonitoringEventName.AiFlowSucceeded,
+        operation: AiMonitoringOperation.LlmChat,
+        stage: AiMonitoringStage.AiFlow,
+        status: AiMonitoringStatus.Success,
+        latencyMs: expect.any(Number),
+        providerAlias: 'primary',
+        modelAlias: 'default',
+        providerConfigured: true,
+      }),
+    );
+  });
+
   it('returns no_pii effective class when anonymizer finds no entities', async () => {
     const response = await service.chat(baseRequest);
 
@@ -405,6 +428,8 @@ describe('LlmProxyService', () => {
 
     const serializedLogs = serializeLogs();
     expect(serializedLogs).toContain('AI_PROVIDER_TIMEOUT');
+    expect(serializedLogs).toContain('AI_FLOW_FAILED');
+    expect(serializedLogs).toContain('AI_STAGE_FAILED');
     expect(serializedLogs).not.toContain('Summarize public information');
   });
 
@@ -621,14 +646,41 @@ describe('LlmProxyService', () => {
     });
 
     const serializedLogs = serializeLogs();
-    expect(serializedLogs).toContain('fallbackFrom');
-    expect(serializedLogs).toContain('fallbackTo');
+    expect(serializedLogs).toContain('AI_FALLBACK_ATTEMPTED');
+    expect(serializedLogs).toContain('AI_FALLBACK_SUCCEEDED');
+    expect(serializedLogs).toContain('fallbackUsed');
     expect(serializedLogs).toContain('attempt');
     expect(serializedLogs).not.toContain('https://provider.test');
     expect(serializedLogs).not.toContain('Authorization');
     expect(serializedLogs).not.toContain('secret');
     expect(serializedLogs).not.toContain('Email user@example.com');
     expect(serializedLogs).not.toContain('placeholderMap');
+  });
+
+  it('failure monitoring does not include raw provider error body or endpoint fields', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    jest.spyOn(provider, 'chat').mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'raw provider body https://provider.test Authorization Bearer secret user@example.com',
+        ),
+        { status: 500 },
+      ),
+    );
+
+    await expect(service.chat(baseRequest)).rejects.toThrow(
+      new ServiceUnavailableException('LLM provider is unavailable'),
+    );
+
+    const serializedLogs = serializeLogs();
+    expect(serializedLogs).toContain('AI_PROVIDER_HTTP_5XX');
+    expect(serializedLogs).not.toContain('raw provider body');
+    expect(serializedLogs).not.toContain('https://provider.test');
+    expect(serializedLogs).not.toContain('Authorization');
+    expect(serializedLogs).not.toContain('secret');
+    expect(serializedLogs).not.toContain('user@example.com');
+    expect(serializedLogs).not.toContain('baseUrl');
+    expect(serializedLogs).not.toContain('endpoint');
   });
 
   it('blocks raw PII in provider response before restore', async () => {
