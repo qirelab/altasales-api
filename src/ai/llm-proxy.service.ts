@@ -1,9 +1,14 @@
 import {
   BadRequestException,
   ForbiddenException,
+  GatewayTimeoutException,
+  Inject,
   Injectable,
   Logger,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { AiError, isAiError } from './errors/ai-error';
 import { AgentId } from './enums/agent-id.enum';
 import { AnonymizationMode } from './enums/anonymization-mode.enum';
 import { DataClass } from './enums/data-class.enum';
@@ -20,13 +25,24 @@ import {
   SafeLlmStatus,
 } from './interfaces/safe-llm-log.interface';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
+import { LLM_PROVIDER_ADAPTERS } from './providers/llm-provider-registry';
+import type { LlmProviderRegistry } from './providers/llm-provider-registry';
 import { MockLlmProvider } from './providers/mock-llm.provider';
+import { executeWithResilience } from './resilience/llm-resilience';
 
 const VALIDATION_ERROR = 'LLM request validation failed';
 const POLICY_ERROR = 'LLM request blocked by data policy';
 const PROVIDER_POLICY_ERROR = 'LLM provider is not allowed by policy';
+const MODEL_POLICY_ERROR = 'LLM model is not allowed by policy';
+const PROVIDER_TIMEOUT_ERROR = 'LLM provider timed out';
+const PROVIDER_UNAVAILABLE_ERROR = 'LLM provider is unavailable';
+const RESTORE_ERROR = 'LLM response restore failed';
 const PLACEHOLDER_GUIDANCE =
   'PII placeholders are intentional anonymization tokens. Do not modify, decline, delete, replace, or inflect placeholders. Use neutral constructions where possible, for example "contact person: {{PII_PERSON_0001}}" or "email: {{PII_EMAIL_0001}}".';
+const DEFAULT_PROVIDER_TIMEOUT_MS = 10_000;
+const DEFAULT_PROVIDER_MAX_ATTEMPTS = 2;
+const DEFAULT_PROVIDER_BACKOFF_BASE_MS = 200;
+const DEFAULT_PROVIDER_BACKOFF_MAX_MS = 2_000;
 
 type SafeException = Error & {
   safeErrorCode?: SafeLlmErrorCode;
@@ -39,6 +55,9 @@ export class LlmProxyService {
   constructor(
     private readonly piiAnonymizer: PiiAnonymizerService,
     private readonly mockProvider: MockLlmProvider,
+    @Optional()
+    @Inject(LLM_PROVIDER_ADAPTERS)
+    private readonly providerRegistry?: LlmProviderRegistry,
   ) {}
 
   async chat(request: LlmChatRequest): Promise<LlmChatResponse> {
@@ -47,11 +66,13 @@ export class LlmProxyService {
     let effectiveDataClass: DataClass | undefined;
     let anonymizationStats: Record<string, number> | undefined;
     let provider: LlmProviderAdapter | undefined;
+    let fallbackFrom: string | undefined;
+    let fallbackTo: string | undefined;
 
     try {
       const declaredDataClass = this.resolveDeclaredDataClass(request);
       const anonymizationMode = this.getAnonymizationMode();
-      provider = this.selectProvider(request);
+      provider = this.selectProvider(request, 'primary');
 
       const anonymizationResult = await this.resolveAnonymization(
         request.messages,
@@ -71,7 +92,16 @@ export class LlmProxyService {
 
       this.assertProviderPolicy(effectiveDataClass, provider);
 
-      const providerResponse = await this.callProvider(provider, providerMessages);
+      const providerCallResult = await this.callProviderWithOptionalFallback(
+        request,
+        provider,
+        providerMessages,
+        effectiveDataClass,
+      );
+      provider = providerCallResult.provider;
+      fallbackFrom = providerCallResult.fallbackFrom;
+      fallbackTo = providerCallResult.fallbackTo;
+      const providerResponse = providerCallResult.response;
       this.assertProviderResponsePolicy(providerResponse.content);
 
       const restoredContent = this.restoreProviderResponse(
@@ -100,11 +130,14 @@ export class LlmProxyService {
         latencyMs: response.usage.latencyMs,
         status: 'success',
         anonymizationStats,
+        fallbackFrom,
+        fallbackTo,
       });
 
       return response;
     } catch (error) {
-      const errorCode = this.getErrorCode(error);
+      const safeError = this.toSafeException(error);
+      const errorCode = this.getErrorCode(safeError);
       this.logSafe({
         agentId: request.agentId,
         task: request.task,
@@ -114,8 +147,10 @@ export class LlmProxyService {
         status: this.getStatus(errorCode),
         errorCode,
         anonymizationStats,
+        fallbackFrom,
+        fallbackTo,
       });
-      throw error;
+      throw safeError;
     }
   }
 
@@ -219,13 +254,91 @@ export class LlmProxyService {
     ];
   }
 
-  private selectProvider(request: LlmChatRequest): LlmProviderAdapter {
-    const allowedProviders = request.policy?.providers;
-    if (allowedProviders && !allowedProviders.includes(LlmProvider.Mock)) {
-      throw this.safePolicyError('policy_blocked', PROVIDER_POLICY_ERROR);
+  private selectProvider(
+    request: LlmChatRequest,
+    role: 'primary' | 'fallback',
+  ): LlmProviderAdapter {
+    const providerId =
+      role === 'primary'
+        ? process.env.LLM_PRIMARY_PROVIDER || LlmProvider.Mock
+        : process.env.LLM_FALLBACK_PROVIDER;
+    const modelId =
+      role === 'primary'
+        ? process.env.LLM_PRIMARY_MODEL || this.mockProvider.modelId
+        : process.env.LLM_FALLBACK_MODEL;
+
+    if (!providerId) {
+      throw this.safePolicyError(
+        'AI_PROVIDER_NOT_ALLOWED',
+        PROVIDER_POLICY_ERROR,
+      );
     }
 
-    return this.mockProvider;
+    const provider = this.findProvider(providerId, modelId);
+    this.assertProviderAndModelAllowed(provider, request);
+    return provider;
+  }
+
+  private findProvider(
+    providerId: string,
+    modelId?: string,
+  ): LlmProviderAdapter {
+    const providers = this.getRegisteredProviders();
+    const provider = providers.find(
+      (candidate) =>
+        candidate.providerId === providerId &&
+        (!modelId || candidate.modelId === modelId),
+    );
+
+    if (provider) {
+      return provider;
+    }
+
+    if (providers.some((candidate) => candidate.providerId === providerId)) {
+      throw this.safePolicyError('AI_MODEL_NOT_ALLOWED', MODEL_POLICY_ERROR);
+    }
+
+    throw this.safePolicyError('AI_PROVIDER_NOT_ALLOWED', PROVIDER_POLICY_ERROR);
+  }
+
+  private getRegisteredProviders(): LlmProviderAdapter[] {
+    if (this.providerRegistry?.length) {
+      return this.providerRegistry;
+    }
+
+    return [this.mockProvider];
+  }
+
+  private assertProviderAndModelAllowed(
+    provider: LlmProviderAdapter,
+    request: LlmChatRequest,
+  ): void {
+    const requestAllowedProviders = request.policy?.providers;
+    if (
+      requestAllowedProviders &&
+      !requestAllowedProviders.includes(provider.providerId as LlmProvider)
+    ) {
+      throw this.safePolicyError(
+        'AI_PROVIDER_NOT_ALLOWED',
+        PROVIDER_POLICY_ERROR,
+      );
+    }
+
+    const allowedProviders = this.parseCsv(process.env.LLM_ALLOWED_PROVIDERS);
+    if (
+      allowedProviders.length > 0 &&
+      !allowedProviders.includes(provider.providerId)
+    ) {
+      throw this.safePolicyError(
+        'AI_PROVIDER_NOT_ALLOWED',
+        PROVIDER_POLICY_ERROR,
+      );
+    }
+
+    const allowedModels = this.parseCsv(process.env.LLM_ALLOWED_MODELS);
+    if (allowedModels.length > 0 && !allowedModels.includes(provider.modelId)) {
+      throw this.safePolicyError('AI_MODEL_NOT_ALLOWED', MODEL_POLICY_ERROR);
+    }
   }
 
   private assertProviderPolicy(
@@ -241,15 +354,110 @@ export class LlmProxyService {
     }
   }
 
-  private async callProvider(
+  private async callProviderWithOptionalFallback(
+    request: LlmChatRequest,
     provider: LlmProviderAdapter,
     messages: LlmMessage[],
-  ) {
+    effectiveDataClass: DataClass,
+  ): Promise<{
+    provider: LlmProviderAdapter;
+    response: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
+    fallbackFrom?: string;
+    fallbackTo?: string;
+  }> {
     try {
-      return await provider.chat(messages);
-    } catch {
-      throw this.safeProviderError();
+      return {
+        provider,
+        response: await this.callProvider(request, provider, messages, effectiveDataClass),
+      };
+    } catch (error) {
+      if (!this.shouldUseFallback(error)) {
+        throw error;
+      }
+
+      const fallbackProvider = this.selectProvider(request, 'fallback');
+      this.assertProviderPolicy(effectiveDataClass, fallbackProvider);
+      const fallbackFrom = this.formatProvider(provider);
+      const fallbackTo = this.formatProvider(fallbackProvider);
+      this.logSafe({
+        agentId: request.agentId,
+        task: request.task,
+        providerId: provider.providerId,
+        modelId: provider.modelId,
+        effectiveDataClass,
+        status: 'provider_error',
+        errorCode: this.getErrorCode(error),
+        fallbackFrom,
+        fallbackTo,
+      });
+
+      return {
+        provider: fallbackProvider,
+        response: await this.callProvider(
+          request,
+          fallbackProvider,
+          messages,
+          effectiveDataClass,
+        ),
+        fallbackFrom,
+        fallbackTo,
+      };
     }
+  }
+
+  private async callProvider(
+    request: LlmChatRequest,
+    provider: LlmProviderAdapter,
+    messages: LlmMessage[],
+    effectiveDataClass: DataClass,
+  ) {
+    const timeoutMs = this.getPositiveInteger(
+      process.env.LLM_PROVIDER_TIMEOUT_MS,
+      DEFAULT_PROVIDER_TIMEOUT_MS,
+    );
+    const maxAttempts = this.getPositiveInteger(
+      process.env.LLM_PROVIDER_MAX_ATTEMPTS,
+      DEFAULT_PROVIDER_MAX_ATTEMPTS,
+    );
+    const backoffBaseMs = this.getPositiveInteger(
+      process.env.LLM_PROVIDER_BACKOFF_BASE_MS,
+      DEFAULT_PROVIDER_BACKOFF_BASE_MS,
+    );
+    const backoffMaxMs = this.getPositiveInteger(
+      process.env.LLM_PROVIDER_BACKOFF_MAX_MS,
+      DEFAULT_PROVIDER_BACKOFF_MAX_MS,
+    );
+
+    return executeWithResilience(
+      (signal) => provider.chat(messages, { signal }),
+      {
+        timeoutMs,
+        maxAttempts,
+        backoffBaseMs,
+        backoffMaxMs,
+        onAttemptFailure: ({ attempt, maxAttempts, error, latencyMs }) =>
+          this.logSafe({
+            agentId: request.agentId,
+            task: request.task,
+            providerId: provider.providerId,
+            modelId: provider.modelId,
+            effectiveDataClass,
+            status: this.getStatus(error.code),
+            errorCode: error.code,
+            attempt,
+            maxAttempts,
+            latencyMs,
+          }),
+      },
+    );
+  }
+
+  private shouldUseFallback(error: unknown): boolean {
+    if (process.env.LLM_FALLBACK_ENABLED !== 'true') {
+      return false;
+    }
+
+    return isAiError(error) && error.fallbackEligible;
   }
 
   private assertProviderResponsePolicy(content: string): void {
@@ -273,7 +481,7 @@ export class LlmProxyService {
     );
 
     if (restoreResult.unresolvedPlaceholders.length > 0) {
-      throw this.safeValidationError();
+      throw this.safeRestoreError();
     }
 
     return restoreResult.content;
@@ -294,7 +502,14 @@ export class LlmProxyService {
   private safeValidationError(): BadRequestException {
     const error = new BadRequestException(VALIDATION_ERROR) as BadRequestException &
       SafeException;
-    error.safeErrorCode = 'validation_failed';
+    error.safeErrorCode = 'AI_VALIDATION_FAILED';
+    return error;
+  }
+
+  private safeRestoreError(): BadRequestException {
+    const error = new BadRequestException(RESTORE_ERROR) as BadRequestException &
+      SafeException;
+    error.safeErrorCode = 'AI_RESTORE_FAILED';
     return error;
   }
 
@@ -308,14 +523,73 @@ export class LlmProxyService {
     return error;
   }
 
-  private safeProviderError(): ForbiddenException {
-    const error = new ForbiddenException(POLICY_ERROR) as ForbiddenException &
-      SafeException;
-    error.safeErrorCode = 'provider_error';
+  private safeProviderUnavailableError(
+    code: SafeLlmErrorCode,
+  ): ServiceUnavailableException {
+    const error = new ServiceUnavailableException(
+      PROVIDER_UNAVAILABLE_ERROR,
+    ) as ServiceUnavailableException & SafeException;
+    error.safeErrorCode = code;
     return error;
   }
 
+  private safeProviderTimeoutError(): GatewayTimeoutException {
+    const error = new GatewayTimeoutException(
+      PROVIDER_TIMEOUT_ERROR,
+    ) as GatewayTimeoutException & SafeException;
+    error.safeErrorCode = 'AI_PROVIDER_TIMEOUT';
+    return error;
+  }
+
+  private toSafeException(error: unknown): Error {
+    if (error instanceof BadRequestException || error instanceof ForbiddenException) {
+      return error;
+    }
+
+    if (error instanceof GatewayTimeoutException) {
+      return error;
+    }
+
+    if (error instanceof ServiceUnavailableException) {
+      return error;
+    }
+
+    if (isAiError(error)) {
+      if (error.code === 'AI_PROVIDER_TIMEOUT') {
+        return this.safeProviderTimeoutError();
+      }
+
+      if (
+        error.code === 'AI_PROVIDER_UNAVAILABLE' ||
+        error.code === 'AI_PROVIDER_RATE_LIMITED' ||
+        error.code === 'AI_PROVIDER_HTTP_5XX' ||
+        error.code === 'AI_PROVIDER_RETRY_EXHAUSTED' ||
+        error.code === 'AI_FALLBACK_NOT_AVAILABLE'
+      ) {
+        return this.safeProviderUnavailableError(error.code);
+      }
+
+      if (
+        error.code === 'AI_PROVIDER_NOT_ALLOWED' ||
+        error.code === 'AI_MODEL_NOT_ALLOWED' ||
+        error.code === 'AI_POLICY_BLOCKED'
+      ) {
+        return this.safePolicyError(error.code);
+      }
+
+      if (error.code === 'AI_RESTORE_FAILED') {
+        return this.safeRestoreError();
+      }
+    }
+
+    return this.safeProviderUnavailableError('AI_PROVIDER_UNAVAILABLE');
+  }
+
   private getErrorCode(error: unknown): SafeLlmErrorCode {
+    if (isAiError(error)) {
+      return error.code;
+    }
+
     const safeError = error as SafeException;
     if (safeError?.safeErrorCode) {
       return safeError.safeErrorCode;
@@ -327,13 +601,54 @@ export class LlmProxyService {
   }
 
   private getStatus(errorCode: SafeLlmErrorCode): SafeLlmStatus {
-    if (errorCode === 'validation_failed') return 'validation_error';
-    if (errorCode === 'provider_error') return 'provider_error';
-    if (errorCode === 'anonymizer_error') return 'anonymizer_error';
+    if (
+      errorCode === 'validation_failed' ||
+      errorCode === 'AI_VALIDATION_FAILED' ||
+      errorCode === 'AI_RESTORE_FAILED'
+    ) {
+      return 'validation_error';
+    }
+    if (
+      errorCode === 'provider_error' ||
+      errorCode === 'AI_PROVIDER_TIMEOUT' ||
+      errorCode === 'AI_PROVIDER_RETRY_EXHAUSTED' ||
+      errorCode === 'AI_PROVIDER_UNAVAILABLE' ||
+      errorCode === 'AI_PROVIDER_RATE_LIMITED' ||
+      errorCode === 'AI_PROVIDER_HTTP_5XX' ||
+      errorCode === 'AI_FALLBACK_NOT_AVAILABLE'
+    ) {
+      return 'provider_error';
+    }
+    if (
+      errorCode === 'anonymizer_error' ||
+      errorCode === 'AI_ANONYMIZATION_FAILED'
+    ) {
+      return 'anonymizer_error';
+    }
     return 'blocked';
   }
 
   private logSafe(metadata: SafeLlmLogMetadata): void {
     this.logger.log(metadata);
+  }
+
+  private parseCsv(value: string | undefined): string[] {
+    return (value ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  private getPositiveInteger(value: string | undefined, fallback: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
+  private formatProvider(provider: LlmProviderAdapter): string {
+    return `${provider.providerId}:${provider.modelId}`;
   }
 }
