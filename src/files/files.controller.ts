@@ -13,6 +13,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
@@ -30,6 +31,10 @@ type UploadFileMetadata = {
   mimetype: string;
 };
 
+interface MulterUtf8Options extends MulterOptions {
+  defParamCharset?: string;
+}
+
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
   'application/msword',
@@ -43,6 +48,12 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/heic-sequence',
+  'image/heif-sequence',
+  'image/x-heic',
+  'image/x-heif',
   'application/zip',
   'application/x-zip-compressed',
   'application/vnd.rar',
@@ -50,22 +61,46 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/x-rar-compressed',
 ]);
 
-const ARCHIVE_EXTENSIONS = new Set(['.zip', '.rar']);
-const ARCHIVE_FALLBACK_MIME_TYPES = new Set([
+const FALLBACK_MIME_TYPES = new Set([
   'application/octet-stream',
   '',
 ]);
+
+const ARCHIVE_EXTENSIONS = new Set(['.zip', '.rar']);
+const APPLE_IMAGE_EXTENSIONS = new Set(['.heic', '.heif']);
 
 function isAllowedArchiveFallback(file: UploadFileMetadata): boolean {
   const extension = extname(file.originalname).toLowerCase();
 
   return ARCHIVE_EXTENSIONS.has(extension)
-    && ARCHIVE_FALLBACK_MIME_TYPES.has(file.mimetype);
+    && FALLBACK_MIME_TYPES.has(file.mimetype);
+}
+
+function isAllowedAppleImageFallback(file: UploadFileMetadata): boolean {
+  const extension = extname(file.originalname).toLowerCase();
+
+  return APPLE_IMAGE_EXTENSIONS.has(extension)
+    && FALLBACK_MIME_TYPES.has(file.mimetype);
 }
 
 function isAllowedFileType(file: UploadFileMetadata): boolean {
-  return ALLOWED_MIME_TYPES.has(file.mimetype) || isAllowedArchiveFallback(file);
+  return ALLOWED_MIME_TYPES.has(file.mimetype)
+    || isAllowedArchiveFallback(file)
+    || isAllowedAppleImageFallback(file);
 }
+
+const fileUploadOptions = {
+  storage: memoryStorage(),
+  defParamCharset: 'utf8',
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedFileType(file)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestException('Недопустимый тип файла'), false);
+    }
+  },
+} satisfies MulterUtf8Options;
 
 @ApiTags('files')
 @Controller('files')
@@ -86,17 +121,7 @@ export class FilesController {
   })
   @ApiResponse({ status: 201, description: 'File uploaded to ROP' })
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: MAX_FILE_SIZE },
-      fileFilter: (_req, file, cb) => {
-        if (isAllowedFileType(file)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Недопустимый тип файла'), false);
-        }
-      },
-    }),
+    FileInterceptor('file', fileUploadOptions),
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
