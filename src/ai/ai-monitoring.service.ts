@@ -46,6 +46,8 @@ export class AiMonitoringService {
       tokensOut: event.tokensOut,
       costRub: event.costRub,
       anonymizationStats: this.safeStats(event.anonymizationStats),
+      inputCount: event.inputCount,
+      vectorDimensions: event.vectorDimensions,
     });
   }
 

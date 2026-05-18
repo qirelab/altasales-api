@@ -295,7 +295,7 @@ export class LlmProxyService {
         : process.env.LLM_FALLBACK_PROVIDER;
     const modelId =
       role === 'primary'
-        ? process.env.LLM_PRIMARY_MODEL || this.mockProvider.modelId
+        ? process.env.LLM_PRIMARY_MODEL_ALIAS || this.mockProvider.modelId
         : process.env.LLM_FALLBACK_MODEL;
 
     if (!providerId) {
@@ -366,7 +366,7 @@ export class LlmProxyService {
       );
     }
 
-    const allowedModels = this.parseCsv(process.env.LLM_ALLOWED_MODELS);
+    const allowedModels = this.parseCsv(process.env.LLM_ALLOWED_MODEL_ALIASES);
     if (allowedModels.length > 0 && !allowedModels.includes(provider.modelId)) {
       throw this.safePolicyError('AI_MODEL_NOT_ALLOWED', MODEL_POLICY_ERROR);
     }

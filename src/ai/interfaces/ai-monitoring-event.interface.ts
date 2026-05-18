@@ -28,4 +28,6 @@ export interface AiMonitoringEvent {
   tokensOut?: number;
   costRub?: number;
   anonymizationStats?: Record<string, number>;
+  inputCount?: number;
+  vectorDimensions?: number;
 }
