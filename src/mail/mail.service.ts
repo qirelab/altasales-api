@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { MailerService } from '@nestjs-modules/mailer';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Resend } from 'resend';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
+import { RESEND_CLIENT } from './mail.constants';
 
 interface NewQuestionnaireNotificationData {
   userName: string;
@@ -17,12 +19,19 @@ interface NewQuestionnaireNotificationData {
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
+  private readonly defaultFrom: string;
 
   constructor(
-    private readonly mailerService: MailerService,
+    @Inject(RESEND_CLIENT) private readonly resend: Resend,
+    private readonly configService: ConfigService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-  ) {}
+  ) {
+    this.defaultFrom = this.configService.get<string>(
+      'MAIL_FROM',
+      'AltaSales <onboarding@resend.dev>',
+    );
+  }
 
   async notifyAdminsAboutNewQuestionnaire(
     data: NewQuestionnaireNotificationData,
@@ -82,14 +91,23 @@ export class MailService {
     const adminEmails = admins.map((admin) => admin.email);
 
     try {
-      await this.mailerService.sendMail({
+      const { data: result, error } = await this.resend.emails.send({
+        from: this.defaultFrom,
         to: adminEmails,
         subject,
         html,
       });
 
+      if (error) {
+        this.logger.error(
+          `Failed to send notification email: ${error.message}`,
+          error,
+        );
+        return;
+      }
+
       this.logger.log(
-        `Notification sent to ${adminEmails.length} admin(s) about questionnaire ${data.questionnaireId}`,
+        `Notification sent to ${adminEmails.length} admin(s) about questionnaire ${data.questionnaireId} (id: ${result?.id})`,
       );
     } catch (error) {
       this.logger.error(
