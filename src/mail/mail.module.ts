@@ -1,36 +1,27 @@
 import { Module } from '@nestjs/common';
-import { MailerModule } from '@nestjs-modules/mailer';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { Resend } from 'resend';
 import { User } from '../users/entities/user.entity';
 import { MailService } from './mail.service';
+import { RESEND_CLIENT } from './mail.constants';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([User]),
-    MailerModule.forRootAsync({
-      imports: [ConfigModule],
+  imports: [TypeOrmModule.forFeature([User]), ConfigModule],
+  providers: [
+    {
+      provide: RESEND_CLIENT,
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        transport: {
-          host: configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
-          port: configService.get<number>('SMTP_PORT', 587),
-          secure: false,
-          auth: {
-            user: configService.get<string>('SMTP_USER'),
-            pass: configService.get<string>('SMTP_PASS'),
-          },
-        },
-        defaults: {
-          from: configService.get<string>(
-            'SMTP_FROM',
-            '"AltaSales" <noreply@altasales.com>',
-          ),
-        },
-      }),
-    }),
+      useFactory: (configService: ConfigService) => {
+        const apiKey = configService.get<string>('RESEND_API_KEY');
+        if (!apiKey) {
+          throw new Error('RESEND_API_KEY is not defined');
+        }
+        return new Resend(apiKey);
+      },
+    },
+    MailService,
   ],
-  providers: [MailService],
   exports: [MailService],
 })
 export class MailModule {}
