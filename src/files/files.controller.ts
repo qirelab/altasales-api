@@ -13,9 +13,9 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { randomUUID } from 'crypto';
+import { join } from 'path';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
@@ -25,6 +25,10 @@ import { FilesService } from './files.service';
 const UPLOADS_DIR = join(process.cwd(), 'uploads');
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+interface MulterUtf8Options extends MulterOptions {
+  defParamCharset?: string;
+}
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -43,6 +47,19 @@ const ALLOWED_MIME_TYPES = [
   'application/x-rar-compressed',
 ];
 
+const fileUploadOptions = {
+  storage: memoryStorage(),
+  defParamCharset: 'utf8',
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestException('Недопустимый тип файла'), false);
+    }
+  },
+} satisfies MulterUtf8Options;
+
 @ApiTags('files')
 @Controller('files')
 @UseGuards(SessionGuard)
@@ -60,23 +77,7 @@ export class FilesController {
   })
   @ApiResponse({ status: 201, description: 'File uploaded' })
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: UPLOADS_DIR,
-        filename: (_req, file, cb) => {
-          const uniqueName = `${randomUUID()}${extname(file.originalname)}`;
-          cb(null, uniqueName);
-        },
-      }),
-      limits: { fileSize: MAX_FILE_SIZE },
-      fileFilter: (_req, file, cb) => {
-        if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Недопустимый тип файла'), false);
-        }
-      },
-    }),
+    FileInterceptor('file', fileUploadOptions),
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
