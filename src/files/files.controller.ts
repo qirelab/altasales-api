@@ -13,6 +13,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
@@ -23,6 +24,10 @@ import { FilesService } from './files.service';
 import { FileSource } from './entities/file.entity';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+interface MulterUtf8Options extends MulterOptions {
+  defParamCharset?: string;
+}
 
 const ALLOWED_MIME_TYPES = [
   'application/pdf',
@@ -40,6 +45,19 @@ const ALLOWED_MIME_TYPES = [
   'application/zip',
   'application/x-rar-compressed',
 ];
+
+const fileUploadOptions = {
+  storage: memoryStorage(),
+  defParamCharset: 'utf8',
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestException('Недопустимый тип файла'), false);
+    }
+  },
+} satisfies MulterUtf8Options;
 
 @ApiTags('files')
 @Controller('files')
@@ -60,17 +78,7 @@ export class FilesController {
   })
   @ApiResponse({ status: 201, description: 'File uploaded to ROP' })
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: MAX_FILE_SIZE },
-      fileFilter: (_req, file, cb) => {
-        if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Недопустимый тип файла'), false);
-        }
-      },
-    }),
+    FileInterceptor('file', fileUploadOptions),
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
