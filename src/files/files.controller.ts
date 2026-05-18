@@ -13,6 +13,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiQuery } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
@@ -29,6 +30,10 @@ type UploadFileMetadata = {
   originalname: string;
   mimetype: string;
 };
+
+interface MulterUtf8Options extends MulterOptions {
+  defParamCharset?: string;
+}
 
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
@@ -70,6 +75,19 @@ function isAllowedFileType(file: UploadFileMetadata): boolean {
   return ALLOWED_MIME_TYPES.has(file.mimetype) || isAllowedAppleImageFallback(file);
 }
 
+const fileUploadOptions = {
+  storage: memoryStorage(),
+  defParamCharset: 'utf8',
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedFileType(file)) {
+      cb(null, true);
+    } else {
+      cb(new BadRequestException('Недопустимый тип файла'), false);
+    }
+  },
+} satisfies MulterUtf8Options;
+
 @ApiTags('files')
 @Controller('files')
 @UseGuards(SessionGuard)
@@ -89,17 +107,7 @@ export class FilesController {
   })
   @ApiResponse({ status: 201, description: 'File uploaded to ROP' })
   @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: MAX_FILE_SIZE },
-      fileFilter: (_req, file, cb) => {
-        if (isAllowedFileType(file)) {
-          cb(null, true);
-        } else {
-          cb(new BadRequestException('Недопустимый тип файла'), false);
-        }
-      },
-    }),
+    FileInterceptor('file', fileUploadOptions),
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
