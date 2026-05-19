@@ -93,10 +93,10 @@ export class ServicesService {
       .leftJoinAndSelect('servicePackage.category', 'category');
 
     if (query.categoryId) {
-      packageQb.andWhere('servicePackage."categoryId" = :categoryId', { categoryId: query.categoryId });
+      packageQb.andWhere('"servicePackage"."categoryId" = :categoryId', { categoryId: query.categoryId });
     }
     if (query.name?.trim()) {
-      packageQb.andWhere('servicePackage.name ILIKE :name', {
+      packageQb.andWhere('"servicePackage".name ILIKE :name', {
         name: `%${query.name.trim()}%`,
       });
     }

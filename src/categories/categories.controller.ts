@@ -8,6 +8,13 @@ import { Category } from './entities/category.entity';
 export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) { }
 
+  @Get()
+  @ApiOperation({ summary: 'Get all categories (for filter list)' })
+  @ApiResponse({ status: 200, description: 'List of all categories', type: [Category] })
+  async findAll(): Promise<Category[]> {
+    return this.categoriesService.findAll();
+  }
+
   @Get(':slug')
   @ApiOperation({ summary: 'Get category content by slug with FAQ relation' })
   @ApiParam({ name: 'slug', description: 'Category slug' })
