@@ -334,7 +334,11 @@ export class ServicesService {
       )
       .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
       .where('o."userId" = :userId', { userId })
-      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
+      .setParameter('activeStatuses', [
+        OrderStatus.PendingPayment,
+        OrderStatus.Planned,
+        OrderStatus.InProgress,
+      ])
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -416,7 +420,11 @@ export class ServicesService {
       .addSelect('COALESCE(SUM(item.amount), 0)', 'totalIncome')
       .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
       .andWhere('service."userId" = :userId', { userId })
-      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
+      .setParameter('activeStatuses', [
+        OrderStatus.PendingPayment,
+        OrderStatus.Planned,
+        OrderStatus.InProgress,
+      ])
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -495,7 +503,11 @@ export class ServicesService {
         'activeOrders',
       )
       .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
-      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
+      .setParameter('activeStatuses', [
+        OrderStatus.PendingPayment,
+        OrderStatus.Planned,
+        OrderStatus.InProgress,
+      ])
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
