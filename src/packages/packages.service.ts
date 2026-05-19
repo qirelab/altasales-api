@@ -5,7 +5,7 @@ import { CreatePackageDto } from './dto/create-package.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
 import { Service } from '../services/entities/service.entity';
-import { Category } from '../services/entities/category.entity';
+import { Category } from '../categories/entities/category.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 
 @Injectable()
