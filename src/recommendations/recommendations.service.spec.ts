@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationsService } from './recommendations.service';
 
 describe('RecommendationsService', () => {
@@ -35,7 +36,7 @@ describe('RecommendationsService', () => {
     );
   });
 
-  it('ranks generated recommendations by diagnostics', async () => {
+  it('ranks generated recommendations by diagnostics and assigns urgency', async () => {
     serviceRepository.createQueryBuilder.mockReturnValue({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -72,6 +73,7 @@ describe('RecommendationsService', () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       serviceId: 'crm-service-id',
+      priority: RecommendationPriority.Urgent,
       diagnosticSignals: expect.arrayContaining([
         'funnel_conversion',
         'crm_quality',
@@ -119,6 +121,7 @@ describe('RecommendationsService', () => {
       expect.objectContaining({
         userId: 'user-id',
         serviceId: 'crm-service-id',
+        priority: RecommendationPriority.Urgent,
       }),
     );
     expect(recommendationRepository.save).toHaveBeenCalledTimes(1);
