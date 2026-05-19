@@ -13,6 +13,7 @@ import { User } from '../users/entities/user.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
+import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { Recommendation } from './entities/recommendation.entity';
 
@@ -24,6 +25,7 @@ export type UserRecommendationListItem = {
   category: string;
   price: number;
   status: RecommendationStatus;
+  priority: RecommendationPriority;
   rationale: string | null;
   dependencyIds: string[];
   diagnosticSignals: string[];
@@ -34,6 +36,7 @@ export type AdminRecommendationListItem = {
   serviceId: string;
   category: string;
   status: RecommendationStatus;
+  priority: RecommendationPriority;
   price: number;
   rationale: string | null;
   dependencyIds: string[];
@@ -45,6 +48,7 @@ export type GeneratedRecommendationItem = {
   rationale: string;
   diagnosticSignals: string[];
   score: number;
+  priority: RecommendationPriority;
   recommendation?: Recommendation;
 };
 
@@ -159,7 +163,8 @@ export class RecommendationsService {
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
       })
-      .orderBy('recommendation."createdAt"', 'DESC')
+      .orderBy(this.priorityOrderExpression(), 'ASC')
+      .addOrderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
 
@@ -177,6 +182,7 @@ export class RecommendationsService {
       .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('service.price', 'price')
       .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation.priority', 'priority')
       .addSelect('recommendation.rationale', 'rationale')
       .addSelect('recommendation."dependencyIds"', 'dependencyIds')
       .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
@@ -184,7 +190,8 @@ export class RecommendationsService {
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
       })
-      .orderBy('recommendation."createdAt"', 'DESC')
+      .orderBy(this.priorityOrderExpression(), 'ASC')
+      .addOrderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem>();
   }
 
@@ -199,6 +206,7 @@ export class RecommendationsService {
       .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation.priority', 'priority')
       .addSelect('service.price', 'price')
       .addSelect('recommendation.rationale', 'rationale')
       .addSelect('recommendation."dependencyIds"', 'dependencyIds')
@@ -206,7 +214,8 @@ export class RecommendationsService {
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
       })
-      .orderBy('recommendation."createdAt"', 'DESC')
+      .orderBy(this.priorityOrderExpression(), 'ASC')
+      .addOrderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<AdminRecommendationListItem>();
   }
 
@@ -220,6 +229,7 @@ export class RecommendationsService {
       userId: dto.userId,
       serviceId: dto.serviceId,
       status: dto.status ?? RecommendationStatus.Recommended,
+      priority: dto.priority ?? RecommendationPriority.Medium,
       rationale: dto.rationale ?? null,
       dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
       diagnosticSignals: this.normalizeSignals(dto.diagnosticSignals ?? []),
@@ -254,6 +264,7 @@ export class RecommendationsService {
     }
 
     if (dto.status) recommendation.status = dto.status;
+    if (dto.priority) recommendation.priority = dto.priority;
     if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
 
     if (dto.dependencyIds) {
@@ -374,6 +385,7 @@ export class RecommendationsService {
       rationale: this.buildRationale(service.name, matchedSignals),
       diagnosticSignals: matchedSignals.map((group) => group.signal),
       score,
+      priority: this.resolvePriority(score, matchedSignals),
     };
   }
 
@@ -388,6 +400,7 @@ export class RecommendationsService {
     if (existing) {
       existing.rationale = item.rationale;
       existing.diagnosticSignals = item.diagnosticSignals;
+      existing.priority = item.priority;
       existing.generatedAt = new Date();
 
       return this.recommendationRepository.save(existing);
@@ -397,6 +410,7 @@ export class RecommendationsService {
       userId,
       serviceId: item.serviceId,
       status: RecommendationStatus.Recommended,
+      priority: item.priority,
       rationale: item.rationale,
       dependencyIds: [],
       diagnosticSignals: item.diagnosticSignals,
@@ -405,6 +419,25 @@ export class RecommendationsService {
     });
 
     return this.recommendationRepository.save(recommendation);
+  }
+
+  private resolvePriority(
+    score: number,
+    matchedSignals: { signal: string }[],
+  ): RecommendationPriority {
+    const signals = matchedSignals.map((group) => group.signal);
+    const revenueOrFunnelRisk =
+      signals.includes('revenue_risk') || signals.includes('funnel_conversion');
+
+    if (score >= 8 || (score >= 5 && revenueOrFunnelRisk)) {
+      return RecommendationPriority.Urgent;
+    }
+
+    if (score >= 3) {
+      return RecommendationPriority.Medium;
+    }
+
+    return RecommendationPriority.Low;
   }
 
   private async validateDependencyIds(
@@ -531,6 +564,10 @@ export class RecommendationsService {
           .filter((signal) => signal.length > 0),
       ),
     );
+  }
+
+  private priorityOrderExpression(): string {
+    return `CASE recommendation.priority WHEN '${RecommendationPriority.Urgent}' THEN 1 WHEN '${RecommendationPriority.Medium}' THEN 2 ELSE 3 END`;
   }
 
   private uniqueIds(ids: string[]): string[] {
