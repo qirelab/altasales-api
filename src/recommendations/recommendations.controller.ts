@@ -27,6 +27,7 @@ import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
+import { UpdateRecommendationDependenciesDto } from './dto/update-recommendation-dependencies.dto';
 import { RecommendationsService } from './recommendations.service';
 
 @ApiTags('recommendations')
@@ -35,22 +36,20 @@ import { RecommendationsService } from './recommendations.service';
 export class RecommendationsController {
   constructor(
     private readonly recommendationsService: RecommendationsService,
-  ) { }
+  ) {}
 
   @Get('my')
   @ApiOperation({
     summary: 'Get recommendations assigned to current user',
     description:
-      'Returns recommendations linked to current user with service/document details.',
+      'Returns recommendations linked to current user with service/document details and dependency graph.',
   })
   @ApiResponse({
     status: 200,
     description: 'List of user recommendations',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getMyRecommendations(
-    @CurrentUser() user: CurrentUserData,
-  ) {
+  async getMyRecommendations(@CurrentUser() user: CurrentUserData) {
     return this.recommendationsService.findAssignedToUserList(user.id);
   }
 
@@ -113,6 +112,28 @@ export class RecommendationsController {
     @Body() dto: UpdateAdminRecommendationDto,
   ) {
     return this.recommendationsService.updateForAdmin(id, dto);
+  }
+
+  @Patch('admin/:id/dependencies')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Update recommendation dependency graph (admin)',
+  })
+  @ApiParam({ name: 'id', description: 'Recommendation ID' })
+  @ApiResponse({ status: 200, description: 'Dependencies updated' })
+  @ApiResponse({ status: 400, description: 'Invalid dependency graph' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Recommendation not found' })
+  async updateDependenciesForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateRecommendationDependenciesDto,
+  ) {
+    return this.recommendationsService.updateDependenciesForAdmin(
+      id,
+      dto.dependencyIds,
+    );
   }
 
   @Delete('admin/:id')
