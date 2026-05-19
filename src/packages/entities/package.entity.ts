@@ -11,7 +11,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
 import { PackageType } from './package-type.enum';
-import { Category } from '../../services/entities/category.entity';
+import { Category } from '../../categories/entities/category.entity';
 
 @Entity()
 export class ServicePackage {

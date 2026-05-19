@@ -15,13 +15,16 @@ import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
 import { OrderItem } from '../orders/entities/order-item.entity';
-import { Category } from './entities/category.entity';
+import { Category } from '../categories/entities/category.entity';
+import { ServicePackage } from '../packages/entities/package.entity';
 
 @Injectable()
 export class ServicesService {
   constructor(
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(ServicePackage)
+    private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
     @InjectRepository(Order)
@@ -42,7 +45,20 @@ export class ServicesService {
     return await this.serviceRepository.save(service);
   }
 
-  async findAll(query: GetServicesQueryDto): Promise<Service[]> {
+  async findAll(query: GetServicesQueryDto): Promise<{
+    packages: ServicePackage[];
+    services: Service[];
+    categoryContent: {
+      id: string;
+      name: string;
+      description: string | null;
+      faqs: Array<{
+        id: string;
+        question: string;
+        answer: string;
+      }>;
+    } | null;
+  }> {
     const qb = this.serviceRepository
       .createQueryBuilder('service')
       .leftJoinAndSelect('service.category', 'category');
@@ -72,7 +88,40 @@ export class ServicesService {
       }
     }
 
-    return await qb.getMany();
+    const packageQb = this.packageRepository
+      .createQueryBuilder('servicePackage')
+      .leftJoinAndSelect('servicePackage.category', 'category');
+
+    if (query.categoryId) {
+      packageQb.andWhere('servicePackage."categoryId" = :categoryId', { categoryId: query.categoryId });
+    }
+    if (query.name?.trim()) {
+      packageQb.andWhere('servicePackage.name ILIKE :name', {
+        name: `%${query.name.trim()}%`,
+      });
+    }
+    if (query.dateOrder) {
+      packageQb.orderBy('servicePackage.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
+    }
+    if (query.priceOrder) {
+      if (query.dateOrder) {
+        packageQb.addOrderBy('servicePackage.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+      } else {
+        packageQb.orderBy('servicePackage.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+      }
+    }
+
+    const [services, packages, categoryContent] = await Promise.all([
+      qb.getMany(),
+      query.type && query.type !== ServiceType.Service ? Promise.resolve([]) : packageQb.getMany(),
+      this.getCategoryContentForFilter(query.categoryId),
+    ]);
+
+    return {
+      packages,
+      services,
+      categoryContent,
+    };
   }
 
   async findAllServicesForAdmin(query: GetAdminServicesQueryDto): Promise<{
@@ -607,5 +656,40 @@ export class ServicesService {
     if (!category) {
       throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
     }
+  }
+
+  private async getCategoryContentForFilter(categoryId?: string): Promise<{
+    id: string;
+    name: string;
+    description: string | null;
+    faqs: Array<{
+      id: string;
+      question: string;
+      answer: string;
+    }>;
+  } | null> {
+    if (!categoryId) {
+      return null;
+    }
+
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+      relations: ['faqs'],
+    });
+
+    if (!category) {
+      throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
+    }
+
+    return {
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      faqs: category.faqs.map((faq) => ({
+        id: faq.id,
+        question: faq.question,
+        answer: faq.answer,
+      })),
+    };
   }
 }
