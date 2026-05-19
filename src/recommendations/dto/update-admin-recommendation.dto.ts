@@ -6,6 +6,7 @@ import {
   IsString,
   IsUUID,
 } from 'class-validator';
+import { RecommendationPriority } from '../entities/recommendation-priority.enum';
 import { RecommendationStatus } from '../entities/recommendation-status.enum';
 
 export class UpdateAdminRecommendationDto {
@@ -33,6 +34,14 @@ export class UpdateAdminRecommendationDto {
   @IsOptional()
   @IsEnum(RecommendationStatus)
   status?: RecommendationStatus;
+
+  @ApiPropertyOptional({
+    enum: RecommendationPriority,
+    description: 'Urgency level',
+  })
+  @IsOptional()
+  @IsEnum(RecommendationPriority)
+  priority?: RecommendationPriority;
 
   @ApiPropertyOptional({
     description: 'Short reason why this recommendation matters',
