@@ -5,5 +5,6 @@ export interface EmbeddingRequest {
   declaredDataClass?: DataClass;
   policy?: {
     providers?: string[];
+    cacheTtlMs?: number;
   };
 }
