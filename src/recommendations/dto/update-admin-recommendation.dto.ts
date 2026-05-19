@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsArray, IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { RecommendationStatus } from '../entities/recommendation-status.enum';
 
 export class UpdateAdminRecommendationDto {
@@ -27,4 +27,13 @@ export class UpdateAdminRecommendationDto {
   @IsOptional()
   @IsEnum(RecommendationStatus)
   status?: RecommendationStatus;
+
+  @ApiPropertyOptional({
+    description: 'Prerequisite recommendation IDs',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  dependencyIds?: string[];
 }
