@@ -1,11 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
+import { ServiceType } from '../services/entities/service-type.enum';
 import { RecommendationsService } from './recommendations.service';
 
-describe('RecommendationsService dependency graph', () => {
+describe('RecommendationsService', () => {
   const userRepository = {
     findOne: jest.fn(),
   };
   const serviceRepository = {
+    createQueryBuilder: jest.fn(),
     findOne: jest.fn(),
   };
   const recommendationRepository = {
@@ -24,12 +26,57 @@ describe('RecommendationsService dependency graph', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    userRepository.findOne.mockResolvedValue({ id: 'user-id' });
     service = new RecommendationsService(
       recommendationRepository as never,
       userRepository as never,
       serviceRepository as never,
       orderRepository as never,
     );
+  });
+
+  it('ranks generated recommendations by diagnostics', async () => {
+    serviceRepository.createQueryBuilder.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        {
+          id: 'crm-service-id',
+          type: ServiceType.Service,
+          name: 'CRM audit',
+          description: 'Audit CRM data, statuses and funnel conversion',
+          category: { name: 'CRM' },
+          skills: [],
+          contentSections: [],
+        },
+        {
+          id: 'docs-service-id',
+          type: ServiceType.Document,
+          name: 'Sales documents',
+          description: 'Prepare sales scripts and regulations',
+          category: { name: 'Documents' },
+          skills: [],
+          contentSections: [],
+        },
+      ]),
+    });
+
+    const result = await service.generateForUser({
+      userId: 'user-id',
+      diagnostics: [
+        'Revenue plan is at risk because CRM statuses and funnel conversion are broken',
+      ],
+      persist: false,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      serviceId: 'crm-service-id',
+      diagnosticSignals: expect.arrayContaining([
+        'funnel_conversion',
+        'crm_quality',
+      ]),
+    });
   });
 
   it('rejects self dependency in recommendation graph', async () => {
@@ -43,5 +90,38 @@ describe('RecommendationsService dependency graph', () => {
     ).rejects.toThrow(
       new BadRequestException('Recommendation cannot depend on itself'),
     );
+  });
+
+  it('persists generated recommendations by upsert', async () => {
+    serviceRepository.createQueryBuilder.mockReturnValue({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        {
+          id: 'crm-service-id',
+          type: ServiceType.Service,
+          name: 'CRM audit',
+          description: 'CRM data and funnel conversion audit',
+          category: { name: 'CRM' },
+          skills: [],
+          contentSections: [],
+        },
+      ]),
+    });
+    recommendationRepository.findOne.mockResolvedValue(null);
+
+    const result = await service.generateForUser({
+      userId: 'user-id',
+      diagnostics: ['CRM funnel conversion is leaking revenue'],
+    });
+
+    expect(recommendationRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-id',
+        serviceId: 'crm-service-id',
+      }),
+    );
+    expect(recommendationRepository.save).toHaveBeenCalledTimes(1);
+    expect(result[0].recommendation).toBeDefined();
   });
 });
