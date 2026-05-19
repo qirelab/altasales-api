@@ -89,25 +89,25 @@ export class ServicesService {
     }
 
     const packageQb = this.packageRepository
-      .createQueryBuilder('servicePackage')
-      .leftJoinAndSelect('servicePackage.category', 'category');
+      .createQueryBuilder('sp')
+      .leftJoinAndSelect('sp.category', 'category');
 
     if (query.categoryId) {
-      packageQb.andWhere('servicePackage."categoryId" = :categoryId', { categoryId: query.categoryId });
+      packageQb.andWhere('sp."categoryId" = :categoryId', { categoryId: query.categoryId });
     }
     if (query.name?.trim()) {
-      packageQb.andWhere('servicePackage.name ILIKE :name', {
+      packageQb.andWhere('sp.name ILIKE :name', {
         name: `%${query.name.trim()}%`,
       });
     }
     if (query.dateOrder) {
-      packageQb.orderBy('servicePackage.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
+      packageQb.orderBy('sp.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
     }
     if (query.priceOrder) {
       if (query.dateOrder) {
-        packageQb.addOrderBy('servicePackage.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+        packageQb.addOrderBy('sp.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
       } else {
-        packageQb.orderBy('servicePackage.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+        packageQb.orderBy('sp.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
       }
     }
 
