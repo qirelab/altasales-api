@@ -4,12 +4,16 @@ import {
   GatewayTimeoutException,
   Inject,
   Injectable,
-  Logger,
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { AiMonitoringService } from './ai-monitoring.service';
 import { AiError, isAiError } from './errors/ai-error';
 import { AgentId } from './enums/agent-id.enum';
+import { AiMonitoringEventName } from './enums/ai-monitoring-event-name.enum';
+import { AiMonitoringOperation } from './enums/ai-monitoring-operation.enum';
+import { AiMonitoringStage } from './enums/ai-monitoring-stage.enum';
+import { AiMonitoringStatus } from './enums/ai-monitoring-status.enum';
 import { AnonymizationMode } from './enums/anonymization-mode.enum';
 import { DataClass } from './enums/data-class.enum';
 import { LlmProvider } from './enums/llm-provider.enum';
@@ -19,11 +23,7 @@ import { LlmChatResponse } from './interfaces/llm-chat-response.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
 import { LlmProviderAdapter } from './interfaces/llm-provider-adapter.interface';
 import { AnonymizationResult } from './interfaces/pii-anonymization.interface';
-import {
-  SafeLlmErrorCode,
-  SafeLlmLogMetadata,
-  SafeLlmStatus,
-} from './interfaces/safe-llm-log.interface';
+import { SafeLlmErrorCode } from './interfaces/safe-llm-log.interface';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
 import { LLM_PROVIDER_ADAPTERS } from './providers/llm-provider-registry';
 import type { LlmProviderRegistry } from './providers/llm-provider-registry';
@@ -50,30 +50,34 @@ type SafeException = Error & {
 
 @Injectable()
 export class LlmProxyService {
-  private readonly logger = new Logger(LlmProxyService.name);
-
   constructor(
     private readonly piiAnonymizer: PiiAnonymizerService,
     private readonly mockProvider: MockLlmProvider,
+    private readonly monitoring: AiMonitoringService,
     @Optional()
     @Inject(LLM_PROVIDER_ADAPTERS)
     private readonly providerRegistry?: LlmProviderRegistry,
   ) {}
 
   async chat(request: LlmChatRequest): Promise<LlmChatResponse> {
-    this.validateRequest(request);
-
+    const flowStartedAt = Date.now();
+    let currentStage = AiMonitoringStage.Validation;
+    let task: LlmTask | undefined;
     let effectiveDataClass: DataClass | undefined;
     let anonymizationStats: Record<string, number> | undefined;
     let provider: LlmProviderAdapter | undefined;
-    let fallbackFrom: string | undefined;
-    let fallbackTo: string | undefined;
+    let fallbackUsed = false;
+    let fallbackReasonCode: SafeLlmErrorCode | undefined;
 
     try {
+      this.validateRequest(request);
+      task = request.task;
+
       const declaredDataClass = this.resolveDeclaredDataClass(request);
       const anonymizationMode = this.getAnonymizationMode();
       provider = this.selectProvider(request, 'primary');
 
+      currentStage = AiMonitoringStage.Anonymization;
       const anonymizationResult = await this.resolveAnonymization(
         request.messages,
         declaredDataClass,
@@ -92,6 +96,7 @@ export class LlmProxyService {
 
       this.assertProviderPolicy(effectiveDataClass, provider);
 
+      currentStage = AiMonitoringStage.ProviderCall;
       const providerCallResult = await this.callProviderWithOptionalFallback(
         request,
         provider,
@@ -99,11 +104,14 @@ export class LlmProxyService {
         effectiveDataClass,
       );
       provider = providerCallResult.provider;
-      fallbackFrom = providerCallResult.fallbackFrom;
-      fallbackTo = providerCallResult.fallbackTo;
+      fallbackUsed = providerCallResult.fallbackUsed;
+      fallbackReasonCode = providerCallResult.fallbackReasonCode;
       const providerResponse = providerCallResult.response;
+
+      currentStage = AiMonitoringStage.SafetyScan;
       this.assertProviderResponsePolicy(providerResponse.content);
 
+      currentStage = AiMonitoringStage.Restore;
       const restoredContent = this.restoreProviderResponse(
         providerResponse.content,
         anonymizationResult,
@@ -118,37 +126,60 @@ export class LlmProxyService {
         anonymizationStats,
       };
 
-      this.logSafe({
-        agentId: request.agentId,
-        providerId: response.providerId,
-        modelId: response.modelId,
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiFlowSucceeded,
+        operation: AiMonitoringOperation.LlmChat,
+        stage: AiMonitoringStage.AiFlow,
+        status: AiMonitoringStatus.Success,
+        providerAlias: fallbackUsed ? 'fallback' : 'primary',
+        modelAlias: 'default',
+        providerConfigured: true,
         task: request.task,
+        dataClass: response.dataClass,
         effectiveDataClass: response.dataClass,
         tokensIn: response.usage.tokensIn,
         tokensOut: response.usage.tokensOut,
         costRub: response.usage.costRub,
-        latencyMs: response.usage.latencyMs,
-        status: 'success',
+        latencyMs: Date.now() - flowStartedAt,
         anonymizationStats,
-        fallbackFrom,
-        fallbackTo,
+        fallbackUsed,
+        fallbackReasonCode,
       });
 
       return response;
     } catch (error) {
       const safeError = this.toSafeException(error);
       const errorCode = this.getErrorCode(safeError);
-      this.logSafe({
-        agentId: request.agentId,
-        task: request.task,
-        providerId: provider?.providerId,
-        modelId: provider?.modelId,
+
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiStageFailed,
+        operation: AiMonitoringOperation.LlmChat,
+        stage: currentStage,
+        status: AiMonitoringStatus.Failure,
+        task,
+        dataClass: effectiveDataClass ?? 'unresolved',
         effectiveDataClass: effectiveDataClass ?? 'unresolved',
-        status: this.getStatus(errorCode),
         errorCode,
+        latencyMs: Date.now() - flowStartedAt,
         anonymizationStats,
-        fallbackFrom,
-        fallbackTo,
+        fallbackUsed,
+        fallbackReasonCode,
+        providerConfigured: Boolean(provider),
+      });
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiFlowFailed,
+        operation: AiMonitoringOperation.LlmChat,
+        stage: AiMonitoringStage.AiFlow,
+        status: AiMonitoringStatus.Failure,
+        task,
+        dataClass: effectiveDataClass ?? 'unresolved',
+        effectiveDataClass: effectiveDataClass ?? 'unresolved',
+        errorCode,
+        latencyMs: Date.now() - flowStartedAt,
+        anonymizationStats,
+        fallbackUsed,
+        fallbackReasonCode,
+        providerConfigured: Boolean(provider),
       });
       throw safeError;
     }
@@ -264,7 +295,7 @@ export class LlmProxyService {
         : process.env.LLM_FALLBACK_PROVIDER;
     const modelId =
       role === 'primary'
-        ? process.env.LLM_PRIMARY_MODEL || this.mockProvider.modelId
+        ? process.env.LLM_PRIMARY_MODEL_ALIAS || this.mockProvider.modelId
         : process.env.LLM_FALLBACK_MODEL;
 
     if (!providerId) {
@@ -335,7 +366,7 @@ export class LlmProxyService {
       );
     }
 
-    const allowedModels = this.parseCsv(process.env.LLM_ALLOWED_MODELS);
+    const allowedModels = this.parseCsv(process.env.LLM_ALLOWED_MODEL_ALIASES);
     if (allowedModels.length > 0 && !allowedModels.includes(provider.modelId)) {
       throw this.safePolicyError('AI_MODEL_NOT_ALLOWED', MODEL_POLICY_ERROR);
     }
@@ -362,46 +393,92 @@ export class LlmProxyService {
   ): Promise<{
     provider: LlmProviderAdapter;
     response: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
-    fallbackFrom?: string;
-    fallbackTo?: string;
+    fallbackUsed: boolean;
+    fallbackReasonCode?: SafeLlmErrorCode;
   }> {
     try {
       return {
         provider,
-        response: await this.callProvider(request, provider, messages, effectiveDataClass),
+        response: await this.callProvider(
+          request,
+          provider,
+          messages,
+          effectiveDataClass,
+          'primary',
+        ),
+        fallbackUsed: false,
       };
     } catch (error) {
       if (!this.shouldUseFallback(error)) {
         throw error;
       }
 
-      const fallbackProvider = this.selectProvider(request, 'fallback');
-      this.assertProviderPolicy(effectiveDataClass, fallbackProvider);
-      const fallbackFrom = this.formatProvider(provider);
-      const fallbackTo = this.formatProvider(fallbackProvider);
-      this.logSafe({
-        agentId: request.agentId,
+      const fallbackReasonCode = this.getErrorCode(error);
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiFallbackAttempted,
+        operation: AiMonitoringOperation.LlmChat,
+        stage: AiMonitoringStage.Fallback,
+        status: AiMonitoringStatus.Failure,
         task: request.task,
-        providerId: provider.providerId,
-        modelId: provider.modelId,
+        providerAlias: 'primary',
+        modelAlias: 'default',
+        providerConfigured: true,
+        dataClass: effectiveDataClass,
         effectiveDataClass,
-        status: 'provider_error',
-        errorCode: this.getErrorCode(error),
-        fallbackFrom,
-        fallbackTo,
+        errorCode: fallbackReasonCode,
+        fallbackUsed: true,
+        fallbackReasonCode,
       });
 
-      return {
-        provider: fallbackProvider,
-        response: await this.callProvider(
+      try {
+        const fallbackProvider = this.selectProvider(request, 'fallback');
+        this.assertProviderPolicy(effectiveDataClass, fallbackProvider);
+        const response = await this.callProvider(
           request,
           fallbackProvider,
           messages,
           effectiveDataClass,
-        ),
-        fallbackFrom,
-        fallbackTo,
-      };
+          'fallback',
+        );
+        this.monitoring.log({
+          eventName: AiMonitoringEventName.AiFallbackSucceeded,
+          operation: AiMonitoringOperation.LlmChat,
+          stage: AiMonitoringStage.Fallback,
+          status: AiMonitoringStatus.Success,
+          task: request.task,
+          providerAlias: 'fallback',
+          modelAlias: 'default',
+          providerConfigured: true,
+          dataClass: effectiveDataClass,
+          effectiveDataClass,
+          fallbackUsed: true,
+          fallbackReasonCode,
+        });
+
+        return {
+          provider: fallbackProvider,
+          response,
+          fallbackUsed: true,
+          fallbackReasonCode,
+        };
+      } catch (fallbackError) {
+        this.monitoring.log({
+          eventName: AiMonitoringEventName.AiFallbackFailed,
+          operation: AiMonitoringOperation.LlmChat,
+          stage: AiMonitoringStage.Fallback,
+          status: AiMonitoringStatus.Failure,
+          task: request.task,
+          providerAlias: 'fallback',
+          modelAlias: 'default',
+          providerConfigured: Boolean(process.env.LLM_FALLBACK_PROVIDER),
+          dataClass: effectiveDataClass,
+          effectiveDataClass,
+          errorCode: this.getErrorCode(fallbackError),
+          fallbackUsed: true,
+          fallbackReasonCode,
+        });
+        throw fallbackError;
+      }
     }
   }
 
@@ -410,6 +487,7 @@ export class LlmProxyService {
     provider: LlmProviderAdapter,
     messages: LlmMessage[],
     effectiveDataClass: DataClass,
+    providerAlias: 'primary' | 'fallback',
   ) {
     const timeoutMs = this.getPositiveInteger(
       process.env.LLM_PROVIDER_TIMEOUT_MS,
@@ -436,13 +514,17 @@ export class LlmProxyService {
         backoffBaseMs,
         backoffMaxMs,
         onAttemptFailure: ({ attempt, maxAttempts, error, latencyMs }) =>
-          this.logSafe({
-            agentId: request.agentId,
+          this.monitoring.log({
+            eventName: AiMonitoringEventName.AiRetryAttemptFailed,
+            operation: AiMonitoringOperation.LlmChat,
+            stage: AiMonitoringStage.Retry,
+            status: AiMonitoringStatus.Failure,
             task: request.task,
-            providerId: provider.providerId,
-            modelId: provider.modelId,
+            providerAlias,
+            modelAlias: 'default',
+            providerConfigured: true,
+            dataClass: effectiveDataClass,
             effectiveDataClass,
-            status: this.getStatus(error.code),
             errorCode: error.code,
             attempt,
             maxAttempts,
@@ -600,38 +682,6 @@ export class LlmProxyService {
     return 'provider_error';
   }
 
-  private getStatus(errorCode: SafeLlmErrorCode): SafeLlmStatus {
-    if (
-      errorCode === 'validation_failed' ||
-      errorCode === 'AI_VALIDATION_FAILED' ||
-      errorCode === 'AI_RESTORE_FAILED'
-    ) {
-      return 'validation_error';
-    }
-    if (
-      errorCode === 'provider_error' ||
-      errorCode === 'AI_PROVIDER_TIMEOUT' ||
-      errorCode === 'AI_PROVIDER_RETRY_EXHAUSTED' ||
-      errorCode === 'AI_PROVIDER_UNAVAILABLE' ||
-      errorCode === 'AI_PROVIDER_RATE_LIMITED' ||
-      errorCode === 'AI_PROVIDER_HTTP_5XX' ||
-      errorCode === 'AI_FALLBACK_NOT_AVAILABLE'
-    ) {
-      return 'provider_error';
-    }
-    if (
-      errorCode === 'anonymizer_error' ||
-      errorCode === 'AI_ANONYMIZATION_FAILED'
-    ) {
-      return 'anonymizer_error';
-    }
-    return 'blocked';
-  }
-
-  private logSafe(metadata: SafeLlmLogMetadata): void {
-    this.logger.log(metadata);
-  }
-
   private parseCsv(value: string | undefined): string[] {
     return (value ?? '')
       .split(',')
@@ -646,9 +696,5 @@ export class LlmProxyService {
     }
 
     return parsed;
-  }
-
-  private formatProvider(provider: LlmProviderAdapter): string {
-    return `${provider.providerId}:${provider.modelId}`;
   }
 }

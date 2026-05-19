@@ -6,7 +6,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AiMonitoringService } from './ai-monitoring.service';
 import { AgentId } from './enums/agent-id.enum';
+import { AiMonitoringEventName } from './enums/ai-monitoring-event-name.enum';
+import { AiMonitoringOperation } from './enums/ai-monitoring-operation.enum';
+import { AiMonitoringStage } from './enums/ai-monitoring-stage.enum';
+import { AiMonitoringStatus } from './enums/ai-monitoring-status.enum';
 import { AnonymizationMode } from './enums/anonymization-mode.enum';
 import { DataClass } from './enums/data-class.enum';
 import { LlmProvider } from './enums/llm-provider.enum';
@@ -14,6 +19,7 @@ import { LlmTask } from './enums/llm-task.enum';
 import { AnonymizerProvider } from './interfaces/anonymizer-provider.interface';
 import { LlmChatRequest } from './interfaces/llm-chat-request.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
+import { LlmProviderAdapter } from './interfaces/llm-provider-adapter.interface';
 import { LlmProxyService } from './llm-proxy.service';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
 import { LLM_PROVIDER_ADAPTERS } from './providers/llm-provider-registry';
@@ -24,6 +30,7 @@ describe('LlmProxyService', () => {
   let service: LlmProxyService;
   let provider: MockLlmProvider;
   let fallbackProvider: MockLlmProvider;
+  let openAICompatibleProvider: LlmProviderAdapter;
   let anonymizerProvider: { anonymize: jest.Mock };
   let piiAnonymizer: PiiAnonymizerService;
   let loggerLogSpy: jest.SpyInstance;
@@ -45,7 +52,7 @@ describe('LlmProxyService', () => {
     process.env.LLM_PROVIDER_BACKOFF_MAX_MS = '1';
     process.env.LLM_PROVIDER_TIMEOUT_MS = '10000';
     process.env.LLM_PRIMARY_PROVIDER = LlmProvider.Mock;
-    process.env.LLM_PRIMARY_MODEL = 'mock-llm-v1';
+    process.env.LLM_PRIMARY_MODEL_ALIAS = 'mock-llm-v1';
     process.env.LLM_FALLBACK_ENABLED = 'false';
 
     loggerLogSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
@@ -66,10 +73,20 @@ describe('LlmProxyService', () => {
     Object.defineProperty(fallbackProvider, 'modelId', {
       value: 'mock-fallback-v1',
     });
+    openAICompatibleProvider = {
+      providerId: LlmProvider.OpenAICompatible,
+      modelId: 'chat-default',
+      isExternal: false,
+      chat: jest.fn().mockResolvedValue({
+        content: 'OpenAI-compatible response',
+        usage: usage(),
+      }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LlmProxyService,
+        AiMonitoringService,
         PiiAnonymizerService,
         MockLlmProvider,
         {
@@ -81,6 +98,7 @@ describe('LlmProxyService', () => {
           useFactory: (mockProvider: MockLlmProvider) => [
             mockProvider,
             fallbackProvider,
+            openAICompatibleProvider,
           ],
           inject: [MockLlmProvider],
         },
@@ -328,6 +346,23 @@ describe('LlmProxyService', () => {
     expect(serializedLogs).not.toContain('placeholderMap');
   });
 
+  it('success path logs a safe AI flow monitoring event with latency', async () => {
+    await service.chat(baseRequest);
+
+    expect(loggerLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: AiMonitoringEventName.AiFlowSucceeded,
+        operation: AiMonitoringOperation.LlmChat,
+        stage: AiMonitoringStage.AiFlow,
+        status: AiMonitoringStatus.Success,
+        latencyMs: expect.any(Number),
+        providerAlias: 'primary',
+        modelAlias: 'default',
+        providerConfigured: true,
+      }),
+    );
+  });
+
   it('returns no_pii effective class when anonymizer finds no entities', async () => {
     const response = await service.chat(baseRequest);
 
@@ -405,6 +440,8 @@ describe('LlmProxyService', () => {
 
     const serializedLogs = serializeLogs();
     expect(serializedLogs).toContain('AI_PROVIDER_TIMEOUT');
+    expect(serializedLogs).toContain('AI_FLOW_FAILED');
+    expect(serializedLogs).toContain('AI_STAGE_FAILED');
     expect(serializedLogs).not.toContain('Summarize public information');
   });
 
@@ -572,7 +609,7 @@ describe('LlmProxyService', () => {
     process.env.LLM_FALLBACK_ENABLED = 'true';
     process.env.LLM_FALLBACK_PROVIDER = LlmProvider.Mock;
     process.env.LLM_FALLBACK_MODEL = 'mock-fallback-v1';
-    process.env.LLM_ALLOWED_MODELS = 'mock-llm-v1';
+    process.env.LLM_ALLOWED_MODEL_ALIASES = 'mock-llm-v1';
     jest
       .spyOn(provider, 'chat')
       .mockRejectedValueOnce(new TypeError('primary unavailable'));
@@ -585,13 +622,23 @@ describe('LlmProxyService', () => {
   });
 
   it('blocks unsupported primary provider/model safely', async () => {
-    process.env.LLM_PRIMARY_MODEL = 'missing-model';
+    process.env.LLM_PRIMARY_MODEL_ALIAS = 'missing-model';
     const chatSpy = jest.spyOn(provider, 'chat');
 
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new ForbiddenException('LLM model is not allowed by policy'),
     );
     expect(chatSpy).not.toHaveBeenCalled();
+  });
+
+  it('can select openai_compatible provider by safe aliases', async () => {
+    process.env.LLM_PRIMARY_PROVIDER = LlmProvider.OpenAICompatible;
+    process.env.LLM_PRIMARY_MODEL_ALIAS = 'chat-default';
+
+    const response = await service.chat(baseRequest);
+
+    expect(response.content).toBe('OpenAI-compatible response');
+    expect(openAICompatibleProvider.chat).toHaveBeenCalledTimes(1);
   });
 
   it('safe logs across retry and fallback do not include raw payloads', async () => {
@@ -621,14 +668,41 @@ describe('LlmProxyService', () => {
     });
 
     const serializedLogs = serializeLogs();
-    expect(serializedLogs).toContain('fallbackFrom');
-    expect(serializedLogs).toContain('fallbackTo');
+    expect(serializedLogs).toContain('AI_FALLBACK_ATTEMPTED');
+    expect(serializedLogs).toContain('AI_FALLBACK_SUCCEEDED');
+    expect(serializedLogs).toContain('fallbackUsed');
     expect(serializedLogs).toContain('attempt');
     expect(serializedLogs).not.toContain('https://provider.test');
     expect(serializedLogs).not.toContain('Authorization');
     expect(serializedLogs).not.toContain('secret');
     expect(serializedLogs).not.toContain('Email user@example.com');
     expect(serializedLogs).not.toContain('placeholderMap');
+  });
+
+  it('failure monitoring does not include raw provider error body or endpoint fields', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    jest.spyOn(provider, 'chat').mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'raw provider body https://provider.test Authorization Bearer secret user@example.com',
+        ),
+        { status: 500 },
+      ),
+    );
+
+    await expect(service.chat(baseRequest)).rejects.toThrow(
+      new ServiceUnavailableException('LLM provider is unavailable'),
+    );
+
+    const serializedLogs = serializeLogs();
+    expect(serializedLogs).toContain('AI_PROVIDER_HTTP_5XX');
+    expect(serializedLogs).not.toContain('raw provider body');
+    expect(serializedLogs).not.toContain('https://provider.test');
+    expect(serializedLogs).not.toContain('Authorization');
+    expect(serializedLogs).not.toContain('secret');
+    expect(serializedLogs).not.toContain('user@example.com');
+    expect(serializedLogs).not.toContain('baseUrl');
+    expect(serializedLogs).not.toContain('endpoint');
   });
 
   it('blocks raw PII in provider response before restore', async () => {
@@ -699,12 +773,12 @@ describe('LlmProxyService', () => {
       LLM_PROVIDER_BACKOFF_MAX_MS: process.env.LLM_PROVIDER_BACKOFF_MAX_MS,
       LLM_PROVIDER_TIMEOUT_MS: process.env.LLM_PROVIDER_TIMEOUT_MS,
       LLM_PRIMARY_PROVIDER: process.env.LLM_PRIMARY_PROVIDER,
-      LLM_PRIMARY_MODEL: process.env.LLM_PRIMARY_MODEL,
+      LLM_PRIMARY_MODEL_ALIAS: process.env.LLM_PRIMARY_MODEL_ALIAS,
       LLM_FALLBACK_ENABLED: process.env.LLM_FALLBACK_ENABLED,
       LLM_FALLBACK_PROVIDER: process.env.LLM_FALLBACK_PROVIDER,
       LLM_FALLBACK_MODEL: process.env.LLM_FALLBACK_MODEL,
       LLM_ALLOWED_PROVIDERS: process.env.LLM_ALLOWED_PROVIDERS,
-      LLM_ALLOWED_MODELS: process.env.LLM_ALLOWED_MODELS,
+      LLM_ALLOWED_MODEL_ALIASES: process.env.LLM_ALLOWED_MODEL_ALIASES,
     };
   }
 
