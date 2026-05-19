@@ -11,6 +11,7 @@ import {
 import { Order } from '../../orders/entities/order.entity';
 import { Service } from '../../services/entities/service.entity';
 import { User } from '../../users/entities/user.entity';
+import { RecommendationPriority } from './recommendation-priority.enum';
 import { RecommendationStatus } from './recommendation-status.enum';
 
 @Entity()
@@ -66,6 +67,18 @@ export class Recommendation {
     default: RecommendationStatus.Recommended,
   })
   status: RecommendationStatus;
+
+  @ApiProperty({
+    enum: RecommendationPriority,
+    description: 'Urgency level inferred from client diagnostics',
+    default: RecommendationPriority.Medium,
+  })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: RecommendationPriority.Medium,
+  })
+  priority: RecommendationPriority;
 
   @ApiPropertyOptional({
     description: 'Short AI/diagnostic rationale shown to the client',
