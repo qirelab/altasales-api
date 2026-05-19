@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Payment, PaymentStatus } from './entities/payment.entity';
@@ -46,6 +46,7 @@ export class PaymentService {
     const payment = paymentRepo.create({
       invId,
       orderId: dto.orderId ?? null,
+      orderIds: dto.orderIds ?? null,
       userId: dto.userId ?? null,
       outSum: dto.outSum,
       description: dto.description,
@@ -151,7 +152,16 @@ export class PaymentService {
       payment.status = PaymentStatus.Paid;
       await paymentRepo.save(payment);
 
-      if (payment.orderId != null) {
+      if (payment.orderIds?.length) {
+        await orderRepo.update(
+          { id: In(payment.orderIds) },
+          { status: OrderStatus.Planned },
+        );
+        const order = await orderRepo.findOne({ where: { id: payment.orderIds[0] } });
+        if (order) {
+          await this.cartService.clearAndArchiveActiveCart(order.userId);
+        }
+      } else if (payment.orderId != null) {
         const order = await orderRepo.findOne({ where: { id: payment.orderId } });
         await orderRepo.update(
           { id: payment.orderId },

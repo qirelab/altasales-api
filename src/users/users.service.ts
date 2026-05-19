@@ -172,17 +172,13 @@ export class UsersService {
     const ordersRaw = await this.userRepository.manager
       .getRepository(Order)
       .createQueryBuilder('o')
-      .leftJoin('o.items', 'item')
+      .leftJoin('o.item', 'item')
       .select('o.id', 'orderNumber')
-      .addSelect('COUNT(item.id)', 'positions')
+      .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'positions')
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
       .where('o."userId" = :userId', { userId })
-      .groupBy('o.id')
-      .addGroupBy('o."createdAt"')
-      .addGroupBy('o.amount')
-      .addGroupBy('o.status')
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         orderNumber: string;

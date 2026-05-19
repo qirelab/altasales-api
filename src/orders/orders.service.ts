@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, In, Repository } from 'typeorm';
 import { PaymentService } from '../payment/payment.service';
@@ -44,7 +44,7 @@ export interface OrderDto {
   deadline: Date;
   comments?: string | null;
   contractorChatAccess: boolean;
-  items: OrderItemDto[];
+  item: OrderItemDto | null;
   user?: User;
 }
 
@@ -72,26 +72,29 @@ export class OrdersService {
       comments: order.comments,
       contractorChatAccess: order.contractorChatAccess,
       user: order.user,
-      items: (order.items ?? []).map((item): OrderItemDto => ({
-        id: item.id,
-        orderId: item.orderId,
-        serviceId: item.serviceId,
-        service: item.service,
-        hours: item.hours,
-        amount: item.amount,
-        files: (item.files ?? []).map((file): OrderFileDto => ({
-          id: file.id,
-          name: file.originalName,
-          size: file.size,
-          type: file.mimeType,
-          source: file.source ?? FileSource.CLIENT,
-        })),
-      })),
+      item: order.item
+        ? {
+          id: order.item.id,
+          orderId: order.item.orderId,
+          serviceId: order.item.serviceId,
+          service: order.item.service,
+          hours: order.item.hours,
+          amount: order.item.amount,
+          files: (order.item.files ?? []).map((file): OrderFileDto => ({
+            id: file.id,
+            name: file.originalName,
+            size: file.size,
+            type: file.mimeType,
+            source: file.source ?? FileSource.CLIENT,
+          })),
+        }
+        : null,
     };
   }
 
   async checkout(dto: CheckoutDto, userId: string): Promise<{
     orderId: string;
+    orderIds: string[];
     status: OrderStatus;
     paymentMethod: CheckoutPaymentMethod;
     paymentUrl?: string;
@@ -101,51 +104,65 @@ export class OrdersService {
       throw new BadRequestException('Order must have at least one item');
     }
 
+    const totalAmount = dto.items.reduce((sum, item) => sum + Number(item.amount), 0);
+    if (Math.abs(totalAmount - Number(dto.amount)) > 0.01) {
+      throw new BadRequestException('Order total amount does not match item amounts');
+    }
+
     const paymentMethod = dto.paymentMethod ?? CheckoutPaymentMethod.Robokassa;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const order = this.orderRepository.create({
-        userId,
-        amount: dto.amount,
-        deadline: new Date(dto.deadline),
-        comments: dto.comments ?? undefined,
-        status: OrderStatus.PendingPayment,
-      });
-      await queryRunner.manager.save(Order, order);
+      const createdOrders: Order[] = [];
+      for (const checkoutItem of dto.items) {
+        const order = this.orderRepository.create({
+          userId,
+          amount: checkoutItem.amount,
+          deadline: new Date(dto.deadline),
+          comments: dto.comments ?? undefined,
+          status: OrderStatus.PendingPayment,
+        });
+        await queryRunner.manager.save(Order, order);
 
-      const items = dto.items.map((item) =>
-        this.orderItemRepository.create({
+        const item = this.orderItemRepository.create({
           orderId: order.id,
-          serviceId: item.serviceId,
-          hours: item.hours ?? null,
-          amount: item.amount,
-        }),
-      );
-      await queryRunner.manager.save(OrderItem, items);
+          serviceId: checkoutItem.serviceId,
+          hours: checkoutItem.hours ?? null,
+          amount: checkoutItem.amount,
+        });
+        await queryRunner.manager.save(OrderItem, item);
+        createdOrders.push(order);
+      }
+
+      const orderIds = createdOrders.map((order) => order.id);
+      const primaryOrderId = orderIds[0];
 
       if (paymentMethod === CheckoutPaymentMethod.Balance) {
         await this.balanceService.addToBalance(
           userId,
-          -Number(dto.amount),
+          -totalAmount,
           BalanceTransactionType.OrderPayment,
           {
-            orderId: order.id,
-            description: `Оплата заказа №${order.id} с внутреннего баланса`,
+            orderId: primaryOrderId,
+            description:
+              orderIds.length === 1
+                ? `Оплата заказа №${primaryOrderId} с внутреннего баланса`
+                : `Оплата заказов (${orderIds.length} шт.) с внутреннего баланса`,
           },
           queryRunner.manager,
         );
         await queryRunner.manager.update(
           Order,
-          { id: order.id },
+          { id: In(orderIds) },
           { status: OrderStatus.Planned },
         );
         await this.cartService.clearAndArchiveActiveCart(userId);
         await queryRunner.commitTransaction();
         return {
-          orderId: order.id,
+          orderId: primaryOrderId,
+          orderIds,
           status: OrderStatus.Planned,
           paymentMethod: CheckoutPaymentMethod.Balance,
         };
@@ -153,16 +170,21 @@ export class OrdersService {
 
       const { paymentUrl, params } = await this.paymentService.createWithManager(
         {
-          orderId: order.id,
-          outSum: dto.amount,
-          description: `Оплата заказа №${order.id}`,
+          orderId: primaryOrderId,
+          orderIds,
+          outSum: totalAmount,
+          description:
+            orderIds.length === 1
+              ? `Оплата заказа №${primaryOrderId}`
+              : `Оплата заказов (${orderIds.length} шт.)`,
         },
         queryRunner.manager,
       );
 
       await queryRunner.commitTransaction();
       return {
-        orderId: order.id,
+        orderId: primaryOrderId,
+        orderIds,
         status: OrderStatus.PendingPayment,
         paymentMethod: CheckoutPaymentMethod.Robokassa,
         paymentUrl,
@@ -186,7 +208,7 @@ export class OrdersService {
 
     const [data, total] = await this.orderRepository.findAndCount({
       where,
-      relations: ['items', 'items.service', 'items.files'],
+      relations: ['item', 'item.service', 'item.files'],
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -202,7 +224,7 @@ export class OrdersService {
 
     const baseQb = this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item')
+      .innerJoin('o.item', 'item')
       .innerJoin('item.service', 'service')
       .where('service.type = :contractorType', {
         contractorType: ServiceType.Contractor,
@@ -236,7 +258,7 @@ export class OrdersService {
 
     const data = await this.orderRepository.find({
       where: { id: In(ids) },
-      relations: ['items', 'items.service', 'items.files'],
+      relations: ['item', 'item.service', 'item.files'],
       order: { createdAt: 'DESC' },
     });
 
@@ -284,18 +306,15 @@ export class OrdersService {
 
     const rows = await baseQb
       .clone()
-      .leftJoin('o.items', 'item')
+      .leftJoin('o.item', 'item')
       .select('o.id', 'id')
-      .addSelect('COUNT(item.id)', 'itemsCount')
+      .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
       .addSelect('o."contractorChatAccess"', 'contractorChatAccess')
-      .groupBy('o.id')
-      .addGroupBy('u.name')
-      .addGroupBy('u."lastName"')
       .orderBy('o."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
@@ -330,8 +349,7 @@ export class OrdersService {
   async findOneForAdmin(id: string): Promise<OrderDto> {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['user', 'items', 'items.service', 'items.files'],
-      order: { items: { id: 'ASC' } },
+      relations: ['user', 'item', 'item.service', 'item.files'],
     });
 
     if (!order) {

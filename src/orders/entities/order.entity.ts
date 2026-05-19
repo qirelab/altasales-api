@@ -3,7 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
-  OneToMany,
+  OneToOne,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
@@ -59,6 +59,6 @@ export class Order {
   @Column({ type: 'boolean', default: false })
   contractorChatAccess: boolean;
 
-  @OneToMany(() => OrderItem, (item: OrderItem) => item.order)
-  items: OrderItem[];
+  @OneToOne(() => OrderItem, (item: OrderItem) => item.order)
+  item: OrderItem;
 }

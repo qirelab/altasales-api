@@ -396,17 +396,13 @@ export class ServicesService {
 
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .leftJoin('o.items', 'item')
+      .leftJoin('o.item', 'item')
       .select('o.id', 'id')
-      .addSelect('COALESCE(SUM(item.hours), 0)', 'hours')
+      .addSelect('COALESCE(item.hours, 0)', 'hours')
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
       .where('o."userId" = :userId', { userId })
-      .groupBy('o.id')
-      .addGroupBy('o."createdAt"')
-      .addGroupBy('o.amount')
-      .addGroupBy('o.status')
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
@@ -459,7 +455,7 @@ export class ServicesService {
 
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item')
+      .innerJoin('o.item', 'item')
       .innerJoin('item.service', 'service')
       .select('COUNT(DISTINCT o.id)', 'totalProjects')
       .addSelect(
@@ -482,18 +478,15 @@ export class ServicesService {
 
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item')
+      .innerJoin('o.item', 'item')
       .innerJoin('item.service', 'service')
       .select('o.id', 'id')
-      .addSelect('COALESCE(SUM(item.hours), 0)', 'hours')
+      .addSelect('COALESCE(item.hours, 0)', 'hours')
       .addSelect('o."createdAt"', 'createdAt')
-      .addSelect('COALESCE(SUM(item.amount), 0)', 'amount')
+      .addSelect('item.amount', 'amount')
       .addSelect('o.status', 'status')
       .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
       .andWhere('service."userId" = :userId', { userId })
-      .groupBy('o.id')
-      .addGroupBy('o."createdAt"')
-      .addGroupBy('o.status')
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
@@ -545,7 +538,7 @@ export class ServicesService {
 
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item', 'item."serviceId" = :serviceId', { serviceId: id })
+      .innerJoin('o.item', 'item', 'item."serviceId" = :serviceId', { serviceId: id })
       .select('COUNT(DISTINCT o.id)', 'totalProjects')
       .addSelect(
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
@@ -565,16 +558,12 @@ export class ServicesService {
 
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item', 'item."serviceId" = :serviceId', { serviceId: id })
+      .innerJoin('o.item', 'item', 'item."serviceId" = :serviceId', { serviceId: id })
       .select('o.id', 'id')
-      .addSelect('COUNT(item.id)', 'positions')
+      .addSelect('1', 'positions')
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
-      .groupBy('o.id')
-      .addGroupBy('o."createdAt"')
-      .addGroupBy('o.amount')
-      .addGroupBy('o.status')
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;

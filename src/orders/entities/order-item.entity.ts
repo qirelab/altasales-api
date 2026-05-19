@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   ManyToOne,
+  OneToOne,
   OneToMany,
   JoinColumn,
 } from 'typeorm';
@@ -24,10 +25,10 @@ export class OrderItem {
     example: '550e8400-e29b-41d4-a716-446655440000',
     description: 'Order ID',
   })
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', unique: true })
   orderId: string;
 
-  @ManyToOne(() => Order, (order) => order.items, { onDelete: 'CASCADE' })
+  @OneToOne(() => Order, (order) => order.item, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'orderId' })
   order: Order;
 
