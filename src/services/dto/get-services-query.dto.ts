@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsEnum, IsIn, IsString } from 'class-validator';
+import { IsOptional, IsEnum, IsIn, IsString, IsUUID } from 'class-validator';
 import { ServiceType } from '../entities/service-type.enum';
 
 export class GetServicesQueryDto {
@@ -16,9 +16,13 @@ export class GetServicesQueryDto {
   @IsEnum(ServiceType)
   type?: ServiceType;
 
-  @ApiPropertyOptional({ example: 'Интеграции', description: 'Filter by category' })
+  @ApiPropertyOptional({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Filter by category ID',
+  })
   @IsOptional()
-  category?: string;
+  @IsUUID()
+  categoryId?: string;
 
   @ApiPropertyOptional({ example: 'CRM', description: 'Filter by skill (exact match in skills array)' })
   @IsOptional()
