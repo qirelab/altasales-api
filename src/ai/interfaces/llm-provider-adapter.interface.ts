@@ -6,9 +6,16 @@ export interface LlmProviderResponse {
   usage: LlmUsage;
 }
 
+export interface LlmProviderRequestOptions {
+  signal?: AbortSignal;
+}
+
 export interface LlmProviderAdapter {
   providerId: string;
   modelId: string;
   isExternal?: boolean;
-  chat(messages: LlmMessage[]): Promise<LlmProviderResponse>;
+  chat(
+    messages: LlmMessage[],
+    options?: LlmProviderRequestOptions,
+  ): Promise<LlmProviderResponse>;
 }

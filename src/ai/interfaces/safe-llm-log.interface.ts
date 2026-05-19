@@ -1,6 +1,7 @@
 import { AgentId } from '../enums/agent-id.enum';
 import { DataClass } from '../enums/data-class.enum';
 import { LlmTask } from '../enums/llm-task.enum';
+import { AiErrorCode } from '../errors/ai-error';
 
 export type SafeLlmStatus =
   | 'success'
@@ -13,7 +14,8 @@ export type SafeLlmErrorCode =
   | 'validation_failed'
   | 'policy_blocked'
   | 'provider_error'
-  | 'anonymizer_error';
+  | 'anonymizer_error'
+  | AiErrorCode;
 
 export interface SafeLlmLogMetadata {
   agentId?: AgentId;
@@ -25,6 +27,10 @@ export interface SafeLlmLogMetadata {
   tokensOut?: number;
   costRub?: number;
   latencyMs?: number;
+  attempt?: number;
+  maxAttempts?: number;
+  fallbackFrom?: string;
+  fallbackTo?: string;
   status: SafeLlmStatus;
   errorCode?: SafeLlmErrorCode;
   anonymizationStats?: Record<string, number>;

@@ -121,6 +121,7 @@ describe('PiiAnonymizerService', () => {
     await expect(service.anonymizeMessages(messages)).rejects.toThrow(
       'validation_error',
     );
+    expect(provider.anonymize).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed when message count changes', async () => {
