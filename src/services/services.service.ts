@@ -15,12 +15,15 @@ import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
 import { OrderItem } from '../orders/entities/order-item.entity';
+import { Category } from './entities/category.entity';
 
 @Injectable()
 export class ServicesService {
   constructor(
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(Category)
+    private readonly categoryRepository: Repository<Category>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(User)
@@ -28,6 +31,10 @@ export class ServicesService {
   ) { }
 
   async create(createServiceDto: CreateServiceDto): Promise<Service> {
+    if (createServiceDto.categoryId) {
+      await this.ensureCategoryExists(createServiceDto.categoryId);
+    }
+
     const service = this.serviceRepository.create({
       ...createServiceDto,
       skills: createServiceDto.skills ?? [],
@@ -36,7 +43,9 @@ export class ServicesService {
   }
 
   async findAll(query: GetServicesQueryDto): Promise<Service[]> {
-    const qb = this.serviceRepository.createQueryBuilder('service');
+    const qb = this.serviceRepository
+      .createQueryBuilder('service')
+      .leftJoinAndSelect('service.category', 'category');
 
     if (query.name?.trim()) {
       qb.andWhere('service.name ILIKE :name', {
@@ -46,8 +55,8 @@ export class ServicesService {
     if (query.type) {
       qb.andWhere('service.type = :type', { type: query.type });
     }
-    if (query.category) {
-      qb.andWhere('service.category = :category', { category: query.category });
+    if (query.categoryId) {
+      qb.andWhere('service."categoryId" = :categoryId', { categoryId: query.categoryId });
     }
     if (query.skill) {
       qb.andWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([query.skill]) });
@@ -91,6 +100,7 @@ export class ServicesService {
 
     const baseQb = this.serviceRepository
       .createQueryBuilder('s')
+      .leftJoin('s.category', 'c')
       .where('s.type = :type', { type: ServiceType.Service });
 
     if (search) {
@@ -98,7 +108,7 @@ export class ServicesService {
         new Brackets((qb) => {
           qb
             .where('s.name ILIKE :search', { search: `%${search}%` })
-            .orWhere('s.category ILIKE :search', { search: `%${search}%` })
+            .orWhere('c.name ILIKE :search', { search: `%${search}%` })
             .orWhere('s.description ILIKE :search', { search: `%${search}%` });
         }),
       );
@@ -113,7 +123,7 @@ export class ServicesService {
       .addSelect('s.type', 'type')
       .addSelect('s.name', 'name')
       .addSelect('s.description', 'description')
-      .addSelect('s.category', 'category')
+      .addSelect('c.name', 'category')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
@@ -121,6 +131,7 @@ export class ServicesService {
       .addSelect('s."userId"', 'userId')
       .addSelect('COUNT(oi.id)', 'ordersCount')
       .groupBy('s.id')
+      .addGroupBy('c.name')
       .orderBy('s."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
@@ -129,7 +140,7 @@ export class ServicesService {
         type: string;
         name: string;
         description: string;
-        category: string;
+        category: string | null;
         price: string;
         image: string | null;
         skills: string[] | string;
@@ -144,7 +155,7 @@ export class ServicesService {
         type: row.type as ServiceType,
         name: row.name,
         description: row.description,
-        category: row.category,
+        category: row.category ?? '',
         price: Number(row.price),
         image: row.image,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
@@ -176,7 +187,7 @@ export class ServicesService {
   }
 
   async findOne(id: string): Promise<Service> {
-    const service = await this.serviceRepository.findOne({ where: { id } });
+    const service = await this.serviceRepository.findOne({ where: { id }, relations: ['category'] });
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
@@ -184,6 +195,10 @@ export class ServicesService {
   }
 
   async update(id: string, updateServiceDto: UpdateServiceDto): Promise<Service> {
+    if (updateServiceDto.categoryId) {
+      await this.ensureCategoryExists(updateServiceDto.categoryId);
+    }
+
     const service = await this.findOne(id);
     Object.assign(service, updateServiceDto);
     return await this.serviceRepository.save(service);
@@ -211,7 +226,7 @@ export class ServicesService {
       type: ServiceType.Contractor,
       name: 'Подрядчик',
       description: dto.description,
-      category: ServiceType.Contractor,
+      categoryId: null,
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
@@ -473,6 +488,7 @@ export class ServicesService {
   }> {
     const service = await this.serviceRepository.findOne({
       where: { id, type: ServiceType.Service },
+      relations: ['category'],
     });
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
@@ -584,5 +600,12 @@ export class ServicesService {
       throw new NotFoundException(`Подрядчик с ID ${id} не найден`);
     }
     return contractor;
+  }
+
+  private async ensureCategoryExists(categoryId: string): Promise<void> {
+    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+    if (!category) {
+      throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
+    }
   }
 }

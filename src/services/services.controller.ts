@@ -43,7 +43,7 @@ export class ServicesController {
   @Get()
   @ApiOperation({
     summary: 'Get all services',
-    description: 'Search by name, filter by type and category, sort by price and date (asc/desc)',
+    description: 'Search by name, filter by type and categoryId, sort by price and date (asc/desc)',
   })
   @ApiResponse({ status: 200, description: 'List of services', type: [Service] })
   async findAll(@Query() query: GetServicesQueryDto): Promise<Service[]> {
