@@ -8,4 +8,6 @@ export interface EmbeddingResponse {
   usage: LlmUsage;
   dimensions: number;
   dataClass: DataClass;
+  cacheKey?: string;
+  cacheHit?: boolean;
 }
