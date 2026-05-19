@@ -8,4 +8,6 @@ export interface LlmChatResponse {
   usage: LlmUsage;
   dataClass: DataClass;
   anonymizationStats?: Record<string, number>;
+  cacheKey?: string;
+  cacheHit?: boolean;
 }
