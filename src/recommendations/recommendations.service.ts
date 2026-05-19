@@ -11,6 +11,7 @@ import { Service } from '../services/entities/service.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
+import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { Recommendation } from './entities/recommendation.entity';
@@ -23,7 +24,9 @@ export type UserRecommendationListItem = {
   category: string;
   price: number;
   status: RecommendationStatus;
+  rationale: string | null;
   dependencyIds: string[];
+  diagnosticSignals: string[];
 };
 
 export type AdminRecommendationListItem = {
@@ -32,8 +35,107 @@ export type AdminRecommendationListItem = {
   category: string;
   status: RecommendationStatus;
   price: number;
+  rationale: string | null;
   dependencyIds: string[];
 };
+
+export type GeneratedRecommendationItem = {
+  serviceId: string;
+  serviceName: string;
+  rationale: string;
+  diagnosticSignals: string[];
+  score: number;
+  recommendation?: Recommendation;
+};
+
+type ServiceCandidate = Service & {
+  category?: { name?: string } | null;
+};
+
+type SignalGroup = {
+  signal: string;
+  weight: number;
+  terms: string[];
+};
+
+const SIGNAL_GROUPS: SignalGroup[] = [
+  {
+    signal: 'revenue_risk',
+    weight: 5,
+    terms: [
+      'revenue',
+      'plan',
+      'money',
+      'profit',
+      'risk',
+      'loss',
+      'sales target',
+      'выруч',
+      'прибыл',
+      'потер',
+    ],
+  },
+  {
+    signal: 'funnel_conversion',
+    weight: 4,
+    terms: [
+      'conversion',
+      'funnel',
+      'lead',
+      'deal',
+      'drop-off',
+      'конверс',
+      'воронк',
+      'лид',
+      'сделк',
+    ],
+  },
+  {
+    signal: 'crm_quality',
+    weight: 3,
+    terms: [
+      'crm',
+      'data',
+      'duplicate',
+      'status',
+      'task',
+      'данн',
+      'дубл',
+      'статус',
+      'задач',
+    ],
+  },
+  {
+    signal: 'team_performance',
+    weight: 3,
+    terms: [
+      'manager',
+      'team',
+      'discipline',
+      'kpi',
+      'script',
+      'менедж',
+      'команд',
+      'дисциплин',
+      'скрипт',
+    ],
+  },
+  {
+    signal: 'sales_process',
+    weight: 2,
+    terms: [
+      'process',
+      'training',
+      'document',
+      'control',
+      'регламент',
+      'процесс',
+      'обуч',
+      'документ',
+      'контрол',
+    ],
+  },
+];
 
 @Injectable()
 export class RecommendationsService {
@@ -75,7 +177,9 @@ export class RecommendationsService {
       .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('service.price', 'price')
       .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation.rationale', 'rationale')
       .addSelect('recommendation."dependencyIds"', 'dependencyIds')
+      .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
@@ -96,6 +200,7 @@ export class RecommendationsService {
       .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('recommendation.status', 'status')
       .addSelect('service.price', 'price')
+      .addSelect('recommendation.rationale', 'rationale')
       .addSelect('recommendation."dependencyIds"', 'dependencyIds')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere('service.type IN (:...serviceTypes)', {
@@ -115,7 +220,10 @@ export class RecommendationsService {
       userId: dto.userId,
       serviceId: dto.serviceId,
       status: dto.status ?? RecommendationStatus.Recommended,
+      rationale: dto.rationale ?? null,
       dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
+      diagnosticSignals: this.normalizeSignals(dto.diagnosticSignals ?? []),
+      generatedAt: null,
       orderId: null,
     });
 
@@ -146,11 +254,18 @@ export class RecommendationsService {
     }
 
     if (dto.status) recommendation.status = dto.status;
+    if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
 
     if (dto.dependencyIds) {
       recommendation.dependencyIds = await this.validateDependencyIds(
         recommendation.id,
         dto.dependencyIds,
+      );
+    }
+
+    if (dto.diagnosticSignals) {
+      recommendation.diagnosticSignals = this.normalizeSignals(
+        dto.diagnosticSignals,
       );
     }
 
@@ -168,6 +283,37 @@ export class RecommendationsService {
     );
 
     return this.recommendationRepository.save(recommendation);
+  }
+
+  async generateForUser(
+    dto: GenerateRecommendationsDto,
+  ): Promise<GeneratedRecommendationItem[]> {
+    await this.ensureUserExists(dto.userId);
+
+    const limit = dto.limit ?? 5;
+    const services = await this.findRecommendableServices();
+    const context = this.buildDiagnosticContext(dto);
+    const ranked = services
+      .map((service) => this.scoreService(service, context))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    if (dto.persist === false) {
+      return ranked;
+    }
+
+    const persisted: GeneratedRecommendationItem[] = [];
+
+    for (const item of ranked) {
+      const recommendation = await this.upsertGeneratedRecommendation(
+        dto.userId,
+        item,
+      );
+      persisted.push({ ...item, recommendation });
+    }
+
+    return persisted;
   }
 
   async removeForAdmin(id: string): Promise<void> {
@@ -188,6 +334,77 @@ export class RecommendationsService {
     }
 
     return recommendation;
+  }
+
+  private async findRecommendableServices(): Promise<ServiceCandidate[]> {
+    return this.serviceRepository
+      .createQueryBuilder('service')
+      .leftJoinAndSelect('service.category', 'category')
+      .where('service.type IN (:...serviceTypes)', {
+        serviceTypes: [ServiceType.Service, ServiceType.Document],
+      })
+      .getMany() as Promise<ServiceCandidate[]>;
+  }
+
+  private scoreService(
+    service: ServiceCandidate,
+    context: string,
+  ): GeneratedRecommendationItem {
+    const serviceText = this.normalizeText(
+      [
+        service.name,
+        service.description,
+        service.category?.name,
+        ...(service.skills ?? []),
+        ...(service.contentSections ?? []).map(
+          (section) => `${section.title} ${section.content}`,
+        ),
+      ].join(' '),
+    );
+    const matchedSignals = SIGNAL_GROUPS.filter(
+      (group) =>
+        group.terms.some((term) => context.includes(term)) &&
+        group.terms.some((term) => serviceText.includes(term)),
+    );
+    const score = matchedSignals.reduce((sum, group) => sum + group.weight, 0);
+
+    return {
+      serviceId: service.id,
+      serviceName: service.name,
+      rationale: this.buildRationale(service.name, matchedSignals),
+      diagnosticSignals: matchedSignals.map((group) => group.signal),
+      score,
+    };
+  }
+
+  private async upsertGeneratedRecommendation(
+    userId: string,
+    item: GeneratedRecommendationItem,
+  ): Promise<Recommendation> {
+    const existing = await this.recommendationRepository.findOne({
+      where: { userId, serviceId: item.serviceId },
+    });
+
+    if (existing) {
+      existing.rationale = item.rationale;
+      existing.diagnosticSignals = item.diagnosticSignals;
+      existing.generatedAt = new Date();
+
+      return this.recommendationRepository.save(existing);
+    }
+
+    const recommendation = this.recommendationRepository.create({
+      userId,
+      serviceId: item.serviceId,
+      status: RecommendationStatus.Recommended,
+      rationale: item.rationale,
+      dependencyIds: [],
+      diagnosticSignals: item.diagnosticSignals,
+      generatedAt: new Date(),
+      orderId: null,
+    });
+
+    return this.recommendationRepository.save(recommendation);
   }
 
   private async validateDependencyIds(
@@ -282,6 +499,38 @@ export class RecommendationsService {
         'This service is already recommended to this user',
       );
     }
+  }
+
+  private buildRationale(
+    serviceName: string,
+    matchedSignals: { signal: string }[],
+  ): string {
+    const signalText = matchedSignals.map((group) => group.signal).join(', ');
+
+    return `${serviceName} matched diagnostics (${signalText || 'general fit'}).`;
+  }
+
+  private buildDiagnosticContext(dto: GenerateRecommendationsDto): string {
+    return this.normalizeText(
+      [
+        JSON.stringify(dto.clientProfile ?? {}),
+        ...(dto.diagnostics ?? []),
+      ].join(' '),
+    );
+  }
+
+  private normalizeText(text: string): string {
+    return text.toLowerCase().replace(/ё/g, 'е');
+  }
+
+  private normalizeSignals(signals: string[]): string[] {
+    return Array.from(
+      new Set(
+        signals
+          .map((signal) => signal.trim())
+          .filter((signal) => signal.length > 0),
+      ),
+    );
   }
 
   private uniqueIds(ids: string[]): string[] {
