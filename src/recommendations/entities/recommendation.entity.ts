@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   Column,
   CreateDateColumn,
@@ -7,10 +8,9 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { User } from '../../users/entities/user.entity';
-import { Service } from '../../services/entities/service.entity';
 import { Order } from '../../orders/entities/order.entity';
+import { Service } from '../../services/entities/service.entity';
+import { User } from '../../users/entities/user.entity';
 import { RecommendationStatus } from './recommendation-status.enum';
 
 @Entity()
@@ -66,6 +66,13 @@ export class Recommendation {
     default: RecommendationStatus.Recommended,
   })
   status: RecommendationStatus;
+
+  @ApiProperty({
+    description: 'Recommendation prerequisite IDs from the dependency graph',
+    type: [String],
+  })
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  dependencyIds: string[];
 
   @ApiProperty({ description: 'Recommendation creation date' })
   @CreateDateColumn()
