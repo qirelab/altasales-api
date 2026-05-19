@@ -26,6 +26,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
+import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
 import { UpdateRecommendationDependenciesDto } from './dto/update-recommendation-dependencies.dto';
 import { RecommendationsService } from './recommendations.service';
@@ -42,7 +43,7 @@ export class RecommendationsController {
   @ApiOperation({
     summary: 'Get recommendations assigned to current user',
     description:
-      'Returns recommendations linked to current user with service/document details and dependency graph.',
+      'Returns recommendations linked to current user with service/document details, matching rationale and dependency graph.',
   })
   @ApiResponse({
     status: 200,
@@ -70,6 +71,20 @@ export class RecommendationsController {
     @Param('userId', ParseUUIDPipe) userId: string,
   ) {
     return this.recommendationsService.findAssignedToUserForAdmin(userId);
+  }
+
+  @Post('admin/generate')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Generate client recommendations from diagnostics (admin)',
+  })
+  @ApiResponse({ status: 201, description: 'Recommendations generated' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async generateForAdmin(@Body() dto: GenerateRecommendationsDto) {
+    return this.recommendationsService.generateForUser(dto);
   }
 
   @Post('admin')
