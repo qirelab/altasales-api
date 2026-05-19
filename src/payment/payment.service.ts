@@ -155,7 +155,7 @@ export class PaymentService {
         const order = await orderRepo.findOne({ where: { id: payment.orderId } });
         await orderRepo.update(
           { id: payment.orderId },
-          { status: OrderStatus.InProgress },
+          { status: OrderStatus.Planned },
         );
         if (order) {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
