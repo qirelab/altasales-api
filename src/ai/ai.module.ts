@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiCacheService } from './ai-cache.service';
 import { AiMonitoringService } from './ai-monitoring.service';
 import { EmbeddingProxyService } from './embedding-proxy.service';
 import { LlmProxyService } from './llm-proxy.service';
@@ -14,6 +15,7 @@ import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-com
   providers: [
     LlmProxyService,
     EmbeddingProxyService,
+    AiCacheService,
     AiMonitoringService,
     PiiAnonymizerService,
     MockLlmProvider,
@@ -36,6 +38,6 @@ import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-com
       inject: [OpenAICompatibleEmbeddingProviderAdapter],
     },
   ],
-  exports: [LlmProxyService, EmbeddingProxyService],
+  exports: [LlmProxyService, EmbeddingProxyService, AiCacheService],
 })
 export class AiModule {}
