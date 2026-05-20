@@ -10,6 +10,13 @@ export class CategoriesService {
     private readonly categoryRepository: Repository<Category>,
   ) { }
 
+  async findAll(): Promise<Category[]> {
+    return this.categoryRepository.find({
+      order: { name: 'ASC' },
+      select: ['id', 'name', 'slug'],
+    });
+  }
+
   async findBySlug(slug: string): Promise<Category> {
     const normalizedSlug = slug.trim().toLowerCase();
     const category = await this.categoryRepository.findOne({
