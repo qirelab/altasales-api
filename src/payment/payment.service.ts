@@ -9,6 +9,8 @@ import { RobokassaService } from './robokassa.service';
 import { CartService } from '../cart/cart.service';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 
 @Injectable()
 export class PaymentService {
@@ -133,6 +135,7 @@ export class PaymentService {
     try {
       const paymentRepo = queryRunner.manager.getRepository(Payment);
       const orderRepo = queryRunner.manager.getRepository(Order);
+      const recommendationRepo = queryRunner.manager.getRepository(Recommendation);
 
       const payment = await paymentRepo.findOne({ where: { invId: invIdNum } });
       if (!payment) {
@@ -157,6 +160,12 @@ export class PaymentService {
           { id: In(payment.orderIds) },
           { status: OrderStatus.Planned },
         );
+        await recommendationRepo
+          .createQueryBuilder()
+          .update(Recommendation)
+          .set({ status: RecommendationStatus.Planned })
+          .where('"orderId" IN (:...orderIds)', { orderIds: payment.orderIds })
+          .execute();
         const order = await orderRepo.findOne({ where: { id: payment.orderIds[0] } });
         if (order) {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
@@ -167,6 +176,12 @@ export class PaymentService {
           { id: payment.orderId },
           { status: OrderStatus.Planned },
         );
+        await recommendationRepo
+          .createQueryBuilder()
+          .update(Recommendation)
+          .set({ status: RecommendationStatus.Planned })
+          .where('"orderId" = :orderId', { orderId: payment.orderId })
+          .execute();
         if (order) {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
         }

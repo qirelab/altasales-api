@@ -6,12 +6,13 @@ import { BalanceTransactionsModule } from '../balance-transactions/balance-trans
 import { CartModule } from '../cart/cart.module';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem]),
+    TypeOrmModule.forFeature([Order, OrderItem, Recommendation]),
     PaymentModule,
     AuthModule,
     BalanceTransactionsModule,
