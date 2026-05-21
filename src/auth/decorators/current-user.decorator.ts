@@ -8,6 +8,7 @@ export interface CurrentUserData {
   displayName?: string;
   emailVerified: boolean;
   role: UserRole;
+  notificationsSeenAt?: Date | null;
 }
 
 export const CurrentUser = createParamDecorator(

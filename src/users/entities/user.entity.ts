@@ -1,5 +1,5 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from './user-role.enum';
 
 @Entity()
@@ -46,4 +46,12 @@ export class User {
   @ApiProperty({ example: '40', description: 'ROP project ID for file storage', nullable: true })
   @Column({ type: 'varchar', nullable: true })
   ropProjectId: string | null;
+
+  @ApiPropertyOptional({
+    example: '2026-05-21T10:30:00.000Z',
+    description: 'Timestamp when recommendation notifications were marked as seen',
+    nullable: true,
+  })
+  @Column({ type: 'timestamp', nullable: true })
+  notificationsSeenAt: Date | null;
 }

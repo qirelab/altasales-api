@@ -116,4 +116,54 @@ export class MailService {
       );
     }
   }
+
+  async sendRecommendationsReadyEmail(
+    userEmail: string,
+    userName: string,
+    recommendationsUrl: string,
+  ): Promise<void> {
+    const subject = 'Ваши рекомендации готовы';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #E75E32;">Рекомендации готовы</h2>
+        <p>Здравствуйте, ${userName || 'пользователь'}!</p>
+        <p>Для вас сформированы новые рекомендации. Перейдите по ссылке, чтобы посмотреть их.</p>
+        <p>
+          <a href="${recommendationsUrl}"
+             style="display: inline-block; padding: 12px 24px; background-color: #E75E32; color: white; text-decoration: none; border-radius: 6px;">
+            Открыть рекомендации
+          </a>
+        </p>
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+          Это автоматическое уведомление от AltaSales
+        </p>
+      </div>
+    `;
+
+    try {
+      const { data: result, error } = await this.resend.emails.send({
+        from: this.defaultFrom,
+        to: [userEmail],
+        subject,
+        html,
+      });
+
+      if (error) {
+        this.logger.error(
+          `Failed to send recommendations email to ${userEmail}: ${error.message}`,
+          error,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `Recommendations email sent to ${userEmail} (id: ${result?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send recommendations email to ${userEmail}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
 }
