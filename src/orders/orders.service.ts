@@ -41,7 +41,7 @@ export interface OrderDto {
   createdAt: Date;
   amount: number;
   status: OrderStatus;
-  deadline: Date;
+  deadline: Date | null;
   comments?: string | null;
   contractorChatAccess: boolean;
   item: OrderItemDto | null;
@@ -120,7 +120,6 @@ export class OrdersService {
         const order = this.orderRepository.create({
           userId,
           amount: checkoutItem.amount,
-          deadline: new Date(dto.deadline),
           comments: dto.comments ?? undefined,
           status: OrderStatus.PendingPayment,
         });

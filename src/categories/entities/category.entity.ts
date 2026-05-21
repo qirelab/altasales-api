@@ -17,9 +17,9 @@ export class Category {
   @Column({ type: 'varchar', length: 120, unique: true })
   name: string;
 
-  @ApiPropertyOptional({ example: 'integrations', description: 'Category slug' })
-  @Column({ type: 'varchar', length: 120, unique: true, nullable: true })
-  slug: string | null;
+  @ApiProperty({ example: 'integrations', description: 'Category slug' })
+  @Column({ type: 'varchar', length: 120, unique: true })
+  slug: string;
 
   @ApiPropertyOptional({
     example: 'Категория услуг по интеграциям CRM, телефонии и внешних API',
