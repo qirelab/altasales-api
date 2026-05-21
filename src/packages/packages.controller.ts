@@ -23,17 +23,8 @@ import { PackagesService } from './packages.service';
 
 @ApiTags('packages')
 @Controller('packages')
-@UseGuards(SessionGuard, RolesGuard)
-@Roles(UserRole.ADMIN)
 export class PackagesController {
   constructor(private readonly packagesService: PackagesService) { }
-
-  @Post()
-  @ApiOperation({ summary: 'Create a service package' })
-  @ApiResponse({ status: 201, description: 'Package created', type: ServicePackage })
-  async create(@Body() createPackageDto: CreatePackageDto): Promise<ServicePackage> {
-    return this.packagesService.create(createPackageDto);
-  }
 
   @Get()
   @ApiOperation({ summary: 'Get all service packages' })
@@ -51,7 +42,18 @@ export class PackagesController {
     return this.packagesService.findOne(id);
   }
 
+  @Post()
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Create a service package' })
+  @ApiResponse({ status: 201, description: 'Package created', type: ServicePackage })
+  async create(@Body() createPackageDto: CreatePackageDto): Promise<ServicePackage> {
+    return this.packagesService.create(createPackageDto);
+  }
+
   @Patch(':id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @ApiOperation({ summary: 'Update service package' })
   @ApiParam({ name: 'id', description: 'Package ID' })
   @ApiResponse({ status: 200, description: 'Package updated', type: ServicePackage })
@@ -64,6 +66,8 @@ export class PackagesController {
   }
 
   @Delete(':id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete service package' })
   @ApiParam({ name: 'id', description: 'Package ID' })
