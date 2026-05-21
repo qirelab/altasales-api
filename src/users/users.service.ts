@@ -244,6 +244,7 @@ export class UsersService {
         lastName: user.lastName,
         balance: Number(user.balance),
         role: user.role,
+        notificationsSeenAt: user.notificationsSeenAt,
       },
       stats,
     };

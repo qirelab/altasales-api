@@ -186,6 +186,7 @@ export class AuthController {
       displayName: user.displayName,
       emailVerified: user.emailVerified,
       role: user.role,
+      notificationsSeenAt: user.notificationsSeenAt ?? null,
     };
   }
 
