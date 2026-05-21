@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
-import { PackageType } from '../entities/package-type.enum';
+import { IsArray, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreatePackageDto {
   @ApiProperty({ example: 'CRM Start Pack', description: 'Package name' })
@@ -21,13 +20,9 @@ export class CreatePackageDto {
   @IsString({ each: true })
   tags?: string[];
 
-  @ApiProperty({
-    enum: PackageType,
-    example: PackageType.Economy,
-    description: 'Package tier',
-  })
-  @IsEnum(PackageType)
-  packageType: PackageType;
+  @ApiProperty({ example: 'Silver', description: 'Package tier name (free-form string)' })
+  @IsString()
+  packageType: string;
 
   @ApiProperty({ example: 50000, description: 'Package price' })
   @IsNumber()

@@ -10,7 +10,6 @@ import {
 } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
-import { PackageType } from './package-type.enum';
 import { Category } from '../../categories/entities/category.entity';
 
 @Entity()
@@ -38,13 +37,9 @@ export class ServicePackage {
   @Column({ type: 'json', default: [] })
   tags: string[];
 
-  @ApiProperty({
-    enum: PackageType,
-    example: PackageType.Economy,
-    description: 'Package tier',
-  })
+  @ApiProperty({ example: 'Silver', description: 'Package tier name (free-form string)' })
   @Column({ type: 'varchar', length: 50 })
-  packageType: PackageType;
+  packageType: string;
 
   @ApiProperty({ example: 50000, description: 'Package price' })
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
