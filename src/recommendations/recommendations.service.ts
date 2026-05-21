@@ -24,13 +24,6 @@ export type UserRecommendationListItem = {
   status: RecommendationStatus;
 };
 
-export type AdminRecommendationListItem = {
-  id: string;
-  category: string;
-  status: RecommendationStatus;
-  price: number;
-};
-
 @Injectable()
 export class RecommendationsService {
   constructor(
@@ -78,23 +71,18 @@ export class RecommendationsService {
       .getRawMany<UserRecommendationListItem>();
   }
 
-  async findAssignedToUserForAdmin(
-    userId: string,
-  ): Promise<AdminRecommendationListItem[]> {
+  async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
     return this.recommendationRepository
       .createQueryBuilder('recommendation')
-      .leftJoin('recommendation.service', 'service')
-      .leftJoin('service.category', 'category')
-      .select('recommendation.id', 'id')
-      .addSelect(`COALESCE(category.name, '')`, 'category')
-      .addSelect('recommendation.status', 'status')
-      .addSelect('service.price', 'price')
+      .leftJoinAndSelect('recommendation.service', 'service')
+      .leftJoinAndSelect('service.category', 'category')
+      .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
       })
       .orderBy('recommendation."createdAt"', 'DESC')
-      .getRawMany<AdminRecommendationListItem>();
+      .getMany();
   }
 
   async createForAdmin(dto: CreateAdminRecommendationDto): Promise<Recommendation> {
