@@ -33,28 +33,28 @@ export class CartController {
   }
 
   @Post('items')
-  @ApiOperation({ summary: 'Add service to current user cart' })
+  @ApiOperation({ summary: 'Add service or package to current user cart' })
   addItem(@CurrentUser() user: CurrentUserData, @Body() dto: AddCartItemDto) {
     return this.cartService.addItem(user.id, dto);
   }
 
-  @Patch('items/:serviceId')
-  @ApiOperation({ summary: 'Update cart item quantity by service ID' })
+  @Patch('items/:itemId')
+  @ApiOperation({ summary: 'Update cart item quantity by cart item ID' })
   updateItemQuantity(
     @CurrentUser() user: CurrentUserData,
-    @Param('serviceId', ParseUUIDPipe) serviceId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateCartItemDto,
   ) {
-    return this.cartService.updateItemQuantity(user.id, serviceId, dto);
+    return this.cartService.updateItemQuantity(user.id, itemId, dto);
   }
 
-  @Delete('items/:serviceId')
-  @ApiOperation({ summary: 'Remove cart item by service ID' })
+  @Delete('items/:itemId')
+  @ApiOperation({ summary: 'Remove cart item by cart item ID' })
   removeItem(
     @CurrentUser() user: CurrentUserData,
-    @Param('serviceId', ParseUUIDPipe) serviceId: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
   ) {
-    return this.cartService.removeItem(user.id, serviceId);
+    return this.cartService.removeItem(user.id, itemId);
   }
 
   @Delete()
