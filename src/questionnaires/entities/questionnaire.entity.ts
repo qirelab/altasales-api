@@ -8,6 +8,8 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export type SalesDirection = 'B2B' | 'B2C' | 'B2G' | 'B2B2C' | 'C2C' | 'B2P' | 'D2C';
 
+export type LeadGenerationType = 'inbound' | 'outbound';
+
 export interface QuestionnaireComponents {
   crm: boolean;
   telephony: boolean;
@@ -29,6 +31,7 @@ export interface QuestionnaireAnswers {
   phone: string;
   companyName: string;
   salesDirection: SalesDirection[];
+  leadGenerationTypes?: LeadGenerationType[];
   industry: string;
   product: string;
   website?: string;
