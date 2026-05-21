@@ -1,11 +1,11 @@
 import { DataClass } from '../enums/data-class.enum';
 import { LlmUsage } from './llm-usage.interface';
 
-export interface LlmChatResponse {
+export interface EmbeddingResponse {
   providerId: string;
   modelId: string;
-  content: string;
+  vectors: number[][];
   usage: LlmUsage;
+  dimensions: number;
   dataClass: DataClass;
-  anonymizationStats?: Record<string, number>;
 }
