@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { PaymentService } from '../payment/payment.service';
+import { Service } from '../services/entities/service.entity';
 import { User } from '../users/entities/user.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { FileSource } from '../files/entities/file.entity';
@@ -31,8 +33,10 @@ export interface OrderFileDto {
 export interface OrderItemDto {
   id: string;
   orderId: string;
-  serviceId: string;
-  service: OrderItem['service'];
+  serviceId: string | null;
+  service: OrderItem['service'] | null;
+  packageId: string | null;
+  package: OrderItem['package'] | null;
   hours: number | null;
   amount: number;
   files: OrderFileDto[];
@@ -58,6 +62,10 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(Service)
+    private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(ServicePackage)
+    private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Recommendation)
     private readonly recommendationRepository: Repository<Recommendation>,
     private readonly paymentService: PaymentService,
@@ -120,6 +128,8 @@ export class OrdersService {
           orderId: order.item.orderId,
           serviceId: order.item.serviceId,
           service: order.item.service,
+          packageId: order.item.packageId,
+          package: order.item.package,
           hours: order.item.hours,
           amount: order.item.amount,
           files: (order.item.files ?? []).map((file): OrderFileDto => ({
@@ -146,11 +156,6 @@ export class OrdersService {
       throw new BadRequestException('Order must have at least one item');
     }
 
-    const totalAmount = dto.items.reduce((sum, item) => sum + Number(item.amount), 0);
-    if (Math.abs(totalAmount - Number(dto.amount)) > 0.01) {
-      throw new BadRequestException('Order total amount does not match item amounts');
-    }
-
     const paymentMethod = dto.paymentMethod ?? CheckoutPaymentMethod.Robokassa;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -158,10 +163,36 @@ export class OrdersService {
 
     try {
       const createdOrders: Order[] = [];
+      let totalAmount = 0;
       for (const checkoutItem of dto.items) {
+        const hasService = Boolean(checkoutItem.serviceId);
+        const hasPackage = Boolean(checkoutItem.packageId);
+        if (hasService === hasPackage) {
+          throw new BadRequestException('Exactly one of serviceId or packageId is required for each item');
+        }
+
+        let resolvedAmount = Number(checkoutItem.amount);
+        if (checkoutItem.serviceId) {
+          const service = await this.serviceRepository.findOne({
+            where: { id: checkoutItem.serviceId },
+          });
+          if (!service) {
+            throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
+          }
+        }
+        if (checkoutItem.packageId) {
+          const servicePackage = await this.packageRepository.findOne({
+            where: { id: checkoutItem.packageId },
+          });
+          if (!servicePackage) {
+            throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
+          }
+          resolvedAmount = Number(servicePackage.price);
+        }
+
         const order = this.orderRepository.create({
           userId,
-          amount: checkoutItem.amount,
+          amount: resolvedAmount,
           comments: dto.comments ?? undefined,
           status: OrderStatus.PendingPayment,
         });
@@ -169,13 +200,21 @@ export class OrdersService {
 
         const item = this.orderItemRepository.create({
           orderId: order.id,
-          serviceId: checkoutItem.serviceId,
+          serviceId: checkoutItem.serviceId ?? null,
+          packageId: checkoutItem.packageId ?? null,
           hours: checkoutItem.hours ?? null,
-          amount: checkoutItem.amount,
+          amount: resolvedAmount,
         });
         await queryRunner.manager.save(OrderItem, item);
-        await this.syncRecommendationForOrder(order, checkoutItem.serviceId, queryRunner.manager);
+        if (checkoutItem.serviceId) {
+          await this.syncRecommendationForOrder(order, checkoutItem.serviceId, queryRunner.manager);
+        }
+        totalAmount += resolvedAmount;
         createdOrders.push(order);
+      }
+
+      if (Math.abs(totalAmount - Number(dto.amount)) > 0.01) {
+        throw new BadRequestException('Order total amount does not match item amounts');
       }
 
       const orderIds = createdOrders.map((order) => order.id);
@@ -250,7 +289,7 @@ export class OrdersService {
 
     const [data, total] = await this.orderRepository.findAndCount({
       where,
-      relations: ['item', 'item.service', 'item.files'],
+      relations: ['item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -300,7 +339,7 @@ export class OrdersService {
 
     const data = await this.orderRepository.find({
       where: { id: In(ids) },
-      relations: ['item', 'item.service', 'item.files'],
+      relations: ['item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
       order: { createdAt: 'DESC' },
     });
 
@@ -391,7 +430,7 @@ export class OrdersService {
   async findOneForAdmin(id: string): Promise<OrderDto> {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['user', 'item', 'item.service', 'item.files'],
+      relations: ['user', 'item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
     });
 
     if (!order) {
