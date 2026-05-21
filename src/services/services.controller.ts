@@ -44,7 +44,7 @@ export class ServicesController {
   @Get()
   @ApiOperation({
     summary: 'Get all services',
-    description: 'Returns service packages and services separately; by categoryId also returns category content with FAQ',
+    description: 'Returns packages/services; filters by categoryIds; category content is returned only for a single selected category',
   })
   @ApiResponse({ status: 200, description: 'Packages and services list with optional category content' })
   async findAll(@Query() query: GetServicesQueryDto): Promise<{
