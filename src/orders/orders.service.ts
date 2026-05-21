@@ -11,6 +11,7 @@ import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
 import { CartService } from '../cart/cart.service';
@@ -248,6 +249,16 @@ export class OrdersService {
     }
 
     order.contractorChatAccess = dto.contractorChatAccess;
+    return this.orderRepository.save(order);
+  }
+
+  async updateStatusForAdmin(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException(`Order with id ${id} not found`);
+    }
+
+    order.status = dto.status;
     return this.orderRepository.save(order);
   }
 
