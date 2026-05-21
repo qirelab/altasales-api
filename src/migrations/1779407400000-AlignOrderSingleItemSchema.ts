@@ -70,10 +70,17 @@ export class AlignOrderSingleItemSchema1779407400000 implements MigrationInterfa
         FROM "order_item"
         GROUP BY "orderId"
       ),
-      keeper AS (
-        SELECT MIN(id) AS id, "orderId"
+      ranked AS (
+        SELECT
+          id,
+          "orderId",
+          ROW_NUMBER() OVER (PARTITION BY "orderId" ORDER BY id) AS rn
         FROM "order_item"
-        GROUP BY "orderId"
+      ),
+      keeper AS (
+        SELECT id, "orderId"
+        FROM ranked
+        WHERE rn = 1
       )
       UPDATE "order_item" oi
       SET
