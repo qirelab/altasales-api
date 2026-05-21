@@ -34,6 +34,14 @@ export class Payment {
   orderId: string | null;
 
   @ApiProperty({
+    description: 'Order IDs linked to this payment (batch checkout)',
+    type: [String],
+    required: false,
+  })
+  @Column({ type: 'json', nullable: true })
+  orderIds: string[] | null;
+
+  @ApiProperty({
     example: '550e8400-e29b-41d4-a716-446655440000',
     description: 'User ID для пополнения баланса',
     nullable: true,
