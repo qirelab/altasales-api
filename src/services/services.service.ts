@@ -59,6 +59,8 @@ export class ServicesService {
       }>;
     } | null;
   }> {
+    const categoryIds = query.categoryIds ?? [];
+
     const qb = this.serviceRepository
       .createQueryBuilder('service')
       .leftJoinAndSelect('service.category', 'category');
@@ -71,8 +73,8 @@ export class ServicesService {
     if (query.type) {
       qb.andWhere('service.type = :type', { type: query.type });
     }
-    if (query.categoryId) {
-      qb.andWhere('service."categoryId" = :categoryId', { categoryId: query.categoryId });
+    if (categoryIds.length > 0) {
+      qb.andWhere('service."categoryId" IN (:...categoryIds)', { categoryIds });
     }
     if (query.skill) {
       qb.andWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([query.skill]) });
@@ -92,8 +94,8 @@ export class ServicesService {
       .createQueryBuilder('sp')
       .leftJoinAndSelect('sp.category', 'category');
 
-    if (query.categoryId) {
-      packageQb.andWhere('sp."categoryId" = :categoryId', { categoryId: query.categoryId });
+    if (categoryIds.length > 0) {
+      packageQb.andWhere('sp."categoryId" IN (:...categoryIds)', { categoryIds });
     }
     if (query.name?.trim()) {
       packageQb.andWhere('sp.name ILIKE :name', {
@@ -114,7 +116,7 @@ export class ServicesService {
     const [services, packages, categoryContent] = await Promise.all([
       qb.getMany(),
       query.type && query.type !== ServiceType.Service ? Promise.resolve([]) : packageQb.getMany(),
-      this.getCategoryContentForFilter(query.categoryId),
+      this.getCategoryContentForFilter(categoryIds),
     ]);
 
     return {
@@ -647,7 +649,7 @@ export class ServicesService {
     }
   }
 
-  private async getCategoryContentForFilter(categoryId?: string): Promise<{
+  private async getCategoryContentForFilter(categoryIds: string[]): Promise<{
     id: string;
     name: string;
     description: string | null;
@@ -657,10 +659,11 @@ export class ServicesService {
       answer: string;
     }>;
   } | null> {
-    if (!categoryId) {
+    if (categoryIds.length !== 1) {
       return null;
     }
 
+    const [categoryId] = categoryIds;
     const category = await this.categoryRepository.findOne({
       where: { id: categoryId },
       relations: ['faqs'],
