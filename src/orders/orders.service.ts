@@ -48,7 +48,6 @@ export class OrdersService {
       const order = this.orderRepository.create({
         userId,
         amount: dto.amount,
-        deadline: new Date(dto.deadline),
         comments: dto.comments ?? undefined,
         status: OrderStatus.PendingPayment,
       });

@@ -6,7 +6,6 @@ import {
   ValidateNested,
   Min,
   IsOptional,
-  IsDateString,
   IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -18,10 +17,6 @@ export class CheckoutDto {
   @IsNumber()
   @Min(0.01)
   amount: number;
-
-  @ApiProperty({ example: '2025-03-01T00:00:00.000Z', description: 'Desired deadline (ISO)' })
-  @IsDateString()
-  deadline: string;
 
   @ApiPropertyOptional({ example: 'Нужна интеграция с AmoCRM', description: 'Comment' })
   @IsOptional()
