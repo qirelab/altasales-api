@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, In, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
 import { PaymentService } from '../payment/payment.service';
 import { User } from '../users/entities/user.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
@@ -17,6 +17,8 @@ import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
 import { CartService } from '../cart/cart.service';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 
 export interface OrderFileDto {
   id: string;
@@ -56,11 +58,50 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(Recommendation)
+    private readonly recommendationRepository: Repository<Recommendation>,
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
     private readonly balanceService: BalanceService,
     private readonly cartService: CartService,
   ) { }
+
+  private mapOrderStatusToRecommendationStatus(status: OrderStatus): RecommendationStatus {
+    switch (status) {
+      case OrderStatus.InProgress:
+        return RecommendationStatus.InProgress;
+      case OrderStatus.Completed:
+        return RecommendationStatus.Completed;
+      case OrderStatus.Cancelled:
+        return RecommendationStatus.Recommended;
+      case OrderStatus.PendingPayment:
+      case OrderStatus.Planned:
+      default:
+        return RecommendationStatus.Planned;
+    }
+  }
+
+  private async syncRecommendationForOrder(
+    order: Pick<Order, 'id' | 'userId' | 'status'>,
+    serviceId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const recommendationRepo = manager
+      ? manager.getRepository(Recommendation)
+      : this.recommendationRepository;
+
+    const recommendation = await recommendationRepo.findOne({
+      where: { userId: order.userId, serviceId },
+    });
+
+    if (!recommendation) {
+      return;
+    }
+
+    recommendation.status = this.mapOrderStatusToRecommendationStatus(order.status);
+    recommendation.orderId = order.status === OrderStatus.Cancelled ? null : order.id;
+    await recommendationRepo.save(recommendation);
+  }
 
   private transformOrderFiles(order: Order): OrderDto {
     return {
@@ -133,6 +174,7 @@ export class OrdersService {
           amount: checkoutItem.amount,
         });
         await queryRunner.manager.save(OrderItem, item);
+        await this.syncRecommendationForOrder(order, checkoutItem.serviceId, queryRunner.manager);
         createdOrders.push(order);
       }
 
@@ -382,13 +424,20 @@ export class OrdersService {
   }
 
   async updateStatusForAdmin(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
-    const order = await this.orderRepository.findOne({ where: { id } });
+    const order = await this.orderRepository.findOne({
+      where: { id },
+      relations: ['item'],
+    });
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
 
     order.status = dto.status;
-    return this.orderRepository.save(order);
+    const savedOrder = await this.orderRepository.save(order);
+    if (order.item?.serviceId) {
+      await this.syncRecommendationForOrder(savedOrder, order.item.serviceId);
+    }
+    return savedOrder;
   }
 
   async getOrderCountsByUserId(userId: string): Promise<{
