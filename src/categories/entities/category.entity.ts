@@ -18,7 +18,7 @@ export class Category {
   name: string;
 
   @ApiProperty({ example: 'integrations', description: 'Category slug' })
-  @Column({ type: 'varchar', length: 120, unique: true, nullable: true })
+  @Column({ type: 'varchar', length: 120, unique: true })
   slug: string;
 
   @ApiPropertyOptional({
