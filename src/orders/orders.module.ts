@@ -8,13 +8,14 @@ import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderItemSubItem } from './entities/order-item-sub-item.entity';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, Recommendation, Service, ServicePackage]),
+    TypeOrmModule.forFeature([Order, OrderItem, OrderItemSubItem, Recommendation, Service, ServicePackage]),
     PaymentModule,
     AuthModule,
     BalanceTransactionsModule,
