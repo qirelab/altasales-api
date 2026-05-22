@@ -111,6 +111,14 @@ export class PackagesService {
 
   async remove(id: string): Promise<void> {
     const servicePackage = await this.findOne(id);
+    const referencingOrderItems = await this.orderItemRepository.count({
+      where: { packageId: id },
+    });
+    if (referencingOrderItems > 0) {
+      throw new ConflictException(
+        'Нельзя удалить пакет, который используется в заказах. Удалите или измените связанные заказы.',
+      );
+    }
     await this.packageRepository.remove(servicePackage);
   }
 
@@ -204,7 +212,7 @@ export class PackagesService {
       status: row.status,
     }));
 
-    const totalItemsAmount = servicePackage.services.reduce(
+    const totalItemsAmount = (servicePackage.services ?? []).reduce(
       (sum, service) => sum + Number(service.price),
       0,
     );
