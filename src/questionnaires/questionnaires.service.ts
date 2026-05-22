@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -6,6 +6,7 @@ import {
   type UserRecommendationListItem,
 } from '../recommendations/recommendations.service';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
+import { UpdateQuestionnaireAnswersDto } from './dto/update-questionnaire-answers.dto';
 import { Questionnaire } from './entities/questionnaire.entity';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
@@ -34,6 +35,28 @@ export class QuestionnairesService {
     });
 
     return saved;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private mergeAnswers(
+    current: Record<string, unknown>,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = { ...current };
+
+    Object.entries(patch).forEach(([key, patchValue]) => {
+      const currentValue = result[key];
+      if (this.isPlainObject(currentValue) && this.isPlainObject(patchValue)) {
+        result[key] = this.mergeAnswers(currentValue, patchValue);
+        return;
+      }
+      result[key] = patchValue;
+    });
+
+    return result;
   }
 
   private async notifyAdmins(
@@ -85,5 +108,22 @@ export class QuestionnairesService {
       questionnaire,
       recommendations,
     };
+  }
+
+  async updateAnswersForAdmin(
+    id: string,
+    dto: UpdateQuestionnaireAnswersDto,
+  ): Promise<Questionnaire> {
+    const questionnaire = await this.repo.findOne({ where: { id } });
+    if (!questionnaire) {
+      throw new NotFoundException(`Questionnaire with id ${id} not found`);
+    }
+
+    questionnaire.answers = this.mergeAnswers(
+      questionnaire.answers as unknown as Record<string, unknown>,
+      dto as unknown as Record<string, unknown>,
+    ) as unknown as Questionnaire['answers'];
+
+    return this.repo.save(questionnaire);
   }
 }
