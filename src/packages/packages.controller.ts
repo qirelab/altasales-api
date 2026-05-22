@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -17,6 +18,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreatePackageDto } from './dto/create-package.dto';
+import { GetAdminPackagesQueryDto } from './dto/get-admin-packages-query.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
 import { PackagesService } from './packages.service';
@@ -25,6 +27,61 @@ import { PackagesService } from './packages.service';
 @Controller('packages')
 export class PackagesController {
   constructor(private readonly packagesService: PackagesService) { }
+
+  @Get('admin')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get packages list for admin (paginated, with search and orders count)' })
+  @ApiResponse({ status: 200, description: 'Paginated packages list with orders count' })
+  async findAllForAdmin(@Query() query: GetAdminPackagesQueryDto) {
+    return this.packagesService.findAllPackagesForAdmin(query);
+  }
+
+  @Get('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Get package by ID for admin with orders count and related orders' })
+  @ApiParam({ name: 'id', description: 'Package ID' })
+  @ApiResponse({ status: 200, description: 'Package found with stats and orders' })
+  @ApiResponse({ status: 404, description: 'Package not found' })
+  async findOneForAdmin(@Param('id', ParseUUIDPipe) id: string) {
+    return this.packagesService.findOnePackageForAdmin(id);
+  }
+
+  @Post('admin')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Create a service package (admin only)' })
+  @ApiResponse({ status: 201, description: 'Package created', type: ServicePackage })
+  async createForAdmin(@Body() createPackageDto: CreatePackageDto): Promise<ServicePackage> {
+    return this.packagesService.create(createPackageDto);
+  }
+
+  @Patch('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update service package (admin only)' })
+  @ApiParam({ name: 'id', description: 'Package ID' })
+  @ApiResponse({ status: 200, description: 'Package updated', type: ServicePackage })
+  @ApiResponse({ status: 404, description: 'Package not found' })
+  async updateForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updatePackageDto: UpdatePackageDto,
+  ): Promise<ServicePackage> {
+    return this.packagesService.update(id, updatePackageDto);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete service package (admin only)' })
+  @ApiParam({ name: 'id', description: 'Package ID' })
+  @ApiResponse({ status: 204, description: 'Package deleted' })
+  @ApiResponse({ status: 404, description: 'Package not found' })
+  async removeForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    return this.packagesService.remove(id);
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all service packages' })
@@ -40,40 +97,5 @@ export class PackagesController {
   @ApiResponse({ status: 404, description: 'Package not found' })
   async findOne(@Param('id', ParseUUIDPipe) id: string): Promise<ServicePackage> {
     return this.packagesService.findOne(id);
-  }
-
-  @Post()
-  @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Create a service package' })
-  @ApiResponse({ status: 201, description: 'Package created', type: ServicePackage })
-  async create(@Body() createPackageDto: CreatePackageDto): Promise<ServicePackage> {
-    return this.packagesService.create(createPackageDto);
-  }
-
-  @Patch(':id')
-  @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Update service package' })
-  @ApiParam({ name: 'id', description: 'Package ID' })
-  @ApiResponse({ status: 200, description: 'Package updated', type: ServicePackage })
-  @ApiResponse({ status: 404, description: 'Package not found' })
-  async update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() updatePackageDto: UpdatePackageDto,
-  ): Promise<ServicePackage> {
-    return this.packagesService.update(id, updatePackageDto);
-  }
-
-  @Delete(':id')
-  @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete service package' })
-  @ApiParam({ name: 'id', description: 'Package ID' })
-  @ApiResponse({ status: 204, description: 'Package deleted' })
-  @ApiResponse({ status: 404, description: 'Package not found' })
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.packagesService.remove(id);
   }
 }
