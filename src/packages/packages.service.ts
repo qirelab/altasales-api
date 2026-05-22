@@ -182,7 +182,12 @@ export class PackagesService {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
-    const ordersCount = await this.orderItemRepository.count({ where: { packageId: id } });
+    const ordersCount = await this.orderItemRepository
+      .createQueryBuilder('oi')
+      .select('COUNT(DISTINCT oi."orderId")', 'count')
+      .where('oi."packageId" = :packageId', { packageId: id })
+      .getRawOne<{ count: string }>()
+      .then((row) => Number(row?.count ?? 0));
 
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
