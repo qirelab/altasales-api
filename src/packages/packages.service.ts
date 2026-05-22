@@ -133,7 +133,8 @@ export class PackagesService {
 
     const qb = this.packageRepository
       .createQueryBuilder('p')
-      .leftJoinAndSelect('p.category', 'c');
+      .leftJoinAndSelect('p.category', 'c')
+      .leftJoinAndSelect('p.services', 's');
 
     if (search) {
       qb.where(
@@ -174,7 +175,7 @@ export class PackagesService {
   }> {
     const servicePackage = await this.packageRepository.findOne({
       where: { id },
-      relations: ['category'],
+      relations: ['category', 'services', 'services.category'],
     });
 
     if (!servicePackage) {
