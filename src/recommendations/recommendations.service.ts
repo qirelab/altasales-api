@@ -26,6 +26,7 @@ export type UserRecommendationListItem = {
   category: string;
   price: number;
   status: RecommendationStatus;
+  createdAt: Date;
 };
 
 @Injectable()
@@ -72,6 +73,7 @@ export class RecommendationsService {
       .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('service.price', 'price')
       .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
