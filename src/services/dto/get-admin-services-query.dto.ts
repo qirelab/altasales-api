@@ -5,7 +5,7 @@ import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 export class GetAdminServicesQueryDto {
   @ApiPropertyOptional({
     example: 'crm',
-    description: 'Search by service name, category or description',
+    description: 'Search by service name, category name or description',
   })
   @IsOptional()
   @IsString()

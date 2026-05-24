@@ -414,7 +414,7 @@ export class ChatService {
 
     const matchedContractor = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item')
+      .innerJoin('o.item', 'item')
       .innerJoin('item.service', 'service')
       .where('o.id = :orderId', { orderId })
       .andWhere('service.type = :contractorType', {

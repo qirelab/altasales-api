@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNumber, IsString, IsOptional, Min } from 'class-validator';
+import { IsArray, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreatePaymentDto {
   @ApiProperty({ example: 990.5, description: 'Payment amount (OutSum)' })
@@ -24,6 +24,16 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   orderId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Order IDs to link payment to (batch checkout)',
+    example: ['550e8400-e29b-41d4-a716-446655440000'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  orderIds?: string[];
 
   @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',

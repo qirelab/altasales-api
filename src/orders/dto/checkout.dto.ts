@@ -1,13 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsNumber,
-  IsString,
+  ArrayMinSize,
   IsArray,
-  ValidateNested,
-  Min,
-  IsOptional,
-  IsDateString,
   IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CheckoutItemDto } from './checkout-item.dto';
@@ -19,17 +19,14 @@ export class CheckoutDto {
   @Min(0.01)
   amount: number;
 
-  @ApiProperty({ example: '2025-03-01T00:00:00.000Z', description: 'Desired deadline (ISO)' })
-  @IsDateString()
-  deadline: string;
-
   @ApiPropertyOptional({ example: 'Нужна интеграция с AmoCRM', description: 'Comment' })
   @IsOptional()
   @IsString()
   comments?: string;
 
-  @ApiProperty({ type: [CheckoutItemDto], description: 'Order items' })
+  @ApiProperty({ type: [CheckoutItemDto], description: 'Order items (each item becomes a separate order)' })
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CheckoutItemDto)
   items: CheckoutItemDto[];

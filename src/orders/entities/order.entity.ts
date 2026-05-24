@@ -3,7 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
-  OneToMany,
+  OneToOne,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
@@ -44,9 +44,13 @@ export class Order {
   @Column({ type: 'varchar', length: 20, default: OrderStatus.InProgress })
   status: OrderStatus;
 
-  @ApiProperty({ example: '2025-02-04T12:00:00Z', description: 'Order deadline' })
-  @Column({ type: 'timestamp' })
-  deadline: Date;
+  @ApiProperty({
+    example: '2025-02-04T12:00:00Z',
+    description: 'Order deadline',
+    nullable: true,
+  })
+  @Column({ type: 'timestamp', nullable: true })
+  deadline: Date | null;
 
   @ApiProperty({ example: 'Comments', description: 'Order comments' })
   @Column({ type: 'text' })
@@ -59,6 +63,6 @@ export class Order {
   @Column({ type: 'boolean', default: false })
   contractorChatAccess: boolean;
 
-  @OneToMany(() => OrderItem, (item: OrderItem) => item.order)
-  items: OrderItem[];
+  @OneToOne(() => OrderItem, (item: OrderItem) => item.order)
+  item: OrderItem;
 }

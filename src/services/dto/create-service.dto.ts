@@ -19,9 +19,13 @@ export class CreateServiceDto {
   @IsString()
   description: string;
 
-  @ApiProperty({ example: 'Интеграции', description: 'Service category' })
-  @IsString()
-  category: string;
+  @ApiPropertyOptional({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Category ID for service/document',
+  })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 
   @ApiProperty({ example: 50000, description: 'Service price' })
   @IsNumber()
@@ -79,9 +83,4 @@ export class CreateServiceDto {
   @IsOptional()
   @IsArray()
   contentSections?: { id: string; title: string; content: string }[];
-
-  @ApiPropertyOptional({ description: 'FAQ items for service page', type: 'array' })
-  @IsOptional()
-  @IsArray()
-  faqItems?: { id: string; question: string; answer: string }[];
 }

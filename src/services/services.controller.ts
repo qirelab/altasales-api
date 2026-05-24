@@ -27,6 +27,7 @@ import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
+import { ServicePackage } from '../packages/entities/package.entity';
 
 @ApiTags('services')
 @Controller('services')
@@ -43,10 +44,23 @@ export class ServicesController {
   @Get()
   @ApiOperation({
     summary: 'Get all services',
-    description: 'Search by name, filter by type and category, sort by price and date (asc/desc)',
+    description: 'Returns packages/services; filters by categoryIds; category content is returned only for a single selected category',
   })
-  @ApiResponse({ status: 200, description: 'List of services', type: [Service] })
-  async findAll(@Query() query: GetServicesQueryDto): Promise<Service[]> {
+  @ApiResponse({ status: 200, description: 'Packages and services list with optional category content' })
+  async findAll(@Query() query: GetServicesQueryDto): Promise<{
+    packages: ServicePackage[];
+    services: Service[];
+    categoryContent: {
+      id: string;
+      name: string;
+      description: string | null;
+      faqs: Array<{
+        id: string;
+        question: string;
+        answer: string;
+      }>;
+    } | null;
+  }> {
     return this.servicesService.findAll(query);
   }
 

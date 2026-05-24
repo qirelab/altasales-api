@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Payment, PaymentStatus } from './entities/payment.entity';
@@ -9,6 +9,8 @@ import { RobokassaService } from './robokassa.service';
 import { CartService } from '../cart/cart.service';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 
 @Injectable()
 export class PaymentService {
@@ -46,6 +48,7 @@ export class PaymentService {
     const payment = paymentRepo.create({
       invId,
       orderId: dto.orderId ?? null,
+      orderIds: dto.orderIds ?? null,
       userId: dto.userId ?? null,
       outSum: dto.outSum,
       description: dto.description,
@@ -132,6 +135,7 @@ export class PaymentService {
     try {
       const paymentRepo = queryRunner.manager.getRepository(Payment);
       const orderRepo = queryRunner.manager.getRepository(Order);
+      const recommendationRepo = queryRunner.manager.getRepository(Recommendation);
 
       const payment = await paymentRepo.findOne({ where: { invId: invIdNum } });
       if (!payment) {
@@ -151,12 +155,33 @@ export class PaymentService {
       payment.status = PaymentStatus.Paid;
       await paymentRepo.save(payment);
 
-      if (payment.orderId != null) {
+      if (payment.orderIds?.length) {
+        await orderRepo.update(
+          { id: In(payment.orderIds) },
+          { status: OrderStatus.Planned },
+        );
+        await recommendationRepo
+          .createQueryBuilder()
+          .update(Recommendation)
+          .set({ status: RecommendationStatus.Planned })
+          .where('"orderId" IN (:...orderIds)', { orderIds: payment.orderIds })
+          .execute();
+        const order = await orderRepo.findOne({ where: { id: payment.orderIds[0] } });
+        if (order) {
+          await this.cartService.clearAndArchiveActiveCart(order.userId);
+        }
+      } else if (payment.orderId != null) {
         const order = await orderRepo.findOne({ where: { id: payment.orderId } });
         await orderRepo.update(
           { id: payment.orderId },
           { status: OrderStatus.Planned },
         );
+        await recommendationRepo
+          .createQueryBuilder()
+          .update(Recommendation)
+          .set({ status: RecommendationStatus.Planned })
+          .where('"orderId" = :orderId', { orderId: payment.orderId })
+          .execute();
         if (order) {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
         }

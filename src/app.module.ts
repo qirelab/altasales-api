@@ -15,6 +15,8 @@ import { RecommendationsModule } from './recommendations/recommendations.module'
 import { AiModule } from './ai/ai.module';
 import { MailModule } from './mail/mail.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { PackagesModule } from './packages/packages.module';
+import { CategoriesModule } from './categories/categories.module';
 
 
 @Module({
@@ -35,6 +37,8 @@ import { KnowledgeModule } from './knowledge/knowledge.module';
     AiModule,
     MailModule,
     KnowledgeModule,
+    PackagesModule,
+    CategoriesModule,
   ],
 })
 export class AppModule {}

@@ -241,6 +241,7 @@ export class AuthService {
       displayName: firebaseUser.displayName,
       emailVerified: firebaseUser.emailVerified,
       role: dbUser.role,
+      notificationsSeenAt: dbUser.notificationsSeenAt,
     };
   }
 
@@ -285,6 +286,7 @@ export class AuthService {
         displayName: [dbUser.name, dbUser.lastName].filter(Boolean).join(' ') || firebaseUser.displayName,
         emailVerified: firebaseUser.emailVerified,
         role: dbUser.role,
+        notificationsSeenAt: dbUser.notificationsSeenAt,
       };
     } catch (error) {
       if (error instanceof UnauthorizedException) {

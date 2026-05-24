@@ -1,7 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, In, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { PaymentService } from '../payment/payment.service';
+import { Service } from '../services/entities/service.entity';
 import { User } from '../users/entities/user.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { FileSource } from '../files/entities/file.entity';
@@ -13,9 +15,12 @@ import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
+import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
 import { CartService } from '../cart/cart.service';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 
 export interface OrderFileDto {
   id: string;
@@ -28,8 +33,10 @@ export interface OrderFileDto {
 export interface OrderItemDto {
   id: string;
   orderId: string;
-  serviceId: string;
-  service: OrderItem['service'];
+  serviceId: string | null;
+  service: OrderItem['service'] | null;
+  packageId: string | null;
+  package: OrderItem['package'] | null;
   hours: number | null;
   amount: number;
   files: OrderFileDto[];
@@ -41,10 +48,10 @@ export interface OrderDto {
   createdAt: Date;
   amount: number;
   status: OrderStatus;
-  deadline: Date;
+  deadline: Date | null;
   comments?: string | null;
   contractorChatAccess: boolean;
-  items: OrderItemDto[];
+  item: OrderItemDto | null;
   user?: User;
 }
 
@@ -55,11 +62,54 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(Service)
+    private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(ServicePackage)
+    private readonly packageRepository: Repository<ServicePackage>,
+    @InjectRepository(Recommendation)
+    private readonly recommendationRepository: Repository<Recommendation>,
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
     private readonly balanceService: BalanceService,
     private readonly cartService: CartService,
   ) { }
+
+  private mapOrderStatusToRecommendationStatus(status: OrderStatus): RecommendationStatus {
+    switch (status) {
+      case OrderStatus.InProgress:
+        return RecommendationStatus.InProgress;
+      case OrderStatus.Completed:
+        return RecommendationStatus.Completed;
+      case OrderStatus.Cancelled:
+        return RecommendationStatus.Recommended;
+      case OrderStatus.PendingPayment:
+      case OrderStatus.Planned:
+      default:
+        return RecommendationStatus.Planned;
+    }
+  }
+
+  private async syncRecommendationForOrder(
+    order: Pick<Order, 'id' | 'userId' | 'status'>,
+    serviceId: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const recommendationRepo = manager
+      ? manager.getRepository(Recommendation)
+      : this.recommendationRepository;
+
+    const recommendation = await recommendationRepo.findOne({
+      where: { userId: order.userId, serviceId },
+    });
+
+    if (!recommendation) {
+      return;
+    }
+
+    recommendation.status = this.mapOrderStatusToRecommendationStatus(order.status);
+    recommendation.orderId = order.status === OrderStatus.Cancelled ? null : order.id;
+    await recommendationRepo.save(recommendation);
+  }
 
   private transformOrderFiles(order: Order): OrderDto {
     return {
@@ -72,26 +122,31 @@ export class OrdersService {
       comments: order.comments,
       contractorChatAccess: order.contractorChatAccess,
       user: order.user,
-      items: (order.items ?? []).map((item): OrderItemDto => ({
-        id: item.id,
-        orderId: item.orderId,
-        serviceId: item.serviceId,
-        service: item.service,
-        hours: item.hours,
-        amount: item.amount,
-        files: (item.files ?? []).map((file): OrderFileDto => ({
-          id: file.id,
-          name: file.originalName,
-          size: file.size,
-          type: file.mimeType,
-          source: file.source ?? FileSource.CLIENT,
-        })),
-      })),
+      item: order.item
+        ? {
+          id: order.item.id,
+          orderId: order.item.orderId,
+          serviceId: order.item.serviceId,
+          service: order.item.service,
+          packageId: order.item.packageId,
+          package: order.item.package,
+          hours: order.item.hours,
+          amount: order.item.amount,
+          files: (order.item.files ?? []).map((file): OrderFileDto => ({
+            id: file.id,
+            name: file.originalName,
+            size: file.size,
+            type: file.mimeType,
+            source: file.source ?? FileSource.CLIENT,
+          })),
+        }
+        : null,
     };
   }
 
   async checkout(dto: CheckoutDto, userId: string): Promise<{
     orderId: string;
+    orderIds: string[];
     status: OrderStatus;
     paymentMethod: CheckoutPaymentMethod;
     paymentUrl?: string;
@@ -107,45 +162,88 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
-      const order = this.orderRepository.create({
-        userId,
-        amount: dto.amount,
-        deadline: new Date(dto.deadline),
-        comments: dto.comments ?? undefined,
-        status: OrderStatus.PendingPayment,
-      });
-      await queryRunner.manager.save(Order, order);
+      const createdOrders: Order[] = [];
+      let totalAmount = 0;
+      for (const checkoutItem of dto.items) {
+        const hasService = Boolean(checkoutItem.serviceId);
+        const hasPackage = Boolean(checkoutItem.packageId);
+        if (hasService === hasPackage) {
+          throw new BadRequestException('Exactly one of serviceId or packageId is required for each item');
+        }
 
-      const items = dto.items.map((item) =>
-        this.orderItemRepository.create({
+        let resolvedAmount = Number(checkoutItem.amount);
+        if (checkoutItem.serviceId) {
+          const service = await this.serviceRepository.findOne({
+            where: { id: checkoutItem.serviceId },
+          });
+          if (!service) {
+            throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
+          }
+        }
+        if (checkoutItem.packageId) {
+          const servicePackage = await this.packageRepository.findOne({
+            where: { id: checkoutItem.packageId },
+          });
+          if (!servicePackage) {
+            throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
+          }
+          resolvedAmount = Number(servicePackage.price);
+        }
+
+        const order = this.orderRepository.create({
+          userId,
+          amount: resolvedAmount,
+          comments: dto.comments ?? undefined,
+          status: OrderStatus.PendingPayment,
+        });
+        await queryRunner.manager.save(Order, order);
+
+        const item = this.orderItemRepository.create({
           orderId: order.id,
-          serviceId: item.serviceId,
-          hours: item.hours ?? null,
-          amount: item.amount,
-        }),
-      );
-      await queryRunner.manager.save(OrderItem, items);
+          serviceId: checkoutItem.serviceId ?? null,
+          packageId: checkoutItem.packageId ?? null,
+          hours: checkoutItem.hours ?? null,
+          amount: resolvedAmount,
+        });
+        await queryRunner.manager.save(OrderItem, item);
+        if (checkoutItem.serviceId) {
+          await this.syncRecommendationForOrder(order, checkoutItem.serviceId, queryRunner.manager);
+        }
+        totalAmount += resolvedAmount;
+        createdOrders.push(order);
+      }
+
+      if (Math.abs(totalAmount - Number(dto.amount)) > 0.01) {
+        throw new BadRequestException('Order total amount does not match item amounts');
+      }
+
+      const orderIds = createdOrders.map((order) => order.id);
+      const primaryOrderId = orderIds[0];
 
       if (paymentMethod === CheckoutPaymentMethod.Balance) {
         await this.balanceService.addToBalance(
           userId,
-          -Number(dto.amount),
+          -totalAmount,
           BalanceTransactionType.OrderPayment,
           {
-            orderId: order.id,
-            description: `Оплата заказа №${order.id} с внутреннего баланса`,
+            orderId: primaryOrderId,
+            description:
+              orderIds.length === 1
+                ? `Оплата заказа №${primaryOrderId} с внутреннего баланса`
+                : `Оплата заказов (${orderIds.length} шт.) с внутреннего баланса`,
           },
           queryRunner.manager,
         );
         await queryRunner.manager.update(
           Order,
-          { id: order.id },
+          { id: In(orderIds) },
           { status: OrderStatus.Planned },
         );
         await this.cartService.clearAndArchiveActiveCart(userId);
         await queryRunner.commitTransaction();
         return {
-          orderId: order.id,
+          orderId: primaryOrderId,
+          orderIds,
           status: OrderStatus.Planned,
           paymentMethod: CheckoutPaymentMethod.Balance,
         };
@@ -153,16 +251,21 @@ export class OrdersService {
 
       const { paymentUrl, params } = await this.paymentService.createWithManager(
         {
-          orderId: order.id,
-          outSum: dto.amount,
-          description: `Оплата заказа №${order.id}`,
+          orderId: primaryOrderId,
+          orderIds,
+          outSum: totalAmount,
+          description:
+            orderIds.length === 1
+              ? `Оплата заказа №${primaryOrderId}`
+              : `Оплата заказов (${orderIds.length} шт.)`,
         },
         queryRunner.manager,
       );
 
       await queryRunner.commitTransaction();
       return {
-        orderId: order.id,
+        orderId: primaryOrderId,
+        orderIds,
         status: OrderStatus.PendingPayment,
         paymentMethod: CheckoutPaymentMethod.Robokassa,
         paymentUrl,
@@ -186,7 +289,7 @@ export class OrdersService {
 
     const [data, total] = await this.orderRepository.findAndCount({
       where,
-      relations: ['items', 'items.service', 'items.files'],
+      relations: ['item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -202,7 +305,7 @@ export class OrdersService {
 
     const baseQb = this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.items', 'item')
+      .innerJoin('o.item', 'item')
       .innerJoin('item.service', 'service')
       .where('service.type = :contractorType', {
         contractorType: ServiceType.Contractor,
@@ -236,7 +339,7 @@ export class OrdersService {
 
     const data = await this.orderRepository.find({
       where: { id: In(ids) },
-      relations: ['items', 'items.service', 'items.files'],
+      relations: ['item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
       order: { createdAt: 'DESC' },
     });
 
@@ -284,18 +387,15 @@ export class OrdersService {
 
     const rows = await baseQb
       .clone()
-      .leftJoin('o.items', 'item')
+      .leftJoin('o.item', 'item')
       .select('o.id', 'id')
-      .addSelect('COUNT(item.id)', 'itemsCount')
+      .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
       .addSelect('o."contractorChatAccess"', 'contractorChatAccess')
-      .groupBy('o.id')
-      .addGroupBy('u.name')
-      .addGroupBy('u."lastName"')
       .orderBy('o."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
@@ -330,8 +430,7 @@ export class OrdersService {
   async findOneForAdmin(id: string): Promise<OrderDto> {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['user', 'items', 'items.service', 'items.files'],
-      order: { items: { id: 'ASC' } },
+      relations: ['user', 'item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
     });
 
     if (!order) {
@@ -361,6 +460,23 @@ export class OrdersService {
 
     order.contractorChatAccess = dto.contractorChatAccess;
     return this.orderRepository.save(order);
+  }
+
+  async updateStatusForAdmin(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id },
+      relations: ['item'],
+    });
+    if (!order) {
+      throw new NotFoundException(`Order with id ${id} not found`);
+    }
+
+    order.status = dto.status;
+    const savedOrder = await this.orderRepository.save(order);
+    if (order.item?.serviceId) {
+      await this.syncRecommendationForOrder(savedOrder, order.item.serviceId);
+    }
+    return savedOrder;
   }
 
   async getOrderCountsByUserId(userId: string): Promise<{

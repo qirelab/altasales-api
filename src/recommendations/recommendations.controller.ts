@@ -54,6 +54,19 @@ export class RecommendationsController {
     return this.recommendationsService.findAssignedToUserList(user.id);
   }
 
+  @Post('seen')
+  @ApiOperation({
+    summary: 'Mark recommendation notifications as seen',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications marked as seen',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async markSeen(@CurrentUser() user: CurrentUserData) {
+    return this.recommendationsService.markRecommendationsSeen(user.id);
+  }
+
   @Get('admin/user/:userId')
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
