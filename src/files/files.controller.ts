@@ -1,3 +1,4 @@
+import { extname } from 'path';
 import {
   Controller,
   Post,
@@ -15,14 +16,13 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse, ApiQuery } from '@nestjs/swagger';
-import { memoryStorage } from 'multer';
-import { extname } from 'path';
 import type { Response } from 'express';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
-import { FilesService } from './files.service';
 import { FileSource } from './entities/file.entity';
+import { FilesService } from './files.service';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
@@ -72,8 +72,7 @@ const APPLE_IMAGE_EXTENSIONS = new Set(['.heic', '.heif']);
 function isAllowedArchiveFallback(file: UploadFileMetadata): boolean {
   const extension = extname(file.originalname).toLowerCase();
 
-  return ARCHIVE_EXTENSIONS.has(extension)
-    && FALLBACK_MIME_TYPES.has(file.mimetype);
+  return ARCHIVE_EXTENSIONS.has(extension);
 }
 
 function isAllowedAppleImageFallback(file: UploadFileMetadata): boolean {
