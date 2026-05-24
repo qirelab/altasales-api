@@ -1,8 +1,11 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
 import { Order } from '../orders/entities/order.entity';
+import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -14,9 +17,6 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
-import { OrderItem } from '../orders/entities/order-item.entity';
-import { Category } from '../categories/entities/category.entity';
-import { ServicePackage } from '../packages/entities/package.entity';
 
 @Injectable()
 export class ServicesService {
@@ -133,6 +133,7 @@ export class ServicesService {
       name: string;
       description: string;
       category: string;
+      categoryId: string | null;
       price: number;
       image: string | null;
       skills: string[];
@@ -175,6 +176,7 @@ export class ServicesService {
       .addSelect('s.name', 'name')
       .addSelect('s.description', 'description')
       .addSelect('c.name', 'category')
+      .addSelect('s."categoryId"', 'categoryId')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
@@ -192,6 +194,7 @@ export class ServicesService {
         name: string;
         description: string;
         category: string | null;
+        categoryId: string | null;
         price: string;
         image: string | null;
         skills: string[] | string;
@@ -207,6 +210,7 @@ export class ServicesService {
         name: row.name,
         description: row.description,
         category: row.category ?? '',
+        categoryId: row.categoryId,
         price: Number(row.price),
         image: row.image,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
