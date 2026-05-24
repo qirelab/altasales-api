@@ -30,7 +30,9 @@ export class OpenAICompatibleEmbeddingProviderAdapter
     return process.env.LLM_EMBEDDING_MODEL_ALIAS || DEFAULT_EMBEDDING_MODEL_ALIAS;
   }
 
-  readonly isExternal = true;
+  get isExternal(): boolean {
+    return process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_IS_EXTERNAL !== 'false';
+  }
 
   async embed(
     inputs: string[],
