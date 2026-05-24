@@ -518,7 +518,17 @@ export class ServicesService {
   }
 
   async findOneServiceForAdmin(id: string): Promise<{
-    service: Service;
+    service: {
+      id: string;
+      type: ServiceType;
+      name: string;
+      description: string;
+      category: string;
+      price: number;
+      image: string | null;
+      skills: string[];
+      createdAt: Date;
+    };
     stats: {
       totalProjects: number;
       activeOrders: number;
@@ -578,7 +588,17 @@ export class ServicesService {
       }>();
 
     return {
-      service,
+      service: {
+        id: service.id,
+        type: service.type,
+        name: service.name,
+        description: service.description,
+        category: service.category?.name ?? '',
+        price: Number(service.price),
+        image: service.image,
+        skills: service.skills,
+        createdAt: service.createdAt,
+      },
       stats: {
         totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
         activeOrders: Number(aggregateRaw?.activeOrders ?? 0),
