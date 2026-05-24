@@ -1,8 +1,11 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
 import { Order } from '../orders/entities/order.entity';
+import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -14,9 +17,6 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
-import { OrderItem } from '../orders/entities/order-item.entity';
-import { Category } from '../categories/entities/category.entity';
-import { ServicePackage } from '../packages/entities/package.entity';
 
 @Injectable()
 export class ServicesService {
@@ -383,13 +383,17 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .where('o."userId" = :userId', { userId })
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -464,7 +468,10 @@ export class ServicesService {
         `COUNT(DISTINCT CASE WHEN o.status IN (:...activeStatuses) THEN o.id END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(item.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN item.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
       .andWhere('service."userId" = :userId', { userId })
       .setParameter('activeStatuses', [
@@ -472,6 +479,7 @@ export class ServicesService {
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -546,12 +554,16 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
