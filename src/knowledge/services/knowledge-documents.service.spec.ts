@@ -53,7 +53,12 @@ describe('KnowledgeDocumentsService', () => {
   });
 
   it('hard deletes vector points before database document data', async () => {
-    const documentRepository = { create: jest.fn(), save: jest.fn(), delete: jest.fn() };
+    const documentRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn().mockResolvedValue({ id: 'doc-1', purpose: 'recommendations' }),
+      delete: jest.fn(),
+    };
     const jobRepository = { create: jest.fn(), save: jest.fn() };
     const vectorStore = { deleteByDocumentId: jest.fn().mockResolvedValue(undefined) };
     const service = new KnowledgeDocumentsService(
@@ -68,5 +73,123 @@ describe('KnowledgeDocumentsService', () => {
 
     expect(vectorStore.deleteByDocumentId).toHaveBeenCalledWith('doc-1');
     expect(documentRepository.delete).toHaveBeenCalledWith({ id: 'doc-1' });
+    expect(vectorStore.deleteByDocumentId.mock.invocationCallOrder[0])
+      .toBeLessThan(documentRepository.delete.mock.invocationCallOrder[0]);
+  });
+
+  it('returns not found when deleting a missing document', async () => {
+    const documentRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn().mockResolvedValue(null),
+      delete: jest.fn(),
+    };
+    const vectorStore = { deleteByDocumentId: jest.fn() };
+    const service = new KnowledgeDocumentsService(
+      documentRepository as never,
+      { create: jest.fn(), save: jest.fn() } as never,
+      {} as never,
+      { runAsync: jest.fn() } as never,
+      vectorStore as never,
+    );
+
+    await expect(service.delete('missing-doc')).rejects.toThrow(
+      'Knowledge document not found',
+    );
+
+    expect(vectorStore.deleteByDocumentId).not.toHaveBeenCalled();
+    expect(documentRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('updates editable metadata fields without touching purpose, chunks, or vectors', async () => {
+    const document = {
+      id: 'doc-1',
+      title: 'Old title',
+      purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+      metadata: { tags: ['old'], existing: true },
+    };
+    const documentRepository = {
+      create: jest.fn(),
+      save: jest.fn(async (entity) => entity),
+      findOne: jest.fn().mockResolvedValue(document),
+      delete: jest.fn(),
+    };
+    const chunkRepository = { find: jest.fn() };
+    const vectorStore = { deleteByDocumentId: jest.fn() };
+    const service = new KnowledgeDocumentsService(
+      documentRepository as never,
+      { create: jest.fn(), save: jest.fn() } as never,
+      chunkRepository as never,
+      { runAsync: jest.fn() } as never,
+      vectorStore as never,
+    );
+
+    const result = await service.updateMetadata('doc-1', {
+      title: 'New title',
+      metadata: { source: 'admin' },
+      tags: ['fresh', 'sales'],
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      title: 'New title',
+      purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+      metadata: {
+        existing: true,
+        source: 'admin',
+        tags: ['fresh', 'sales'],
+      },
+    }));
+    expect(chunkRepository.find).not.toHaveBeenCalled();
+    expect(vectorStore.deleteByDocumentId).not.toHaveBeenCalled();
+  });
+
+  it('preserves existing tags when metadata is merged without tags', async () => {
+    const documentRepository = {
+      create: jest.fn(),
+      save: jest.fn(async (entity) => entity),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'doc-1',
+        metadata: { tags: ['keep'], owner: 'kb' },
+      }),
+      delete: jest.fn(),
+    };
+    const service = new KnowledgeDocumentsService(
+      documentRepository as never,
+      { create: jest.fn(), save: jest.fn() } as never,
+      {} as never,
+      { runAsync: jest.fn() } as never,
+      { deleteByDocumentId: jest.fn() } as never,
+    );
+
+    const result = await service.updateMetadata('doc-1', {
+      metadata: { reviewed: true },
+    });
+
+    expect(result.metadata).toEqual({
+      tags: ['keep'],
+      owner: 'kb',
+      reviewed: true,
+    });
+  });
+
+  it('returns not found when updating a missing document', async () => {
+    const documentRepository = {
+      create: jest.fn(),
+      save: jest.fn(),
+      findOne: jest.fn().mockResolvedValue(null),
+      delete: jest.fn(),
+    };
+    const service = new KnowledgeDocumentsService(
+      documentRepository as never,
+      { create: jest.fn(), save: jest.fn() } as never,
+      {} as never,
+      { runAsync: jest.fn() } as never,
+      { deleteByDocumentId: jest.fn() } as never,
+    );
+
+    await expect(
+      service.updateMetadata('missing-doc', { title: 'New title' }),
+    ).rejects.toThrow('Knowledge document not found');
+    expect(documentRepository.save).not.toHaveBeenCalled();
   });
 });

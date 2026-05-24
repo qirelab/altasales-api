@@ -26,6 +26,12 @@ export type ListKnowledgeDocumentsInput = {
   status?: KnowledgeDocumentStatus;
 };
 
+export type UpdateKnowledgeDocumentMetadataInput = {
+  title?: string;
+  metadata?: Record<string, unknown>;
+  tags?: string[];
+};
+
 @Injectable()
 export class KnowledgeDocumentsService {
   constructor(
@@ -127,8 +133,41 @@ export class KnowledgeDocumentsService {
     return job;
   }
 
+  async updateMetadata(
+    id: string,
+    input: UpdateKnowledgeDocumentMetadataInput,
+  ): Promise<KnowledgeDocument> {
+    const document = await this.findOne(id);
+
+    if (input.title !== undefined) {
+      document.title = input.title.trim();
+    }
+
+    if (input.metadata !== undefined || input.tags !== undefined) {
+      document.metadata = {
+        ...this.safeMetadata(document.metadata),
+        ...(input.metadata ?? {}),
+      };
+
+      if (input.tags !== undefined) {
+        document.metadata.tags = input.tags;
+      }
+    }
+
+    return this.documentRepository.save(document);
+  }
+
   async delete(id: string): Promise<void> {
+    await this.findOne(id);
     await this.vectorStore.deleteByDocumentId(id);
     await this.documentRepository.delete({ id });
+  }
+
+  private safeMetadata(
+    metadata: Record<string, unknown> | null | undefined,
+  ): Record<string, unknown> {
+    return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? metadata
+      : {};
   }
 }

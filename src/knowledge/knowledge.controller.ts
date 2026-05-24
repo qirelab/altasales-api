@@ -6,6 +6,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UploadedFile,
@@ -29,6 +30,7 @@ import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { ListKnowledgeDocumentsDto } from './dto/list-knowledge-documents.dto';
 import { SearchKnowledgeDto } from './dto/search-knowledge.dto';
+import { UpdateKnowledgeDocumentDto } from './dto/update-knowledge-document.dto';
 import { UploadKnowledgeDocumentDto } from './dto/upload-knowledge-document.dto';
 import { KnowledgeDocumentsService } from './services/knowledge-documents.service';
 import { KnowledgeSearchService } from './services/knowledge-search.service';
@@ -143,6 +145,21 @@ export class KnowledgeController {
     return this.documentsService.findOne(id);
   }
 
+  @Patch('documents/:id')
+  @ApiOperation({ summary: 'Update knowledge document metadata' })
+  async updateDocument(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateKnowledgeDocumentDto,
+  ) {
+    if (!this.hasUpdateFields(dto)) {
+      throw new BadRequestException(
+        'At least one knowledge document metadata field is required',
+      );
+    }
+
+    return this.documentsService.updateMetadata(id, dto);
+  }
+
   @Get('documents/:id/chunks')
   @ApiOperation({ summary: 'Get knowledge document chunks for admin/debug' })
   async getChunks(@Param('id', ParseUUIDPipe) id: string) {
@@ -195,5 +212,11 @@ export class KnowledgeController {
     } catch {
       throw new BadRequestException('Knowledge metadata must be a JSON object');
     }
+  }
+
+  private hasUpdateFields(dto: UpdateKnowledgeDocumentDto): boolean {
+    return dto.title !== undefined
+      || dto.metadata !== undefined
+      || dto.tags !== undefined;
   }
 }
