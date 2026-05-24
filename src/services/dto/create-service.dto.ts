@@ -78,9 +78,4 @@ export class CreateServiceDto {
   @IsInt()
   @Min(0)
   contractorExperienceYears?: number;
-
-  @ApiPropertyOptional({ description: 'Content sections for service page', type: 'array' })
-  @IsOptional()
-  @IsArray()
-  contentSections?: { id: string; title: string; content: string }[];
 }
