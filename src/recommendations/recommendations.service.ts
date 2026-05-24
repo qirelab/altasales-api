@@ -21,6 +21,7 @@ import { RecommendationStatus } from './entities/recommendation-status.enum';
 
 export type UserRecommendationListItem = {
   id: string;
+  serviceId: string;
   name: string;
   type: ServiceType;
   category: string;
@@ -67,6 +68,7 @@ export class RecommendationsService {
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'category')
       .select('recommendation.id', 'id')
+      .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('service.name', 'name')
       .addSelect('service.type', 'type')
       .addSelect(`COALESCE(category.name, '')`, 'category')
