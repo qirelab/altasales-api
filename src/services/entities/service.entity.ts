@@ -1,9 +1,9 @@
 import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn, ManyToMany } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ServiceType } from './service-type.enum';
-import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
+import { User } from '../../users/entities/user.entity';
+import { ServiceType } from './service-type.enum';
 
 @Entity()
 export class Service {
@@ -74,13 +74,6 @@ export class Service {
   @ApiProperty({ description: 'Creation date' })
   @CreateDateColumn()
   createdAt: Date;
-
-  @ApiPropertyOptional({
-    description: 'Content sections for service page',
-    type: 'array',
-  })
-  @Column({ type: 'json', default: [] })
-  contentSections: { id: string; title: string; content: string }[];
 
   @ApiPropertyOptional({
     description: 'Packages containing this service',
