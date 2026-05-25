@@ -21,11 +21,13 @@ import { RecommendationStatus } from './entities/recommendation-status.enum';
 
 export type UserRecommendationListItem = {
   id: string;
+  serviceId: string;
   name: string;
   type: ServiceType;
   category: string;
   price: number;
   status: RecommendationStatus;
+  createdAt: Date;
 };
 
 @Injectable()
@@ -67,11 +69,13 @@ export class RecommendationsService {
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'category')
       .select('recommendation.id', 'id')
+      .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('service.name', 'name')
       .addSelect('service.type', 'type')
       .addSelect(`COALESCE(category.name, '')`, 'category')
       .addSelect('service.price', 'price')
       .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],

@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
+import { OrderItem } from '../orders/entities/order-item.entity';
+import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -135,6 +137,7 @@ export class PaymentService {
     try {
       const paymentRepo = queryRunner.manager.getRepository(Payment);
       const orderRepo = queryRunner.manager.getRepository(Order);
+      const orderItemRepo = queryRunner.manager.getRepository(OrderItem);
       const recommendationRepo = queryRunner.manager.getRepository(Recommendation);
 
       const payment = await paymentRepo.findOne({ where: { invId: invIdNum } });
@@ -160,6 +163,23 @@ export class PaymentService {
           { id: In(payment.orderIds) },
           { status: OrderStatus.Planned },
         );
+        await orderItemRepo.update(
+          { orderId: In(payment.orderIds) },
+          { status: OrderStatus.Planned },
+        );
+        const itemIds = await orderItemRepo
+          .createQueryBuilder('item')
+          .select('item.id', 'id')
+          .where('item."orderId" IN (:...orderIds)', { orderIds: payment.orderIds })
+          .getRawMany()
+          .then((rows) => rows.map((row: { id: string }) => row.id));
+        if (itemIds.length > 0) {
+          await queryRunner.manager.update(
+            OrderItemSubItem,
+            { orderItemId: In(itemIds) },
+            { status: OrderStatus.Planned },
+          );
+        }
         await recommendationRepo
           .createQueryBuilder()
           .update(Recommendation)
@@ -176,6 +196,23 @@ export class PaymentService {
           { id: payment.orderId },
           { status: OrderStatus.Planned },
         );
+        await orderItemRepo.update(
+          { orderId: payment.orderId },
+          { status: OrderStatus.Planned },
+        );
+        const singleOrderItemIds = await orderItemRepo
+          .createQueryBuilder('item')
+          .select('item.id', 'id')
+          .where('item."orderId" = :orderId', { orderId: payment.orderId })
+          .getRawMany()
+          .then((rows) => rows.map((row: { id: string }) => row.id));
+        if (singleOrderItemIds.length > 0) {
+          await queryRunner.manager.update(
+            OrderItemSubItem,
+            { orderItemId: In(singleOrderItemIds) },
+            { status: OrderStatus.Planned },
+          );
+        }
         await recommendationRepo
           .createQueryBuilder()
           .update(Recommendation)

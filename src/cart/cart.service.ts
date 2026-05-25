@@ -26,7 +26,7 @@ export class CartService {
     const cart = await this.ensureActiveCart(userId);
     const items = await this.cartItemRepository.find({
       where: { cartId: cart.id },
-      relations: ['service', 'package', 'package.services'],
+      relations: ['service', 'service.category', 'package', 'package.category', 'package.services'],
       order: { createdAt: 'ASC' },
     });
 
