@@ -12,6 +12,6 @@ import { RolesGuard } from './guards/roles.guard';
   imports: [TypeOrmModule.forFeature([User]), BalanceTransactionsModule],
   controllers: [AuthController],
   providers: [AuthService, FirebaseService, SessionGuard, RolesGuard],
-  exports: [AuthService, SessionGuard, RolesGuard],
+  exports: [AuthService, FirebaseService, SessionGuard, RolesGuard],
 })
 export class AuthModule {}
