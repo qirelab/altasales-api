@@ -14,6 +14,8 @@ import { Service } from '../../services/entities/service.entity';
 import { Order } from './order.entity';
 import { FileEntity } from '../../files/entities/file.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
+import { OrderStatus } from './order-status.enum';
+import { OrderItemSubItem } from './order-item-sub-item.entity';
 
 @Entity()
 @Index('UQ_order_item_order_service_not_null', ['orderId', 'serviceId'], {
@@ -74,6 +76,13 @@ export class OrderItem {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   amount: number;
 
+  @ApiProperty({ enum: OrderStatus, description: 'Order item status' })
+  @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.Planned })
+  status: OrderStatus;
+
   @OneToMany(() => FileEntity, (file) => file.orderItem)
   files: FileEntity[];
+
+  @OneToMany(() => OrderItemSubItem, (subItem) => subItem.orderItem, { cascade: true })
+  subItems: OrderItemSubItem[];
 }
