@@ -385,13 +385,17 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .where('o."userId" = :userId', { userId })
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -466,7 +470,10 @@ export class ServicesService {
         `COUNT(DISTINCT CASE WHEN o.status IN (:...activeStatuses) THEN o.id END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(item.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN item.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
       .andWhere('service."userId" = :userId', { userId })
       .setParameter('activeStatuses', [
@@ -474,6 +481,7 @@ export class ServicesService {
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -558,12 +566,16 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
