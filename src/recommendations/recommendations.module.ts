@@ -8,10 +8,11 @@ import { RecommendationsService } from './recommendations.service';
 import { User } from '../users/entities/user.entity';
 import { Service } from '../services/entities/service.entity';
 import { Order } from '../orders/entities/order.entity';
+import { ServicePackage } from '../packages/entities/package.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Recommendation, User, Service, Order]),
+    TypeOrmModule.forFeature([Recommendation, User, Service, ServicePackage, Order]),
     AuthModule,
     MailModule,
   ],

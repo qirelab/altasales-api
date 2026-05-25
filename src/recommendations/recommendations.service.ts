@@ -7,11 +7,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { Service } from '../services/entities/service.entity';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { Order } from '../orders/entities/order.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
@@ -21,8 +22,10 @@ import { RecommendationStatus } from './entities/recommendation-status.enum';
 
 export type UserRecommendationListItem = {
   id: string;
+  serviceId: string | null;
+  packageId: string | null;
   name: string;
-  type: ServiceType;
+  type: ServiceType | 'Пакет услуг';
   category: string;
   price: number;
   status: RecommendationStatus;
@@ -40,6 +43,8 @@ export class RecommendationsService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(ServicePackage)
+    private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly mailService: MailService,
@@ -51,11 +56,17 @@ export class RecommendationsService {
     return this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoinAndSelect('recommendation.service', 'service')
+      .leftJoinAndSelect('recommendation.package', 'package')
+      .leftJoinAndSelect('package.category', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere('service.type IN (:...serviceTypes)', {
-        serviceTypes: [ServiceType.Service, ServiceType.Document],
-      })
+      .andWhere(new Brackets((qb) => {
+        qb
+          .where('service.type IN (:...serviceTypes)', {
+            serviceTypes: [ServiceType.Service, ServiceType.Document],
+          })
+          .orWhere('package.id IS NOT NULL');
+      }))
       .orderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
@@ -66,18 +77,26 @@ export class RecommendationsService {
     return this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
-      .leftJoin('service.category', 'category')
+      .leftJoin('service.category', 'serviceCategory')
+      .leftJoin('recommendation.package', 'package')
+      .leftJoin('package.category', 'packageCategory')
       .select('recommendation.id', 'id')
-      .addSelect('service.name', 'name')
-      .addSelect('service.type', 'type')
-      .addSelect(`COALESCE(category.name, '')`, 'category')
-      .addSelect('service.price', 'price')
+      .addSelect('recommendation."serviceId"', 'serviceId')
+      .addSelect('recommendation."packageId"', 'packageId')
+      .addSelect('COALESCE(service.name, package.name)', 'name')
+      .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
+      .addSelect('COALESCE(serviceCategory.name, packageCategory.name, \'\')', 'category')
+      .addSelect('COALESCE(service.price, package.price)', 'price')
       .addSelect('recommendation.status', 'status')
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere('service.type IN (:...serviceTypes)', {
-        serviceTypes: [ServiceType.Service, ServiceType.Document],
-      })
+      .andWhere(new Brackets((qb) => {
+        qb
+          .where('service.type IN (:...serviceTypes)', {
+            serviceTypes: [ServiceType.Service, ServiceType.Document],
+          })
+          .orWhere('package.id IS NOT NULL');
+      }))
       .orderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem>();
   }
@@ -86,25 +105,32 @@ export class RecommendationsService {
     return this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoinAndSelect('recommendation.service', 'service')
-      .leftJoinAndSelect('service.category', 'category')
+      .leftJoinAndSelect('service.category', 'serviceCategory')
+      .leftJoinAndSelect('recommendation.package', 'package')
+      .leftJoinAndSelect('package.category', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere('service.type IN (:...serviceTypes)', {
-        serviceTypes: [ServiceType.Service, ServiceType.Document],
-      })
+      .andWhere(new Brackets((qb) => {
+        qb
+          .where('service.type IN (:...serviceTypes)', {
+            serviceTypes: [ServiceType.Service, ServiceType.Document],
+          })
+          .orWhere('package.id IS NOT NULL');
+      }))
       .orderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
 
   async createForAdmin(dto: CreateAdminRecommendationDto): Promise<Recommendation> {
     const user = await this.getUserOrThrow(dto.userId);
-    await this.ensureServiceCanBeRecommended(dto.serviceId);
-    await this.ensureRecommendationIsUnique(dto.userId, dto.serviceId);
+    const target = await this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
+    await this.ensureRecommendationIsUnique(dto.userId, target.serviceId, target.packageId);
     const shouldNotify = await this.shouldNotifyAboutNewRecommendation(user);
 
     const recommendation = this.recommendationRepository.create({
       userId: dto.userId,
-      serviceId: dto.serviceId,
+      serviceId: target.serviceId,
+      packageId: target.packageId,
       status: dto.status ?? RecommendationStatus.Recommended,
       orderId: null,
     });
@@ -115,7 +141,7 @@ export class RecommendationsService {
       await this.notifyUserAboutRecommendations(user, saved);
     }
 
-    return saved;
+    return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
 
   async markRecommendationsSeen(userId: string): Promise<{ notificationsSeenAt: Date }> {
@@ -137,16 +163,23 @@ export class RecommendationsService {
       throw new NotFoundException(`Recommendation with id ${id} not found`);
     }
 
-    if (dto.serviceId) {
-      await this.ensureServiceCanBeRecommended(dto.serviceId);
-      if (dto.serviceId !== recommendation.serviceId) {
+    const shouldUpdateTarget = dto.serviceId !== undefined || dto.packageId !== undefined;
+    if (shouldUpdateTarget) {
+      const target = await this.resolveUpdateRecommendationTarget(dto);
+      const changedTarget = target.serviceId !== recommendation.serviceId
+        || target.packageId !== recommendation.packageId;
+
+      if (changedTarget) {
         await this.ensureRecommendationIsUnique(
           recommendation.userId,
-          dto.serviceId,
+          target.serviceId,
+          target.packageId,
           recommendation.id,
         );
       }
-      recommendation.serviceId = dto.serviceId;
+
+      recommendation.serviceId = target.serviceId;
+      recommendation.packageId = target.packageId;
     }
 
     if (dto.orderId !== undefined) {
@@ -158,7 +191,53 @@ export class RecommendationsService {
       recommendation.status = dto.status;
     }
 
-    return this.recommendationRepository.save(recommendation);
+    const saved = await this.recommendationRepository.save(recommendation);
+    return this.findRecommendationWithRelationsOrThrow(saved.id);
+  }
+
+  private async resolveUpdateRecommendationTarget(
+    dto: UpdateAdminRecommendationDto,
+  ): Promise<{ serviceId: string | null; packageId: string | null }> {
+    const hasService = dto.serviceId !== undefined;
+    const hasPackage = dto.packageId !== undefined;
+
+    if (hasService && hasPackage) {
+      return this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
+    }
+    if (hasService) {
+      return this.resolveAndValidateRecommendationTarget(dto.serviceId, undefined);
+    }
+    return this.resolveAndValidateRecommendationTarget(undefined, dto.packageId);
+  }
+
+  private async findRecommendationWithRelationsOrThrow(id: string): Promise<Recommendation> {
+    const recommendation = await this.recommendationRepository.findOne({
+      where: { id },
+      relations: ['service', 'service.category', 'package', 'package.category', 'order'],
+    });
+    if (!recommendation) {
+      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    }
+    return recommendation;
+  }
+
+  private async resolveAndValidateRecommendationTarget(
+    serviceId?: string,
+    packageId?: string,
+  ): Promise<{ serviceId: string | null; packageId: string | null }> {
+    const hasService = Boolean(serviceId);
+    const hasPackage = Boolean(packageId);
+    if (hasService === hasPackage) {
+      throw new BadRequestException('Exactly one of serviceId or packageId must be provided');
+    }
+
+    if (serviceId) {
+      await this.ensureServiceCanBeRecommended(serviceId);
+      return { serviceId, packageId: null };
+    }
+
+    await this.ensurePackageCanBeRecommended(packageId!);
+    return { serviceId: null, packageId: packageId! };
   }
 
   async removeForAdmin(id: string): Promise<void> {
@@ -246,6 +325,15 @@ export class RecommendationsService {
     }
   }
 
+  private async ensurePackageCanBeRecommended(packageId: string): Promise<void> {
+    const servicePackage = await this.packageRepository.findOne({
+      where: { id: packageId },
+    });
+    if (!servicePackage) {
+      throw new NotFoundException(`Package with id ${packageId} not found`);
+    }
+  }
+
   private async ensureOrderExists(orderId: string): Promise<void> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
@@ -257,13 +345,19 @@ export class RecommendationsService {
 
   private async ensureRecommendationIsUnique(
     userId: string,
-    serviceId: string,
+    serviceId: string | null,
+    packageId: string | null,
     excludeRecommendationId?: string,
   ): Promise<void> {
     const qb = this.recommendationRepository
       .createQueryBuilder('recommendation')
-      .where('recommendation."userId" = :userId', { userId })
-      .andWhere('recommendation."serviceId" = :serviceId', { serviceId });
+      .where('recommendation."userId" = :userId', { userId });
+
+    if (serviceId) {
+      qb.andWhere('recommendation."serviceId" = :serviceId', { serviceId });
+    } else if (packageId) {
+      qb.andWhere('recommendation."packageId" = :packageId', { packageId });
+    }
 
     if (excludeRecommendationId) {
       qb.andWhere('recommendation.id != :excludeRecommendationId', {
@@ -275,7 +369,9 @@ export class RecommendationsService {
 
     if (existingRecommendation) {
       throw new ConflictException(
-        'This service is already recommended to this user',
+        serviceId
+          ? 'This service is already recommended to this user'
+          : 'This package is already recommended to this user',
       );
     }
   }
