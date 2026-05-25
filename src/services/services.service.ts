@@ -1,8 +1,11 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
 import { Order } from '../orders/entities/order.entity';
+import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -14,9 +17,6 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
-import { OrderItem } from '../orders/entities/order-item.entity';
-import { Category } from '../categories/entities/category.entity';
-import { ServicePackage } from '../packages/entities/package.entity';
 
 @Injectable()
 export class ServicesService {
@@ -152,7 +152,9 @@ export class ServicesService {
     const baseQb = this.serviceRepository
       .createQueryBuilder('s')
       .leftJoin('s.category', 'c')
-      .where('s.type = :type', { type: ServiceType.Service });
+      .where('s.type IN (:...types)', {
+        types: [ServiceType.Service, ServiceType.Document],
+      });
 
     if (search) {
       baseQb.andWhere(
@@ -520,7 +522,17 @@ export class ServicesService {
   }
 
   async findOneServiceForAdmin(id: string): Promise<{
-    service: Service;
+    service: {
+      id: string;
+      type: ServiceType;
+      name: string;
+      description: string;
+      category: string;
+      price: number;
+      image: string | null;
+      skills: string[];
+      createdAt: Date;
+    };
     stats: {
       totalProjects: number;
       activeOrders: number;
@@ -535,7 +547,7 @@ export class ServicesService {
     }>;
   }> {
     const service = await this.serviceRepository.findOne({
-      where: { id, type: ServiceType.Service },
+      where: { id, type: In([ServiceType.Service, ServiceType.Document]) },
       relations: ['category'],
     });
     if (!service) {
@@ -584,7 +596,17 @@ export class ServicesService {
       }>();
 
     return {
-      service,
+      service: {
+        id: service.id,
+        type: service.type,
+        name: service.name,
+        description: service.description,
+        category: service.category?.name ?? '',
+        price: Number(service.price),
+        image: service.image,
+        skills: service.skills,
+        createdAt: service.createdAt,
+      },
       stats: {
         totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
         activeOrders: Number(aggregateRaw?.activeOrders ?? 0),
