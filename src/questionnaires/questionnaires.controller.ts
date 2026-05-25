@@ -1,4 +1,5 @@
 import {
+  Patch,
   Controller,
   Get,
   Post,
@@ -15,6 +16,7 @@ import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-us
 import { UserRole } from '../users/entities/user-role.enum';
 import { QuestionnairesService } from './questionnaires.service';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
+import { UpdateQuestionnaireAnswersDto } from './dto/update-questionnaire-answers.dto';
 
 @ApiTags('questionnaires')
 @Controller('questionnaires')
@@ -56,6 +58,21 @@ export class QuestionnairesController {
   })
   async findByUserId(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.questionnairesService.findByUserIdForAdmin(userId);
+  }
+
+  @Patch('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update questionnaire answers by id (admin only)' })
+  @ApiParam({ name: 'id', description: 'Questionnaire ID' })
+  @ApiResponse({ status: 200, description: 'Questionnaire updated' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Questionnaire not found' })
+  async updateForAdmin(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateQuestionnaireAnswersDto,
+  ) {
+    return this.questionnairesService.updateAnswersForAdmin(id, dto);
   }
 
   @Get(':id')
