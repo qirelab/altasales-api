@@ -23,6 +23,8 @@ import { CheckoutDto } from './dto/checkout.dto';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
+import { UpdateOrderItemStatusDto } from './dto/update-order-item-status.dto';
+import { UpdateOrderItemSubItemStatusDto } from './dto/update-order-item-sub-item-status.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { OrdersService } from './orders.service';
 
@@ -125,6 +127,42 @@ export class OrdersController {
     @Body() dto: UpdateOrderStatusDto,
   ) {
     return this.ordersService.updateStatusForAdmin(id, dto);
+  }
+
+  @Patch('admin/items/:itemId/status')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update order item status (admin)' })
+  @ApiParam({ name: 'itemId', description: 'Order item ID' })
+  @ApiResponse({ status: 200, description: 'Order item status updated' })
+  @ApiResponse({ status: 400, description: 'Invalid status update for package item' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Order item not found' })
+  async updateOrderItemStatus(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: UpdateOrderItemStatusDto,
+  ) {
+    return this.ordersService.updateItemStatusForAdmin(itemId, dto.status);
+  }
+
+  @Patch('admin/items/:itemId/sub-items/:subItemId/status')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update package sub-item status (admin)' })
+  @ApiParam({ name: 'itemId', description: 'Order package item ID' })
+  @ApiParam({ name: 'subItemId', description: 'Order package sub-item ID' })
+  @ApiResponse({ status: 200, description: 'Order package sub-item status updated' })
+  @ApiResponse({ status: 400, description: 'Order item is not a package' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Order item or sub-item not found' })
+  async updateOrderItemSubItemStatus(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('subItemId', ParseUUIDPipe) subItemId: string,
+    @Body() dto: UpdateOrderItemSubItemStatusDto,
+  ) {
+    return this.ordersService.updateSubItemStatus(itemId, subItemId, dto.status);
   }
 
   @Post('checkout')

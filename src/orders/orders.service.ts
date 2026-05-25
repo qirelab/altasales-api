@@ -9,6 +9,7 @@ import { ServiceType } from '../services/entities/service-type.enum';
 import { FileSource } from '../files/entities/file.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
+import { OrderItemSubItem } from './entities/order-item-sub-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
@@ -39,6 +40,13 @@ export interface OrderItemDto {
   package: OrderItem['package'] | null;
   hours: number | null;
   amount: number;
+  status: OrderStatus;
+  subItems: Array<{
+    id: string;
+    serviceId: string;
+    service: Service;
+    status: OrderStatus;
+  }>;
   files: OrderFileDto[];
 }
 
@@ -62,6 +70,8 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    @InjectRepository(OrderItemSubItem)
+    private readonly orderItemSubItemRepository: Repository<OrderItemSubItem>,
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
     @InjectRepository(ServicePackage)
@@ -132,6 +142,13 @@ export class OrdersService {
           package: order.item.package,
           hours: order.item.hours,
           amount: order.item.amount,
+          status: order.item.status,
+          subItems: (order.item.subItems ?? []).map((subItem) => ({
+            id: subItem.id,
+            serviceId: subItem.serviceId,
+            service: subItem.service,
+            status: subItem.status,
+          })),
           files: (order.item.files ?? []).map((file): OrderFileDto => ({
             id: file.id,
             name: file.originalName,
@@ -142,6 +159,42 @@ export class OrdersService {
         }
         : null,
     };
+  }
+
+  private normalizeStatusForPackageAggregation(status: OrderStatus): OrderStatus {
+    return status === OrderStatus.PendingPayment ? OrderStatus.Planned : status;
+  }
+
+  private calculatePackageItemStatusFromSubItems(subItems: OrderItemSubItem[]): OrderStatus {
+    const normalized = subItems.map((subItem) =>
+      this.normalizeStatusForPackageAggregation(subItem.status),
+    );
+
+    if (normalized.every((status) => status === OrderStatus.Cancelled)) {
+      return OrderStatus.Cancelled;
+    }
+
+    const nonCancelled = normalized.filter((status) => status !== OrderStatus.Cancelled);
+    if (nonCancelled.length === 0) {
+      return OrderStatus.Cancelled;
+    }
+    if (nonCancelled.every((status) => status === OrderStatus.Completed)) {
+      return OrderStatus.Completed;
+    }
+    if (nonCancelled.some((status) => status === OrderStatus.InProgress)) {
+      return OrderStatus.InProgress;
+    }
+
+    const hasCompleted = nonCancelled.some((status) => status === OrderStatus.Completed);
+    const hasPlanned = nonCancelled.some((status) => status === OrderStatus.Planned);
+    if (hasCompleted && hasPlanned) {
+      return OrderStatus.InProgress;
+    }
+    if (nonCancelled.every((status) => status === OrderStatus.Planned)) {
+      return OrderStatus.Planned;
+    }
+
+    return OrderStatus.InProgress;
   }
 
   async checkout(dto: CheckoutDto, userId: string): Promise<{
@@ -204,8 +257,24 @@ export class OrdersService {
           packageId: checkoutItem.packageId ?? null,
           hours: checkoutItem.hours ?? null,
           amount: resolvedAmount,
+          status: OrderStatus.PendingPayment,
         });
         await queryRunner.manager.save(OrderItem, item);
+        if (checkoutItem.packageId) {
+          const servicePackage = await this.packageRepository.findOne({
+            where: { id: checkoutItem.packageId },
+            relations: ['services'],
+          });
+          const packageServices = servicePackage?.services ?? [];
+          const subItems = packageServices.map((service) => this.orderItemSubItemRepository.create({
+            orderItemId: item.id,
+            serviceId: service.id,
+            status: OrderStatus.PendingPayment,
+          }));
+          if (subItems.length > 0) {
+            await queryRunner.manager.save(OrderItemSubItem, subItems);
+          }
+        }
         if (checkoutItem.serviceId) {
           await this.syncRecommendationForOrder(order, checkoutItem.serviceId, queryRunner.manager);
         }
@@ -239,6 +308,25 @@ export class OrdersService {
           { id: In(orderIds) },
           { status: OrderStatus.Planned },
         );
+        await queryRunner.manager.update(
+          OrderItem,
+          { orderId: In(orderIds) },
+          { status: OrderStatus.Planned },
+        );
+        const itemIds = await queryRunner.manager
+          .getRepository(OrderItem)
+          .createQueryBuilder('item')
+          .select('item.id', 'id')
+          .where('item."orderId" IN (:...orderIds)', { orderIds })
+          .getRawMany()
+          .then((rows) => rows.map((row: { id: string }) => row.id));
+        if (itemIds.length > 0) {
+          await queryRunner.manager.update(
+            OrderItemSubItem,
+            { orderItemId: In(itemIds) },
+            { status: OrderStatus.Planned },
+          );
+        }
         await this.cartService.clearAndArchiveActiveCart(userId);
         await queryRunner.commitTransaction();
         return {
@@ -289,7 +377,15 @@ export class OrdersService {
 
     const [data, total] = await this.orderRepository.findAndCount({
       where,
-      relations: ['item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
+      relations: [
+        'item',
+        'item.service',
+        'item.package',
+        'item.package.services',
+        'item.subItems',
+        'item.subItems.service',
+        'item.files',
+      ],
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -339,7 +435,15 @@ export class OrdersService {
 
     const data = await this.orderRepository.find({
       where: { id: In(ids) },
-      relations: ['item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
+      relations: [
+        'item',
+        'item.service',
+        'item.package',
+        'item.package.services',
+        'item.subItems',
+        'item.subItems.service',
+        'item.files',
+      ],
       order: { createdAt: 'DESC' },
     });
 
@@ -430,7 +534,16 @@ export class OrdersService {
   async findOneForAdmin(id: string): Promise<OrderDto> {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: ['user', 'item', 'item.service', 'item.package', 'item.package.services', 'item.files'],
+      relations: [
+        'user',
+        'item',
+        'item.service',
+        'item.package',
+        'item.package.services',
+        'item.subItems',
+        'item.subItems.service',
+        'item.files',
+      ],
     });
 
     if (!order) {
@@ -477,6 +590,89 @@ export class OrdersService {
       await this.syncRecommendationForOrder(savedOrder, order.item.serviceId);
     }
     return savedOrder;
+  }
+
+  async updateItemStatusForAdmin(itemId: string, status: OrderStatus): Promise<OrderItem> {
+    const item = await this.orderItemRepository.findOne({
+      where: { id: itemId },
+      relations: ['order', 'subItems'],
+    });
+    if (!item) {
+      throw new NotFoundException(`Order item with id ${itemId} not found`);
+    }
+    if (item.packageId) {
+      throw new BadRequestException('Use sub-item status endpoint for package items');
+    }
+
+    item.status = status;
+    const savedItem = await this.orderItemRepository.save(item);
+
+    if (savedItem.serviceId) {
+      await this.syncRecommendationForOrder(savedItem.order, savedItem.serviceId);
+    }
+
+    return savedItem;
+  }
+
+  async updateSubItemStatus(
+    itemId: string,
+    subItemId: string,
+    status: OrderStatus,
+  ): Promise<{ subItem: OrderItemSubItem; itemStatus: OrderStatus }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const itemRepo = queryRunner.manager.getRepository(OrderItem);
+      const subItemRepo = queryRunner.manager.getRepository(OrderItemSubItem);
+
+      const item = await itemRepo.findOne({
+        where: { id: itemId },
+        relations: ['order', 'subItems', 'subItems.service'],
+      });
+      if (!item) {
+        throw new NotFoundException(`Order item with id ${itemId} not found`);
+      }
+      if (!item.packageId) {
+        throw new BadRequestException('Provided item is not a package item');
+      }
+      if (!item.subItems.length) {
+        throw new BadRequestException('Package item does not contain sub-items');
+      }
+
+      const subItem = item.subItems.find((entry) => entry.id === subItemId);
+      if (!subItem) {
+        throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
+      }
+
+      subItem.status = status;
+      await subItemRepo.save(subItem);
+
+      const recalculatedStatus = this.calculatePackageItemStatusFromSubItems(item.subItems);
+      const prevStatus = item.status;
+      item.status = recalculatedStatus;
+      const savedItem = await itemRepo.save(item);
+
+      if (prevStatus !== recalculatedStatus) {
+        const recommendation = await queryRunner.manager.getRepository(Recommendation).findOne({
+          where: { orderId: savedItem.orderId },
+        });
+        if (recommendation) {
+          recommendation.status = this.mapOrderStatusToRecommendationStatus(recalculatedStatus);
+          recommendation.orderId = recalculatedStatus === OrderStatus.Cancelled ? null : savedItem.orderId;
+          await queryRunner.manager.getRepository(Recommendation).save(recommendation);
+        }
+      }
+
+      await queryRunner.commitTransaction();
+      return { subItem, itemStatus: recalculatedStatus };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async getOrderCountsByUserId(userId: string): Promise<{

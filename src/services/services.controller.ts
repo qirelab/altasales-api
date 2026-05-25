@@ -34,13 +34,6 @@ import { ServicePackage } from '../packages/entities/package.entity';
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) { }
 
-  @Post()
-  @ApiOperation({ summary: 'Create a service' })
-  @ApiResponse({ status: 201, description: 'Service created', type: Service })
-  async create(@Body() createServiceDto: CreateServiceDto): Promise<Service> {
-    return this.servicesService.create(createServiceDto);
-  }
-
   @Get()
   @ApiOperation({
     summary: 'Get all services',
@@ -107,6 +100,17 @@ export class ServicesController {
     return this.servicesService.findAllServicesForAdmin(query);
   }
 
+  @Post('admin')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Create service (admin)' })
+  @ApiResponse({ status: 201, description: 'Service created', type: Service })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async createForAdmin(@Body() createServiceDto: CreateServiceDto): Promise<Service> {
+    return this.servicesService.create(createServiceDto);
+  }
+
   @Get('admin/contractors/:id')
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
@@ -164,25 +168,33 @@ export class ServicesController {
     return this.servicesService.findOne(id);
   }
 
-  @Patch(':id')
-  @ApiOperation({ summary: 'Update service' })
+  @Patch('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Update service by ID (admin)' })
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 200, description: 'Service updated', type: Service })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async update(
+  async updateForAdmin(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateServiceDto: UpdateServiceDto,
   ): Promise<Service> {
     return this.servicesService.update(id, updateServiceDto);
   }
 
-  @Delete(':id')
+  @Delete('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete service' })
+  @ApiOperation({ summary: 'Delete service by ID (admin)' })
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 204, description: 'Service deleted' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+  async removeForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.servicesService.remove(id);
   }
 }

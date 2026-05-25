@@ -14,11 +14,16 @@ import {
   IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import type { LeadGenerationType, SalesDirection } from '../entities/questionnaire.entity';
+import type {
+  LeadGenerationType,
+  PreferredMessenger,
+  SalesDirection,
+} from '../entities/questionnaire.entity';
 
 const SALES_DIRECTIONS: SalesDirection[] = ['B2B', 'B2C', 'B2G', 'B2B2C', 'C2C', 'B2P', 'D2C'];
 
 const LEAD_GENERATION_TYPES: LeadGenerationType[] = ['inbound', 'outbound'];
+const PREFERRED_MESSENGERS: PreferredMessenger[] = ['max', 'telegram'];
 
 class DesiredResultDto {
   @ApiProperty({ enum: ['1m', '3m', '6m'] })
@@ -60,6 +65,11 @@ export class CreateQuestionnaireDto {
     message: 'Некорректный формат телефона',
   })
   phone: string;
+
+  @ApiProperty({ enum: PREFERRED_MESSENGERS })
+  @IsNotEmpty({ message: 'Выберите мессенджер для связи' })
+  @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
+  preferredMessenger: PreferredMessenger;
 
   @ApiProperty({ example: 'ООО "ТехноСтарт"' })
   @IsString()
