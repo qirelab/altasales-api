@@ -133,6 +133,7 @@ export class ServicesService {
       name: string;
       description: string;
       category: string;
+      categoryId: string | null;
       price: number;
       image: string | null;
       skills: string[];
@@ -177,6 +178,7 @@ export class ServicesService {
       .addSelect('s.name', 'name')
       .addSelect('s.description', 'description')
       .addSelect('c.name', 'category')
+      .addSelect('s."categoryId"', 'categoryId')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
@@ -194,6 +196,7 @@ export class ServicesService {
         name: string;
         description: string;
         category: string | null;
+        categoryId: string | null;
         price: string;
         image: string | null;
         skills: string[] | string;
@@ -209,6 +212,7 @@ export class ServicesService {
         name: row.name,
         description: row.description,
         category: row.category ?? '',
+        categoryId: row.categoryId,
         price: Number(row.price),
         image: row.image,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
