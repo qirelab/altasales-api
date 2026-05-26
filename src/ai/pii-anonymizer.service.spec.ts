@@ -2,6 +2,7 @@ import { DataClass } from './enums/data-class.enum';
 import { AnonymizerProvider } from './interfaces/anonymizer-provider.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
+import { Test } from '@nestjs/testing';
 
 describe('PiiAnonymizerService', () => {
   let provider: { anonymize: jest.Mock };
@@ -45,6 +46,32 @@ describe('PiiAnonymizerService', () => {
     );
 
     expect(result.hasPii).toBe(false);
+  });
+
+  it('detects valid 10-digit and 12-digit INN values', () => {
+    const result = service.scanText('ИНН компании 7707083893, ИНН ИП 500100732259');
+
+    expect(result.hasPii).toBe(true);
+    expect(result.stats.inn).toBe(2);
+  });
+
+  it('does not detect random or phone-like digit sequences as INN', () => {
+    const result = service.scanText(
+      'Numbers 1234567890, 123456789012, 8999123456, 89991234567',
+    );
+
+    expect(result.stats.inn).toBe(0);
+  });
+
+  it('allows Nest to create the service without anonymizer provider', async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [PiiAnonymizerService],
+    }).compile();
+    const serviceWithoutProvider = moduleRef.get(PiiAnonymizerService);
+
+    await expect(serviceWithoutProvider.anonymizeMessages(messages)).rejects.toThrow(
+      'anonymizer_unavailable',
+    );
   });
 
   it('validates anonymizer JSON and returns anonymized data class', async () => {
