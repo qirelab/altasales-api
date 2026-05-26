@@ -4,9 +4,6 @@ import { PaymentModule } from '../payment/payment.module';
 import { AuthModule } from '../auth/auth.module';
 import { BalanceTransactionsModule } from '../balance-transactions/balance-transactions.module';
 import { CartModule } from '../cart/cart.module';
-import { ServicePackage } from '../packages/entities/package.entity';
-import { Service } from '../services/entities/service.entity';
-import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrdersService } from './orders.service';
@@ -14,7 +11,7 @@ import { OrdersController } from './orders.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order, OrderItem, Recommendation, Service, ServicePackage]),
+    TypeOrmModule.forFeature([Order, OrderItem]),
     PaymentModule,
     AuthModule,
     BalanceTransactionsModule,

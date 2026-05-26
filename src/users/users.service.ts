@@ -158,11 +158,7 @@ export class UsersService {
       )
       .addSelect('COALESCE(SUM(o.amount), 0)', 'totalOrdersAmount')
       .where('o."userId" = :userId', { userId })
-      .setParameter('activeStatuses', [
-        OrderStatus.PendingPayment,
-        OrderStatus.Planned,
-        OrderStatus.InProgress,
-      ])
+      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
       .getRawOne<{
         ordersCount: string | null;
         activeOrders: string | null;

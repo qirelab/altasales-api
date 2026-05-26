@@ -1,42 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsInt,
-  IsOptional,
-  IsUUID,
-  Min,
-  Validate,
-  ValidationArguments,
-  ValidatorConstraint,
-  ValidatorConstraintInterface,
-} from 'class-validator';
-
-@ValidatorConstraint({ name: 'exactlyOneOfServiceOrPackage', async: false })
-class ExactlyOneOfServiceOrPackageConstraint implements ValidatorConstraintInterface {
-  validate(_: unknown, args: ValidationArguments): boolean {
-    const obj = args.object as AddCartItemDto;
-    const hasService = Boolean(obj.serviceId);
-    const hasPackage = Boolean(obj.packageId);
-    return hasService !== hasPackage;
-  }
-
-  defaultMessage(): string {
-    return 'Exactly one of serviceId or packageId must be provided';
-  }
-}
+import { IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class AddCartItemDto {
-  @ApiPropertyOptional({ description: 'Service ID' })
-  @IsOptional()
+  @ApiProperty({ description: 'Service ID' })
   @IsUUID()
-  serviceId?: string;
-
-  @ApiPropertyOptional({ description: 'Package ID' })
-  @IsOptional()
-  @IsUUID()
-  packageId?: string;
-
-  @Validate(ExactlyOneOfServiceOrPackageConstraint)
-  private readonly _xorCheck?: boolean;
+  serviceId: string;
 
   @ApiPropertyOptional({ description: 'Quantity', default: 1 })
   @IsOptional()

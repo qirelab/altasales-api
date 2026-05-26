@@ -13,10 +13,9 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiResponse } from '@nestjs/swagger';
-import { join } from 'path';
-import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
-import { memoryStorage } from 'multer';
-import { extname } from 'path';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import { randomUUID } from 'crypto';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
@@ -27,16 +26,7 @@ const UPLOADS_DIR = join(process.cwd(), 'uploads');
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-type UploadFileMetadata = {
-  originalname: string;
-  mimetype: string;
-};
-
-interface MulterUtf8Options extends MulterOptions {
-  defParamCharset?: string;
-}
-
-const ALLOWED_MIME_TYPES = new Set([
+const ALLOWED_MIME_TYPES = [
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -49,45 +39,9 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
-  'image/heic',
-  'image/heif',
-  'image/heic-sequence',
-  'image/heif-sequence',
-  'image/x-heic',
-  'image/x-heif',
   'application/zip',
   'application/x-rar-compressed',
-]);
-
-const APPLE_IMAGE_EXTENSIONS = new Set(['.heic', '.heif']);
-const APPLE_IMAGE_FALLBACK_MIME_TYPES = new Set([
-  'application/octet-stream',
-  '',
-]);
-
-function isAllowedAppleImageFallback(file: UploadFileMetadata): boolean {
-  const extension = extname(file.originalname).toLowerCase();
-
-  return APPLE_IMAGE_EXTENSIONS.has(extension)
-    && APPLE_IMAGE_FALLBACK_MIME_TYPES.has(file.mimetype);
-}
-
-function isAllowedFileType(file: UploadFileMetadata): boolean {
-  return ALLOWED_MIME_TYPES.has(file.mimetype) || isAllowedAppleImageFallback(file);
-}
-
-const fileUploadOptions = {
-  storage: memoryStorage(),
-  defParamCharset: 'utf8',
-  limits: { fileSize: MAX_FILE_SIZE },
-  fileFilter: (_req, file, cb) => {
-    if (isAllowedFileType(file)) {
-      cb(null, true);
-    } else {
-      cb(new BadRequestException('Недопустимый тип файла'), false);
-    }
-  },
-} satisfies MulterUtf8Options;
+];
 
 @ApiTags('files')
 @Controller('files')
@@ -106,7 +60,23 @@ export class FilesController {
   })
   @ApiResponse({ status: 201, description: 'File uploaded' })
   @UseInterceptors(
-    FileInterceptor('file', fileUploadOptions),
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: UPLOADS_DIR,
+        filename: (_req, file, cb) => {
+          const uniqueName = `${randomUUID()}${extname(file.originalname)}`;
+          cb(null, uniqueName);
+        },
+      }),
+      limits: { fileSize: MAX_FILE_SIZE },
+      fileFilter: (_req, file, cb) => {
+        if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(new BadRequestException('Недопустимый тип файла'), false);
+        }
+      },
+    }),
   )
   async upload(
     @UploadedFile() file: Express.Multer.File,
