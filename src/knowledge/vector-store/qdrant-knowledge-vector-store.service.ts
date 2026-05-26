@@ -1,4 +1,9 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { KnowledgeChunk } from '../entities/knowledge-chunk.entity';
 import { KnowledgeDocument } from '../entities/knowledge-document.entity';
@@ -9,6 +14,11 @@ import {
 } from './knowledge-vector-store.interface';
 
 type QdrantPayload = Record<string, unknown>;
+type QdrantDistance = 'Cosine' | 'Euclid' | 'Dot' | 'Manhattan';
+type QdrantVectorParams = {
+  size: number;
+  distance: QdrantDistance;
+};
 
 const DEFAULT_QDRANT_URL = 'http://localhost:6333';
 const DEFAULT_COLLECTION_NAME = 'altasales_knowledge_chunks';
@@ -17,19 +27,23 @@ const DEFAULT_DISTANCE = 'Cosine';
 
 @Injectable()
 export class QdrantKnowledgeVectorStore implements KnowledgeVectorStore {
+  private readonly logger = new Logger(QdrantKnowledgeVectorStore.name);
   private readonly client: QdrantClient;
 
-  constructor() {
-    this.client = new QdrantClient({
-      url: process.env.QDRANT_URL || DEFAULT_QDRANT_URL,
-      apiKey: process.env.QDRANT_API_KEY || undefined,
-    });
+  constructor(@Optional() client?: QdrantClient) {
+    this.client = client
+      ?? new QdrantClient({
+        url: process.env.QDRANT_URL || DEFAULT_QDRANT_URL,
+        apiKey: process.env.QDRANT_API_KEY || undefined,
+      });
   }
 
   async ensureCollection(): Promise<void> {
     try {
       const exists = await this.client.collectionExists(this.collectionName);
       if (exists.exists) {
+        const collection = await this.client.getCollection(this.collectionName);
+        this.assertCollectionConfig(collection);
         return;
       }
 
@@ -39,7 +53,10 @@ export class QdrantKnowledgeVectorStore implements KnowledgeVectorStore {
           distance: this.distance,
         },
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
       throw new ServiceUnavailableException('Knowledge vector store unavailable');
     }
   }
@@ -160,6 +177,76 @@ export class QdrantKnowledgeVectorStore implements KnowledgeVectorStore {
     return typeof value === 'string' ? value : undefined;
   }
 
+  private assertCollectionConfig(collection: unknown): void {
+    const actual = this.readSingleVectorConfig(collection);
+    const expected: QdrantVectorParams = {
+      size: this.vectorSize,
+      distance: this.distance,
+    };
+
+    if (
+      !actual ||
+      actual.size !== expected.size ||
+      actual.distance !== expected.distance
+    ) {
+      this.logger.error({
+        eventName: 'KNOWLEDGE_VECTOR_COLLECTION_CONFIG_MISMATCH',
+        collectionName: this.collectionName,
+        expectedVectorSize: expected.size,
+        actualVectorSize: actual?.size ?? null,
+        expectedDistance: expected.distance,
+        actualDistance: actual?.distance ?? null,
+      });
+      throw new ServiceUnavailableException(
+        'Knowledge vector store configuration mismatch',
+      );
+    }
+  }
+
+  private readSingleVectorConfig(
+    collection: unknown,
+  ): QdrantVectorParams | undefined {
+    const vectors = this.readNestedRecord(
+      collection,
+      ['config', 'params', 'vectors'],
+    );
+    const size = vectors?.size;
+    const distance = vectors?.distance;
+
+    if (
+      typeof size === 'number' &&
+      this.isDistance(distance)
+    ) {
+      return { size, distance };
+    }
+
+    return undefined;
+  }
+
+  private readNestedRecord(
+    value: unknown,
+    path: string[],
+  ): Record<string, unknown> | undefined {
+    let current = value;
+    for (const key of path) {
+      if (!current || typeof current !== 'object' || Array.isArray(current)) {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+
+    return current && typeof current === 'object' && !Array.isArray(current)
+      ? current as Record<string, unknown>
+      : undefined;
+  }
+
+  private isDistance(value: unknown): value is QdrantDistance {
+    return value === 'Cosine' ||
+      value === 'Euclid' ||
+      value === 'Dot' ||
+      value === 'Manhattan';
+  }
+
   private get collectionName(): string {
     return process.env.QDRANT_COLLECTION_NAME || DEFAULT_COLLECTION_NAME;
   }
@@ -171,7 +258,7 @@ export class QdrantKnowledgeVectorStore implements KnowledgeVectorStore {
       : DEFAULT_VECTOR_SIZE;
   }
 
-  private get distance(): 'Cosine' | 'Euclid' | 'Dot' | 'Manhattan' {
+  private get distance(): QdrantDistance {
     const value = process.env.QDRANT_DISTANCE;
     if (
       value === 'Cosine' ||

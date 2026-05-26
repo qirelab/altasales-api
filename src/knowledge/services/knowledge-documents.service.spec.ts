@@ -1,3 +1,6 @@
+import { getMetadataArgsStorage } from 'typeorm';
+import { KnowledgeChunk } from '../entities/knowledge-chunk.entity';
+import { KnowledgeIndexJob } from '../entities/knowledge-index-job.entity';
 import { KnowledgeBasePurpose } from '../enums/knowledge-base-purpose.enum';
 import { KnowledgeDocumentStatus } from '../enums/knowledge-document-status.enum';
 import { KnowledgeSourceType } from '../enums/knowledge-source-type.enum';
@@ -99,6 +102,20 @@ describe('KnowledgeDocumentsService', () => {
 
     expect(vectorStore.deleteByDocumentId).not.toHaveBeenCalled();
     expect(documentRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('relies on database cascade for chunks and index jobs during hard delete', () => {
+    const chunkRelation = getMetadataArgsStorage().relations.find(
+      (relation) =>
+        relation.target === KnowledgeChunk && relation.propertyName === 'document',
+    );
+    const jobRelation = getMetadataArgsStorage().relations.find(
+      (relation) =>
+        relation.target === KnowledgeIndexJob && relation.propertyName === 'document',
+    );
+
+    expect(chunkRelation?.options).toMatchObject({ onDelete: 'CASCADE' });
+    expect(jobRelation?.options).toMatchObject({ onDelete: 'CASCADE' });
   });
 
   it('updates editable metadata fields without touching purpose, chunks, or vectors', async () => {

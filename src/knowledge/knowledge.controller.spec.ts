@@ -18,4 +18,13 @@ describe('Knowledge upload validation', () => {
       }),
     ).toBe(true);
   });
+
+  it('rejects generic octet-stream uploads', () => {
+    expect(
+      isSupportedKnowledgeUploadFile({
+        originalname: 'guide.md',
+        mimetype: 'application/octet-stream',
+      }),
+    ).toBe(false);
+  });
 });

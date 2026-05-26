@@ -49,7 +49,6 @@ const SUPPORTED_MIME_TYPES = new Set([
   'text/csv',
   'text/markdown',
   'application/json',
-  'application/octet-stream',
 ]);
 const SUPPORTED_EXTENSIONS = new Set([
   '.pdf',
