@@ -101,15 +101,22 @@ export class OrdersService {
 
   private async syncRecommendationForOrder(
     order: Pick<Order, 'id' | 'userId' | 'status'>,
-    serviceId: string,
+    target: { serviceId?: string | null; packageId?: string | null },
     manager?: EntityManager,
   ): Promise<void> {
     const recommendationRepo = manager
       ? manager.getRepository(Recommendation)
       : this.recommendationRepository;
+    const hasService = Boolean(target.serviceId);
+    const hasPackage = Boolean(target.packageId);
+    if (hasService === hasPackage) {
+      return;
+    }
 
     const recommendation = await recommendationRepo.findOne({
-      where: { userId: order.userId, serviceId },
+      where: hasService
+        ? { userId: order.userId, serviceId: target.serviceId! }
+        : { userId: order.userId, packageId: target.packageId! },
     });
 
     if (!recommendation) {
@@ -275,8 +282,11 @@ export class OrdersService {
             await queryRunner.manager.save(OrderItemSubItem, subItems);
           }
         }
-        if (checkoutItem.serviceId) {
-          await this.syncRecommendationForOrder(order, checkoutItem.serviceId, queryRunner.manager);
+        if (checkoutItem.serviceId || checkoutItem.packageId) {
+          await this.syncRecommendationForOrder(order, {
+            serviceId: checkoutItem.serviceId ?? null,
+            packageId: checkoutItem.packageId ?? null,
+          }, queryRunner.manager);
         }
         totalAmount += resolvedAmount;
         createdOrders.push(order);
@@ -587,7 +597,9 @@ export class OrdersService {
     order.status = dto.status;
     const savedOrder = await this.orderRepository.save(order);
     if (order.item?.serviceId) {
-      await this.syncRecommendationForOrder(savedOrder, order.item.serviceId);
+      await this.syncRecommendationForOrder(savedOrder, { serviceId: order.item.serviceId });
+    } else if (order.item?.packageId) {
+      await this.syncRecommendationForOrder(savedOrder, { packageId: order.item.packageId });
     }
     return savedOrder;
   }
@@ -608,7 +620,7 @@ export class OrdersService {
     const savedItem = await this.orderItemRepository.save(item);
 
     if (savedItem.serviceId) {
-      await this.syncRecommendationForOrder(savedItem.order, savedItem.serviceId);
+      await this.syncRecommendationForOrder(savedItem.order, { serviceId: savedItem.serviceId });
     }
 
     return savedItem;

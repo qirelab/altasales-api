@@ -1,7 +1,9 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -10,10 +12,20 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { Service } from '../../services/entities/service.entity';
+import { ServicePackage } from '../../packages/entities/package.entity';
 import { Order } from '../../orders/entities/order.entity';
 import { RecommendationStatus } from './recommendation-status.enum';
 
 @Entity()
+@Index('UQ_recommendation_user_service_not_null', ['userId', 'serviceId'], {
+  unique: true,
+  where: '"serviceId" IS NOT NULL',
+})
+@Index('UQ_recommendation_user_package_not_null', ['userId', 'packageId'], {
+  unique: true,
+  where: '"packageId" IS NOT NULL',
+})
+@Check('CHK_recommendation_service_xor_package', '("serviceId" IS NOT NULL) <> ("packageId" IS NOT NULL)')
 export class Recommendation {
   @ApiProperty({
     example: '550e8400-e29b-41d4-a716-446655440000',
@@ -33,16 +45,28 @@ export class Recommendation {
   @JoinColumn({ name: 'userId' })
   user: User;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',
-    description: 'Recommended service ID',
+    description: 'Recommended service ID (mutually exclusive with packageId)',
+    nullable: true,
   })
-  @Column({ type: 'uuid' })
-  serviceId: string;
+  @Column({ type: 'uuid', nullable: true })
+  serviceId: string | null;
 
-  @ManyToOne(() => Service, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Service, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'serviceId' })
-  service: Service;
+  service: Service | null;
+
+  @ApiPropertyOptional({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Recommended package ID',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  packageId: string | null;
+
+  @ManyToOne(() => ServicePackage, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'packageId' })
+  package: ServicePackage | null;
 
   @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',

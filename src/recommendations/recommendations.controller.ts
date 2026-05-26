@@ -41,7 +41,7 @@ export class RecommendationsController {
   @ApiOperation({
     summary: 'Get recommendations assigned to current user',
     description:
-      'Returns recommendations linked to current user with service/document details.',
+      'Returns recommendations linked to current user with service, document, or package details.',
   })
   @ApiResponse({
     status: 200,
@@ -91,6 +91,7 @@ export class RecommendationsController {
   @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Create recommendation for user (admin)',
+    description: 'Provide exactly one of serviceId (service/document) or packageId.',
   })
   @ApiResponse({ status: 201, description: 'Recommendation created' })
   @ApiResponse({ status: 400, description: 'Invalid recommendation payload' })
@@ -98,9 +99,9 @@ export class RecommendationsController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({
     status: 409,
-    description: 'This service is already recommended to this user',
+    description: 'This service or package is already recommended to this user',
   })
-  @ApiResponse({ status: 404, description: 'User or service not found' })
+  @ApiResponse({ status: 404, description: 'User, service, or package not found' })
   async createForAdmin(@Body() dto: CreateAdminRecommendationDto) {
     return this.recommendationsService.createForAdmin(dto);
   }
@@ -110,6 +111,8 @@ export class RecommendationsController {
   @Roles(UserRole.ADMIN)
   @ApiOperation({
     summary: 'Update recommendation (admin)',
+    description:
+      'To change the recommended item, send only serviceId or only packageId (not both).',
   })
   @ApiParam({ name: 'id', description: 'Recommendation ID' })
   @ApiResponse({ status: 200, description: 'Recommendation updated' })
@@ -118,9 +121,9 @@ export class RecommendationsController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({
     status: 409,
-    description: 'This service is already recommended to this user',
+    description: 'This service or package is already recommended to this user',
   })
-  @ApiResponse({ status: 404, description: 'Recommendation/service/order not found' })
+  @ApiResponse({ status: 404, description: 'Recommendation, service, package, or order not found' })
   async updateForAdmin(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAdminRecommendationDto,
