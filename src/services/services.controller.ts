@@ -27,33 +27,26 @@ import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
-import { ServicePackage } from '../packages/entities/package.entity';
 
 @ApiTags('services')
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) { }
 
+  @Post()
+  @ApiOperation({ summary: 'Create a service' })
+  @ApiResponse({ status: 201, description: 'Service created', type: Service })
+  async create(@Body() createServiceDto: CreateServiceDto): Promise<Service> {
+    return this.servicesService.create(createServiceDto);
+  }
+
   @Get()
   @ApiOperation({
     summary: 'Get all services',
-    description: 'Returns packages/services; filters by categoryIds; category content is returned only for a single selected category',
+    description: 'Search by name, filter by type and category, sort by price and date (asc/desc)',
   })
-  @ApiResponse({ status: 200, description: 'Packages and services list with optional category content' })
-  async findAll(@Query() query: GetServicesQueryDto): Promise<{
-    packages: ServicePackage[];
-    services: Service[];
-    categoryContent: {
-      id: string;
-      name: string;
-      description: string | null;
-      faqs: Array<{
-        id: string;
-        question: string;
-        answer: string;
-      }>;
-    } | null;
-  }> {
+  @ApiResponse({ status: 200, description: 'List of services', type: [Service] })
+  async findAll(@Query() query: GetServicesQueryDto): Promise<Service[]> {
     return this.servicesService.findAll(query);
   }
 
@@ -98,17 +91,6 @@ export class ServicesController {
   @ApiResponse({ status: 200, description: 'Paginated services list with orders count' })
   async findAllServicesForAdmin(@Query() query: GetAdminServicesQueryDto) {
     return this.servicesService.findAllServicesForAdmin(query);
-  }
-
-  @Post('admin')
-  @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Create service (admin)' })
-  @ApiResponse({ status: 201, description: 'Service created', type: Service })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  async createForAdmin(@Body() createServiceDto: CreateServiceDto): Promise<Service> {
-    return this.servicesService.create(createServiceDto);
   }
 
   @Get('admin/contractors/:id')
@@ -168,33 +150,25 @@ export class ServicesController {
     return this.servicesService.findOne(id);
   }
 
-  @Patch('admin/:id')
-  @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
-  @ApiOperation({ summary: 'Update service by ID (admin)' })
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update service' })
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 200, description: 'Service updated', type: Service })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async updateForAdmin(
+  async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateServiceDto: UpdateServiceDto,
   ): Promise<Service> {
     return this.servicesService.update(id, updateServiceDto);
   }
 
-  @Delete('admin/:id')
-  @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete service by ID (admin)' })
+  @ApiOperation({ summary: 'Delete service' })
   @ApiParam({ name: 'id', description: 'Service ID' })
   @ApiResponse({ status: 204, description: 'Service deleted' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Service not found' })
-  async removeForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.servicesService.remove(id);
   }
 }

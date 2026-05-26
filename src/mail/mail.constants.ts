@@ -1,1 +1,0 @@
-export const RESEND_CLIENT = 'RESEND_CLIENT';

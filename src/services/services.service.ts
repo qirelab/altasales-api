@@ -1,11 +1,8 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
-import { Category } from '../categories/entities/category.entity';
+import { Brackets, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
-import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
-import { ServicePackage } from '../packages/entities/package.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -17,16 +14,13 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
+import { OrderItem } from '../orders/entities/order-item.entity';
 
 @Injectable()
 export class ServicesService {
   constructor(
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
-    @InjectRepository(ServicePackage)
-    private readonly packageRepository: Repository<ServicePackage>,
-    @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(User)
@@ -34,10 +28,6 @@ export class ServicesService {
   ) { }
 
   async create(createServiceDto: CreateServiceDto): Promise<Service> {
-    if (createServiceDto.categoryId) {
-      await this.ensureCategoryExists(createServiceDto.categoryId);
-    }
-
     const service = this.serviceRepository.create({
       ...createServiceDto,
       skills: createServiceDto.skills ?? [],
@@ -45,25 +35,8 @@ export class ServicesService {
     return await this.serviceRepository.save(service);
   }
 
-  async findAll(query: GetServicesQueryDto): Promise<{
-    packages: ServicePackage[];
-    services: Service[];
-    categoryContent: {
-      id: string;
-      name: string;
-      description: string | null;
-      faqs: Array<{
-        id: string;
-        question: string;
-        answer: string;
-      }>;
-    } | null;
-  }> {
-    const categoryIds = query.categoryIds ?? [];
-
-    const qb = this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.category', 'category');
+  async findAll(query: GetServicesQueryDto): Promise<Service[]> {
+    const qb = this.serviceRepository.createQueryBuilder('service');
 
     if (query.name?.trim()) {
       qb.andWhere('service.name ILIKE :name', {
@@ -73,8 +46,8 @@ export class ServicesService {
     if (query.type) {
       qb.andWhere('service.type = :type', { type: query.type });
     }
-    if (categoryIds.length > 0) {
-      qb.andWhere('service."categoryId" IN (:...categoryIds)', { categoryIds });
+    if (query.category) {
+      qb.andWhere('service.category = :category', { category: query.category });
     }
     if (query.skill) {
       qb.andWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([query.skill]) });
@@ -90,40 +63,7 @@ export class ServicesService {
       }
     }
 
-    const packageQb = this.packageRepository
-      .createQueryBuilder('sp')
-      .leftJoinAndSelect('sp.category', 'category');
-
-    if (categoryIds.length > 0) {
-      packageQb.andWhere('sp."categoryId" IN (:...categoryIds)', { categoryIds });
-    }
-    if (query.name?.trim()) {
-      packageQb.andWhere('sp.name ILIKE :name', {
-        name: `%${query.name.trim()}%`,
-      });
-    }
-    if (query.dateOrder) {
-      packageQb.orderBy('sp.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
-    }
-    if (query.priceOrder) {
-      if (query.dateOrder) {
-        packageQb.addOrderBy('sp.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
-      } else {
-        packageQb.orderBy('sp.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
-      }
-    }
-
-    const [services, packages, categoryContent] = await Promise.all([
-      qb.getMany(),
-      query.type && query.type !== ServiceType.Service ? Promise.resolve([]) : packageQb.getMany(),
-      this.getCategoryContentForFilter(categoryIds),
-    ]);
-
-    return {
-      packages,
-      services,
-      categoryContent,
-    };
+    return await qb.getMany();
   }
 
   async findAllServicesForAdmin(query: GetAdminServicesQueryDto): Promise<{
@@ -133,7 +73,6 @@ export class ServicesService {
       name: string;
       description: string;
       category: string;
-      categoryId: string | null;
       price: number;
       image: string | null;
       skills: string[];
@@ -152,17 +91,14 @@ export class ServicesService {
 
     const baseQb = this.serviceRepository
       .createQueryBuilder('s')
-      .leftJoin('s.category', 'c')
-      .where('s.type IN (:...types)', {
-        types: [ServiceType.Service, ServiceType.Document],
-      });
+      .where('s.type = :type', { type: ServiceType.Service });
 
     if (search) {
       baseQb.andWhere(
         new Brackets((qb) => {
           qb
             .where('s.name ILIKE :search', { search: `%${search}%` })
-            .orWhere('c.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('s.category ILIKE :search', { search: `%${search}%` })
             .orWhere('s.description ILIKE :search', { search: `%${search}%` });
         }),
       );
@@ -177,8 +113,7 @@ export class ServicesService {
       .addSelect('s.type', 'type')
       .addSelect('s.name', 'name')
       .addSelect('s.description', 'description')
-      .addSelect('c.name', 'category')
-      .addSelect('s."categoryId"', 'categoryId')
+      .addSelect('s.category', 'category')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
@@ -186,7 +121,6 @@ export class ServicesService {
       .addSelect('s."userId"', 'userId')
       .addSelect('COUNT(oi.id)', 'ordersCount')
       .groupBy('s.id')
-      .addGroupBy('c.name')
       .orderBy('s."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
@@ -195,8 +129,7 @@ export class ServicesService {
         type: string;
         name: string;
         description: string;
-        category: string | null;
-        categoryId: string | null;
+        category: string;
         price: string;
         image: string | null;
         skills: string[] | string;
@@ -211,8 +144,7 @@ export class ServicesService {
         type: row.type as ServiceType,
         name: row.name,
         description: row.description,
-        category: row.category ?? '',
-        categoryId: row.categoryId,
+        category: row.category,
         price: Number(row.price),
         image: row.image,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
@@ -244,7 +176,7 @@ export class ServicesService {
   }
 
   async findOne(id: string): Promise<Service> {
-    const service = await this.serviceRepository.findOne({ where: { id }, relations: ['category'] });
+    const service = await this.serviceRepository.findOne({ where: { id } });
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
@@ -252,10 +184,6 @@ export class ServicesService {
   }
 
   async update(id: string, updateServiceDto: UpdateServiceDto): Promise<Service> {
-    if (updateServiceDto.categoryId) {
-      await this.ensureCategoryExists(updateServiceDto.categoryId);
-    }
-
     const service = await this.findOne(id);
     Object.assign(service, updateServiceDto);
     return await this.serviceRepository.save(service);
@@ -283,7 +211,7 @@ export class ServicesService {
       type: ServiceType.Contractor,
       name: 'Подрядчик',
       description: dto.description,
-      categoryId: null,
+      category: ServiceType.Contractor,
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
@@ -391,11 +319,7 @@ export class ServicesService {
       )
       .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
       .where('o."userId" = :userId', { userId })
-      .setParameter('activeStatuses', [
-        OrderStatus.PendingPayment,
-        OrderStatus.Planned,
-        OrderStatus.InProgress,
-      ])
+      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -472,14 +396,9 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(item.amount), 0)', 'totalIncome')
-      .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
-      .andWhere('service."userId" = :userId', { userId })
-      .setParameter('activeStatuses', [
-        OrderStatus.PendingPayment,
-        OrderStatus.Planned,
-        OrderStatus.InProgress,
-      ])
+      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .where('o."userId" = :userId', { userId })
+      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -526,17 +445,7 @@ export class ServicesService {
   }
 
   async findOneServiceForAdmin(id: string): Promise<{
-    service: {
-      id: string;
-      type: ServiceType;
-      name: string;
-      description: string;
-      category: string;
-      price: number;
-      image: string | null;
-      skills: string[];
-      createdAt: Date;
-    };
+    service: Service;
     stats: {
       totalProjects: number;
       activeOrders: number;
@@ -551,8 +460,7 @@ export class ServicesService {
     }>;
   }> {
     const service = await this.serviceRepository.findOne({
-      where: { id, type: In([ServiceType.Service, ServiceType.Document]) },
-      relations: ['category'],
+      where: { id, type: ServiceType.Service },
     });
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
@@ -567,11 +475,7 @@ export class ServicesService {
         'activeOrders',
       )
       .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
-      .setParameter('activeStatuses', [
-        OrderStatus.PendingPayment,
-        OrderStatus.Planned,
-        OrderStatus.InProgress,
-      ])
+      .setParameter('activeStatuses', [OrderStatus.PendingPayment, OrderStatus.InProgress])
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -600,17 +504,7 @@ export class ServicesService {
       }>();
 
     return {
-      service: {
-        id: service.id,
-        type: service.type,
-        name: service.name,
-        description: service.description,
-        category: service.category?.name ?? '',
-        price: Number(service.price),
-        image: service.image,
-        skills: service.skills,
-        createdAt: service.createdAt,
-      },
+      service,
       stats: {
         totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
         activeOrders: Number(aggregateRaw?.activeOrders ?? 0),
@@ -674,48 +568,5 @@ export class ServicesService {
       throw new NotFoundException(`Подрядчик с ID ${id} не найден`);
     }
     return contractor;
-  }
-
-  private async ensureCategoryExists(categoryId: string): Promise<void> {
-    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
-    if (!category) {
-      throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
-    }
-  }
-
-  private async getCategoryContentForFilter(categoryIds: string[]): Promise<{
-    id: string;
-    name: string;
-    description: string | null;
-    faqs: Array<{
-      id: string;
-      question: string;
-      answer: string;
-    }>;
-  } | null> {
-    if (categoryIds.length !== 1) {
-      return null;
-    }
-
-    const [categoryId] = categoryIds;
-    const category = await this.categoryRepository.findOne({
-      where: { id: categoryId },
-      relations: ['faqs'],
-    });
-
-    if (!category) {
-      throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
-    }
-
-    return {
-      id: category.id,
-      name: category.name,
-      description: category.description,
-      faqs: category.faqs.map((faq) => ({
-        id: faq.id,
-        question: faq.question,
-        answer: faq.answer,
-      })),
-    };
   }
 }
