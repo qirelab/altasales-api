@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { Brackets, DataSource, In, Repository } from 'typeorm';
+import { UsersService } from '../users/users.service';
 import { Category } from '../categories/entities/category.entity';
 import { Order } from '../orders/entities/order.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
@@ -31,6 +32,10 @@ export class ServicesService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
+    private readonly dataSource: DataSource,
+    private readonly usersService: UsersService,
   ) { }
 
   async create(createServiceDto: CreateServiceDto): Promise<Service> {
@@ -666,7 +671,31 @@ export class ServicesService {
 
   async removeContractorForAdmin(id: string): Promise<void> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
-    await this.serviceRepository.remove(contractor);
+    const userId = contractor.userId;
+
+    const orderItemsCount = await this.orderItemRepository.count({
+      where: { serviceId: contractor.id },
+    });
+    if (orderItemsCount > 0) {
+      throw new ConflictException(
+        'Нельзя удалить эксперта: есть заказы, связанные с этим профилем',
+      );
+    }
+
+    let firebaseUid: string | null = null;
+    if (userId) {
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      firebaseUid = user?.firebaseUid ?? null;
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(Service).remove(contractor);
+      if (userId) {
+        await manager.delete(User, { id: userId });
+      }
+    });
+
+    await this.usersService.removeFirebaseAuthUser(firebaseUid);
   }
 
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
