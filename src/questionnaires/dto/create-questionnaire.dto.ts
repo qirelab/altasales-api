@@ -14,9 +14,11 @@ import {
   IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import type { SalesDirection } from '../entities/questionnaire.entity';
+import type { LeadGenerationType, SalesDirection } from '../entities/questionnaire.entity';
 
 const SALES_DIRECTIONS: SalesDirection[] = ['B2B', 'B2C', 'B2G', 'B2B2C', 'C2C', 'B2P', 'D2C'];
+
+const LEAD_GENERATION_TYPES: LeadGenerationType[] = ['inbound', 'outbound'];
 
 class DesiredResultDto {
   @ApiProperty({ enum: ['1m', '3m', '6m'] })
@@ -69,6 +71,12 @@ export class CreateQuestionnaireDto {
   @ArrayMinSize(1, { message: 'Выберите хотя бы одно направление продаж' })
   @IsIn(SALES_DIRECTIONS, { each: true })
   salesDirection: SalesDirection[];
+
+  @ApiProperty({ enum: LEAD_GENERATION_TYPES, isArray: true })
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Выберите хотя бы один тип лидогенерации' })
+  @IsIn(LEAD_GENERATION_TYPES, { each: true })
+  leadGenerationTypes: LeadGenerationType[];
 
   @ApiProperty({ example: 'IT-решения для бизнеса' })
   @IsString()

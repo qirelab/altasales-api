@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -7,13 +7,19 @@ import {
 } from '../recommendations/recommendations.service';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { Questionnaire } from './entities/questionnaire.entity';
+import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class QuestionnairesService {
+  private readonly logger = new Logger(QuestionnairesService.name);
+
   constructor(
     @InjectRepository(Questionnaire)
     private readonly repo: Repository<Questionnaire>,
     private readonly recommendationsService: RecommendationsService,
+    private readonly usersService: UsersService,
+    private readonly mailService: MailService,
   ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
@@ -21,7 +27,34 @@ export class QuestionnairesService {
       userId,
       answers: dto,
     });
-    return this.repo.save(questionnaire);
+    const saved = await this.repo.save(questionnaire);
+
+    this.notifyAdmins(saved, userId).catch((error) => {
+      this.logger.error(`Failed to notify admins: ${error.message}`);
+    });
+
+    return saved;
+  }
+
+  private async notifyAdmins(
+    questionnaire: Questionnaire,
+    userId: string,
+  ): Promise<void> {
+    let user;
+    try {
+      user = await this.usersService.findOne(userId);
+    } catch {
+      return;
+    }
+
+    await this.mailService.notifyAdminsAboutNewQuestionnaire({
+      userName: questionnaire.answers.name,
+      userEmail: user.email,
+      userPhone: questionnaire.answers.phone,
+      companyName: questionnaire.answers.industry,
+      questionnaireId: questionnaire.id,
+      userId,
+    });
   }
 
   async findAll(): Promise<Questionnaire[]> {
