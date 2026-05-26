@@ -164,6 +164,10 @@ jobs:
             source .env
             set +a
 
+            # Run database migrations against the deploy DB
+            echo "Running database migrations..."
+            npm run migration:run:prod
+
             # PM2 deployment
             echo "Managing PM2 process..."
             if pm2 describe $PM2_NAME > /dev/null 2>&1; then
