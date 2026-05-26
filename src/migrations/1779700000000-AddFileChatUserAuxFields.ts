@@ -37,7 +37,7 @@ export class AddFileChatUserAuxFields1779700000000 implements MigrationInterface
           AND tc.table_name = 'chat_conversation'
           AND tc.constraint_type = 'UNIQUE'
         GROUP BY tc.constraint_name
-        HAVING array_agg(kcu.column_name ORDER BY kcu.ordinal_position)
+        HAVING array_agg(kcu.column_name::text ORDER BY kcu.ordinal_position)
           = ARRAY['participantOneId', 'participantTwoId'];
 
         IF con_name IS NOT NULL THEN
@@ -59,7 +59,7 @@ export class AddFileChatUserAuxFields1779700000000 implements MigrationInterface
             AND tc.table_name = 'chat_conversation'
             AND tc.constraint_type = 'UNIQUE'
           GROUP BY tc.constraint_name
-          HAVING array_agg(kcu.column_name ORDER BY kcu.ordinal_position)
+          HAVING array_agg(kcu.column_name::text ORDER BY kcu.ordinal_position)
             = ARRAY['participantOneId', 'participantTwoId', 'orderId']
         ) THEN
           ALTER TABLE "chat_conversation"
