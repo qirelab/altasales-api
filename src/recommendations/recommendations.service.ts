@@ -1,24 +1,41 @@
 import {
-  Injectable,
-  NotFoundException,
   BadRequestException,
   ConflictException,
-  Logger,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
-import { MailService } from '../mail/mail.service';
+import { Order } from '../orders/entities/order.entity';
+import { ServicePackage } from '../packages/entities/package.entity';
+import { Service } from '../services/entities/service.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
-import { Service } from '../services/entities/service.entity';
-import { ServicePackage } from '../packages/entities/package.entity';
-import { WebSocketGatewayService } from '../websocket/websocket.gateway';
-import { Order } from '../orders/entities/order.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
+import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
-import { Recommendation } from './entities/recommendation.entity';
+import { UpdateUserRecommendationDto } from './dto/update-user-recommendation.dto';
+import { RecommendationGenerationJob } from './entities/recommendation-generation-job.entity';
+import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
+import { Recommendation } from './entities/recommendation.entity';
+import {
+  RecommendationGenerationJobService,
+  type RecommendationGenerationJobSummary,
+} from './recommendation-generation-job.service';
+import { RecommendationNotificationService } from './recommendation-notification.service';
+import {
+  RecommendationScoringService,
+  type GeneratedRecommendationItem,
+  type ServiceCandidate,
+} from './recommendation-scoring.service';
+import {
+  ensureDependencyGraphIsValid,
+  validateDependencyIds,
+} from './dependency-graph.utils';
+
+const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
 
 export type UserRecommendationListItem = {
   id: string;
@@ -29,13 +46,27 @@ export type UserRecommendationListItem = {
   category: string;
   price: number;
   status: RecommendationStatus;
+  priority: RecommendationPriority;
+  rationale: string | null;
+  dependencyIds: string[];
+  diagnosticSignals: string[];
   createdAt: Date;
 };
 
-@Injectable()
-export class RecommendationsService {
-  private readonly logger = new Logger(RecommendationsService.name);
+export type AdminRecommendationListItem = {
+  id: string;
+  serviceId: string | null;
+  packageId: string | null;
+  category: string;
+  status: RecommendationStatus;
+  priority: RecommendationPriority;
+  price: number;
+  rationale: string | null;
+  dependencyIds: string[];
+};
 
+@Injectable()
+export class RecommendationsService implements OnModuleInit {
   constructor(
     @InjectRepository(Recommendation)
     private readonly recommendationRepository: Repository<Recommendation>,
@@ -47,10 +78,22 @@ export class RecommendationsService {
     private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
-    private readonly mailService: MailService,
-    private readonly websocketGateway: WebSocketGatewayService,
-    private readonly configService: ConfigService,
-  ) { }
+    private readonly scoringService: RecommendationScoringService,
+    private readonly generationJobService: RecommendationGenerationJobService,
+    private readonly notificationService: RecommendationNotificationService,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.generationJobService.recoverInterruptedGenerationJobs();
+    this.generationJobService.schedulePendingGenerationJobs((job) =>
+      this.runGenerationJob(job),
+    );
+    this.generationJobService.startRecoveryLoop((job) =>
+      this.runGenerationJob(job),
+    );
+  }
+
+  // ── User-facing queries ───────────────────────────────────────────
 
   async findAssignedToUser(userId: string): Promise<Recommendation[]> {
     return this.recommendationRepository
@@ -67,7 +110,11 @@ export class RecommendationsService {
           })
           .orWhere('package.id IS NOT NULL');
       }))
-      .orderBy('recommendation."createdAt"', 'DESC')
+      .orderBy(
+        `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
+        'ASC',
+      )
+      .addOrderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
 
@@ -85,9 +132,13 @@ export class RecommendationsService {
       .addSelect('recommendation."packageId"', 'packageId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
-      .addSelect('COALESCE(serviceCategory.name, packageCategory.name, \'\')', 'category')
+      .addSelect("COALESCE(serviceCategory.name, packageCategory.name, '')", 'category')
       .addSelect('COALESCE(service.price, package.price)', 'price')
       .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation.priority', 'priority')
+      .addSelect('recommendation.rationale', 'rationale')
+      .addSelect('recommendation."dependencyIds"', 'dependencyIds')
+      .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(new Brackets((qb) => {
@@ -97,7 +148,11 @@ export class RecommendationsService {
           })
           .orWhere('package.id IS NOT NULL');
       }))
-      .orderBy('recommendation."createdAt"', 'DESC')
+      .orderBy(
+        `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
+        'ASC',
+      )
+      .addOrderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem>();
   }
 
@@ -117,51 +172,63 @@ export class RecommendationsService {
           })
           .orWhere('package.id IS NOT NULL');
       }))
-      .orderBy('recommendation."createdAt"', 'DESC')
+      .orderBy(
+        `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
+        'ASC',
+      )
+      .addOrderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
+
+  // ── Admin CRUD (merged from develop) ──────────────────────────────
 
   async createForAdmin(dto: CreateAdminRecommendationDto): Promise<Recommendation> {
     const user = await this.getUserOrThrow(dto.userId);
     const target = await this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
     await this.ensureRecommendationIsUnique(dto.userId, target.serviceId, target.packageId);
-    const shouldNotify = await this.shouldNotifyAboutNewRecommendation(user);
+    await ensureDependencyGraphIsValid(
+      this.recommendationRepository,
+      dto.dependencyIds ?? [],
+      undefined,
+      dto.userId,
+    );
+    const shouldNotify =
+      await this.notificationService.shouldNotifyAboutNewRecommendation(user);
 
     const recommendation = this.recommendationRepository.create({
       userId: dto.userId,
       serviceId: target.serviceId,
       packageId: target.packageId,
       status: dto.status ?? RecommendationStatus.Recommended,
+      priority: dto.priority ?? RecommendationPriority.Medium,
+      rationale: dto.rationale ?? null,
+      dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
+      diagnosticSignals: this.scoringService.normalizeSignals(dto.diagnosticSignals ?? []),
+      generatedAt: null,
       orderId: null,
     });
 
     const saved = await this.recommendationRepository.save(recommendation);
 
     if (shouldNotify) {
-      await this.notifyUserAboutRecommendations(user, saved);
+      await this.notificationService.notifyUserAboutRecommendations(user, saved);
     }
 
     return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
 
-  async markRecommendationsSeen(userId: string): Promise<{ notificationsSeenAt: Date }> {
+  async markRecommendationsSeen(
+    userId: string,
+  ): Promise<{ notificationsSeenAt: Date }> {
     const user = await this.getUserOrThrow(userId);
-    user.notificationsSeenAt = new Date();
-    const savedUser = await this.userRepository.save(user);
-    return { notificationsSeenAt: savedUser.notificationsSeenAt! };
+    return this.notificationService.markSeen(user);
   }
 
   async updateForAdmin(
     id: string,
     dto: UpdateAdminRecommendationDto,
   ): Promise<Recommendation> {
-    const recommendation = await this.recommendationRepository.findOne({
-      where: { id },
-    });
-
-    if (!recommendation) {
-      throw new NotFoundException(`Recommendation with id ${id} not found`);
-    }
+    const recommendation = await this.getRecommendationOrThrow(id);
 
     const shouldUpdateTarget = dto.serviceId !== undefined || dto.packageId !== undefined;
     if (shouldUpdateTarget) {
@@ -187,27 +254,158 @@ export class RecommendationsService {
       recommendation.orderId = dto.orderId;
     }
 
-    if (dto.status) {
-      recommendation.status = dto.status;
+    if (dto.status !== undefined) recommendation.status = dto.status;
+    if (dto.priority !== undefined) recommendation.priority = dto.priority;
+    if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
+
+    if (dto.dependencyIds) {
+      recommendation.dependencyIds = await validateDependencyIds(
+        this.recommendationRepository,
+        recommendation.id,
+        dto.dependencyIds,
+        recommendation.userId,
+      );
+    }
+
+    if (dto.diagnosticSignals) {
+      recommendation.diagnosticSignals =
+        this.scoringService.normalizeSignals(dto.diagnosticSignals);
     }
 
     const saved = await this.recommendationRepository.save(recommendation);
     return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
 
-  private async resolveUpdateRecommendationTarget(
-    dto: UpdateAdminRecommendationDto,
-  ): Promise<{ serviceId: string | null; packageId: string | null }> {
-    const hasService = dto.serviceId !== undefined;
-    const hasPackage = dto.packageId !== undefined;
+  // ── User self-service ─────────────────────────────────────────────
 
-    if (hasService && hasPackage) {
-      return this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
+  async updateForUser(
+    userId: string,
+    id: string,
+    dto: UpdateUserRecommendationDto,
+  ): Promise<Recommendation> {
+    const recommendation = await this.getUserRecommendationOrThrow(userId, id);
+    recommendation.status = dto.status;
+    return this.recommendationRepository.save(recommendation);
+  }
+
+  async completeForUser(userId: string, id: string): Promise<Recommendation> {
+    return this.updateForUser(userId, id, {
+      status: RecommendationStatus.Completed,
+    });
+  }
+
+  // ── Dependency graph (admin) ──────────────────────────────────────
+
+  async updateDependenciesForAdmin(
+    id: string,
+    dependencyIds: string[],
+  ): Promise<Recommendation> {
+    const recommendation = await this.getRecommendationOrThrow(id);
+    recommendation.dependencyIds = await validateDependencyIds(
+      this.recommendationRepository,
+      recommendation.id,
+      dependencyIds,
+      recommendation.userId,
+    );
+    return this.recommendationRepository.save(recommendation);
+  }
+
+  // ── Async generation jobs ─────────────────────────────────────────
+
+  async startGenerationForUser(
+    userId: string,
+    dto: Omit<GenerateRecommendationsDto, 'userId'>,
+  ): Promise<RecommendationGenerationJobSummary> {
+    await this.ensureUserExists(userId);
+
+    return this.generationJobService.startGenerationForUser(
+      userId,
+      dto,
+      (job) => this.runGenerationJob(job),
+    );
+  }
+
+  async findGenerationJobForUser(
+    userId: string,
+    id: string,
+  ): Promise<RecommendationGenerationJobSummary> {
+    return this.generationJobService.findGenerationJobForUser(userId, id);
+  }
+
+  // ── AI-driven generation ──────────────────────────────────────────
+
+  async generateForUser(
+    dto: GenerateRecommendationsDto,
+  ): Promise<GeneratedRecommendationItem[]> {
+    await this.ensureUserExists(dto.userId);
+
+    const limit = dto.limit ?? 5;
+    const services = await this.findRecommendableServices();
+    const context = this.scoringService.buildDiagnosticContext(dto);
+    let ranked = await this.scoringService.generateAiRecommendations(
+      dto,
+      services,
+      context,
+    );
+
+    if (ranked.length === 0) {
+      ranked = services
+        .map((service) => this.scoringService.scoreService(service, context))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score);
     }
-    if (hasService) {
-      return this.resolveAndValidateRecommendationTarget(dto.serviceId, undefined);
+
+    ranked = ranked.slice(0, limit);
+
+    if (dto.persist === false) {
+      return ranked;
     }
-    return this.resolveAndValidateRecommendationTarget(undefined, dto.packageId);
+
+    const persisted: GeneratedRecommendationItem[] = [];
+
+    for (const item of ranked) {
+      const recommendation = await this.upsertGeneratedRecommendation(
+        dto.userId,
+        item,
+      );
+      persisted.push({ ...item, recommendation });
+    }
+
+    return persisted;
+  }
+
+  // ── Admin delete ──────────────────────────────────────────────────
+
+  async removeForAdmin(id: string): Promise<void> {
+    const result = await this.recommendationRepository.delete({ id });
+    if (!result.affected) {
+      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    }
+  }
+
+  // ── Private helpers ───────────────────────────────────────────────
+
+  private async getRecommendationOrThrow(id: string): Promise<Recommendation> {
+    const recommendation = await this.recommendationRepository.findOne({
+      where: { id },
+    });
+    if (!recommendation) {
+      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    }
+    return recommendation;
+  }
+
+  private async getUserRecommendationOrThrow(
+    userId: string,
+    id: string,
+  ): Promise<Recommendation> {
+    const recommendation = await this.recommendationRepository.findOne({
+      where: { id, userId },
+    });
+    if (!recommendation) {
+      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    }
+    return recommendation;
   }
 
   private async findRecommendationWithRelationsOrThrow(id: string): Promise<Recommendation> {
@@ -221,6 +419,93 @@ export class RecommendationsService {
     return recommendation;
   }
 
+  private async findRecommendableServices(): Promise<ServiceCandidate[]> {
+    return this.serviceRepository
+      .createQueryBuilder('service')
+      .leftJoinAndSelect('service.category', 'category')
+      .where('service.type IN (:...serviceTypes)', {
+        serviceTypes: [ServiceType.Service, ServiceType.Document],
+      })
+      .orderBy('service."createdAt"', 'DESC')
+      .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
+      .getMany() as Promise<ServiceCandidate[]>;
+  }
+
+  private async upsertGeneratedRecommendation(
+    userId: string,
+    item: GeneratedRecommendationItem,
+  ): Promise<Recommendation> {
+    // AI generation currently ranks services only; packages need their own candidate/upsert path.
+    const existing = await this.recommendationRepository.findOne({
+      where: { userId, serviceId: item.serviceId },
+    });
+
+    if (existing) {
+      existing.priority = item.priority;
+      existing.rationale = item.rationale;
+      existing.diagnosticSignals = item.diagnosticSignals;
+      existing.generatedAt = new Date();
+      return this.recommendationRepository.save(existing);
+    }
+
+    const recommendation = this.recommendationRepository.create({
+      userId,
+      serviceId: item.serviceId,
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      priority: item.priority,
+      rationale: item.rationale,
+      dependencyIds: [],
+      diagnosticSignals: item.diagnosticSignals,
+      generatedAt: new Date(),
+      orderId: null,
+    });
+
+    try {
+      return await this.recommendationRepository.save(recommendation);
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) {
+        throw error;
+      }
+      const retryExisting = await this.recommendationRepository.findOne({
+        where: { userId, serviceId: item.serviceId },
+      });
+      if (!retryExisting) throw error;
+      retryExisting.priority = item.priority;
+      retryExisting.rationale = item.rationale;
+      retryExisting.diagnosticSignals = item.diagnosticSignals;
+      retryExisting.generatedAt = new Date();
+      return this.recommendationRepository.save(retryExisting);
+    }
+  }
+
+  // ── Job processing ────────────────────────────────────────────────
+
+  // ── Resolve target (from develop) ─────────────────────────────────
+
+  private async runGenerationJob(
+    job: RecommendationGenerationJob,
+  ): Promise<Record<string, unknown>[]> {
+    const request = job.request as Partial<GenerateRecommendationsDto>;
+    const recommendations = await this.generateForUser({
+      userId: job.userId,
+      clientProfile: request.clientProfile,
+      diagnostics: request.diagnostics,
+      limit: request.limit,
+      persist: request.persist,
+    });
+
+    return recommendations.map((item) => ({
+      serviceId: item.serviceId,
+      serviceName: item.serviceName,
+      priority: item.priority,
+      rationale: item.rationale,
+      diagnosticSignals: item.diagnosticSignals,
+      score: item.score,
+      recommendationId: item.recommendation?.id,
+    }));
+  }
+
   private async resolveAndValidateRecommendationTarget(
     serviceId?: string,
     packageId?: string,
@@ -230,23 +515,29 @@ export class RecommendationsService {
     if (hasService === hasPackage) {
       throw new BadRequestException('Exactly one of serviceId or packageId must be provided');
     }
-
     if (serviceId) {
       await this.ensureServiceCanBeRecommended(serviceId);
       return { serviceId, packageId: null };
     }
-
     await this.ensurePackageCanBeRecommended(packageId!);
     return { serviceId: null, packageId: packageId! };
   }
 
-  async removeForAdmin(id: string): Promise<void> {
-    const result = await this.recommendationRepository.delete({ id });
-
-    if (!result.affected) {
-      throw new NotFoundException(`Recommendation with id ${id} not found`);
+  private async resolveUpdateRecommendationTarget(
+    dto: UpdateAdminRecommendationDto,
+  ): Promise<{ serviceId: string | null; packageId: string | null }> {
+    const hasService = dto.serviceId !== undefined;
+    const hasPackage = dto.packageId !== undefined;
+    if (hasService && hasPackage) {
+      return this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
     }
+    if (hasService) {
+      return this.resolveAndValidateRecommendationTarget(dto.serviceId, undefined);
+    }
+    return this.resolveAndValidateRecommendationTarget(undefined, dto.packageId);
   }
+
+  // ── Validation helpers ────────────────────────────────────────────
 
   private async getUserOrThrow(userId: string): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
@@ -256,55 +547,8 @@ export class RecommendationsService {
     return user;
   }
 
-  private async shouldNotifyAboutNewRecommendation(user: User): Promise<boolean> {
-    const latestRecommendation = await this.recommendationRepository.findOne({
-      where: { userId: user.id },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (!latestRecommendation) {
-      return true;
-    }
-
-    if (!user.notificationsSeenAt) {
-      return false;
-    }
-
-    return user.notificationsSeenAt >= latestRecommendation.createdAt;
-  }
-
-  private async notifyUserAboutRecommendations(
-    user: User,
-    recommendation: Recommendation,
-  ): Promise<void> {
-    const unreadCount = await this.recommendationRepository
-      .createQueryBuilder('recommendation')
-      .where('recommendation."userId" = :userId', { userId: user.id })
-      .andWhere(
-        user.notificationsSeenAt
-          ? 'recommendation."createdAt" > :notificationsSeenAt'
-          : '1=1',
-        user.notificationsSeenAt ? { notificationsSeenAt: user.notificationsSeenAt } : {},
-      )
-      .getCount();
-
-    const clientUrl = this.configService.get<string>('CLIENT_URI', 'http://localhost:3000')
-      .split(',')[0]
-      .trim();
-    const recommendationsUrl = `${clientUrl}/catalog`;
-
-    await this.mailService.sendRecommendationsReadyEmail(
-      user.email,
-      [user.name, user.lastName].filter(Boolean).join(' '),
-      recommendationsUrl,
-    );
-
-    this.websocketGateway.emitToUser(user.id, 'recommendations:ready', {
-      count: unreadCount,
-      createdAt: recommendation.createdAt.toISOString(),
-    });
-
-    this.logger.log(`Recommendations ready notification emitted for user ${user.id}`);
+  private async ensureUserExists(userId: string): Promise<void> {
+    await this.getUserOrThrow(userId);
   }
 
   private async ensureServiceCanBeRecommended(serviceId: string): Promise<void> {
@@ -314,11 +558,7 @@ export class RecommendationsService {
     if (!service) {
       throw new NotFoundException(`Service with id ${serviceId} not found`);
     }
-
-    if (
-      service.type !== ServiceType.Service &&
-      service.type !== ServiceType.Document
-    ) {
+    if (service.type !== ServiceType.Service && service.type !== ServiceType.Document) {
       throw new BadRequestException(
         'Only services and documents can be assigned as recommendations',
       );
@@ -366,7 +606,6 @@ export class RecommendationsService {
     }
 
     const existingRecommendation = await qb.getOne();
-
     if (existingRecommendation) {
       throw new ConflictException(
         serviceId
@@ -374,5 +613,17 @@ export class RecommendationsService {
           : 'This package is already recommended to this user',
       );
     }
+  }
+
+  private uniqueIds(ids: string[]): string[] {
+    return Array.from(new Set(ids));
+  }
+
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    return Boolean(
+      error &&
+        typeof error === 'object' &&
+        (error as { code?: unknown }).code === '23505',
+    );
   }
 }

@@ -8,8 +8,9 @@ export interface LlmChatRequest {
   agentId: AgentId;
   task: LlmTask;
   messages: LlmMessage[];
-  declaredDataClass?: DataClass;
+  dataClass?: DataClass;
   policy?: {
     providers?: LlmProvider[];
+    cacheTtlMs?: number;
   };
 }
