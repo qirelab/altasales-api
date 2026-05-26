@@ -15,12 +15,15 @@ describe('OpenAICompatibleEmbeddingProviderAdapter', () => {
         process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_MODEL,
       LLM_OPENAI_COMPATIBLE_EMBEDDING_DIMENSIONS:
         process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_DIMENSIONS,
+      LLM_OPENAI_COMPATIBLE_EMBEDDING_IS_EXTERNAL:
+        process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_IS_EXTERNAL,
     };
     process.env.LLM_EMBEDDING_MODEL_ALIAS = 'embedding-default';
     process.env.LLM_OPENAI_COMPATIBLE_BASE_URL = 'https://provider.test';
     process.env.LLM_OPENAI_COMPATIBLE_API_KEY = 'secret-key';
     process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_MODEL = 'real-embedding-model';
     process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_DIMENSIONS = '2';
+    delete process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_IS_EXTERNAL;
     provider = new OpenAICompatibleEmbeddingProviderAdapter();
     fetchSpy = jest.spyOn(global, 'fetch');
   });
@@ -54,6 +57,13 @@ describe('OpenAICompatibleEmbeddingProviderAdapter', () => {
       'https://provider.test/v1/embeddings',
       expect.objectContaining({ signal }),
     );
+  });
+
+  it('is external by default and internal only when explicitly configured', () => {
+    expect(provider.isExternal).toBe(true);
+
+    process.env.LLM_OPENAI_COMPATIBLE_EMBEDDING_IS_EXTERNAL = 'false';
+    expect(provider.isExternal).toBe(false);
   });
 
   it('fails safely when config is missing', async () => {

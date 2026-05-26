@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DataClass } from './enums/data-class.enum';
 import {
   AnonymizationResult,
@@ -9,6 +9,7 @@ import {
   SemanticPlaceholderDescriptions,
 } from './interfaces/pii-anonymization.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
+import type { AnonymizerProvider } from './interfaces/anonymizer-provider.interface';
 import { PiiScanResult } from './interfaces/pii-scan-result.interface';
 import { AnonymizerLlmProvider } from './providers/anonymizer-llm.provider';
 
@@ -55,7 +56,11 @@ const ANY_PLACEHOLDER_PATTERN = /\{\{PII_[A-Z_]+_\d{4}\}\}/g;
 // The LLM anonymizer is the primary detector; regexes are safety checks only.
 @Injectable()
 export class PiiAnonymizerService {
-  constructor(private readonly anonymizerProvider?: AnonymizerLlmProvider) {}
+  constructor(
+    @Optional()
+    @Inject(AnonymizerLlmProvider)
+    private readonly anonymizerProvider?: AnonymizerProvider,
+  ) {}
 
   scanMessages(messages: LlmMessage[]): PiiScanResult {
     return this.scanText(messages.map((message) => message.content).join('\n'));
@@ -76,7 +81,9 @@ export class PiiAnonymizerService {
       PiiKind,
       'bank_card'
     >[]) {
-      stats[kind] = this.countMatches(text, PII_PATTERNS[kind]);
+      stats[kind] = kind === 'inn'
+        ? this.countValidInn(text)
+        : this.countMatches(text, PII_PATTERNS[kind]);
     }
     stats.bank_card = this.countBankCards(text);
 
@@ -294,6 +301,38 @@ export class PiiAnonymizerService {
     return Array.from(text.matchAll(CARD_CANDIDATE_PATTERN)).filter((match) =>
       this.isLuhnValid(match[0].replace(/\D/g, '')),
     ).length;
+  }
+
+  private countValidInn(text: string): number {
+    return Array.from(text.matchAll(PII_PATTERNS.inn)).filter((match) =>
+      this.isInnValid(match[0]),
+    ).length;
+  }
+
+  private isInnValid(value: string): boolean {
+    const digits = value.split('').map((digit) => Number(digit));
+    if (!digits.every((digit) => Number.isInteger(digit))) {
+      return false;
+    }
+
+    if (digits.length === 10) {
+      return this.innChecksum(digits, [2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[9];
+    }
+
+    if (digits.length === 12) {
+      return this.innChecksum(digits, [7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[10]
+        && this.innChecksum(digits, [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[11];
+    }
+
+    return false;
+  }
+
+  private innChecksum(digits: number[], coefficients: number[]): number {
+    const sum = coefficients.reduce(
+      (acc, coefficient, index) => acc + coefficient * digits[index],
+      0,
+    );
+    return (sum % 11) % 10;
   }
 
   private isLuhnValid(value: string): boolean {

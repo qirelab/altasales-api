@@ -99,6 +99,27 @@ describe('EmbeddingProxyService', () => {
     },
   );
 
+  it('allows raw_pii for explicitly internal embedding providers', async () => {
+    provider.isExternal = false;
+
+    const response = await service.embed({
+      inputs: ['private chunk'],
+      declaredDataClass: DataClass.RawPii,
+    });
+
+    expect(response.dataClass).toBe(DataClass.RawPii);
+    expect(provider.embed).toHaveBeenCalledTimes(1);
+  });
+
+  it('still blocks unknown data class for internal embedding providers', async () => {
+    provider.isExternal = false;
+
+    await expect(
+      service.embed({ inputs: ['private chunk'], declaredDataClass: DataClass.Unknown }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(provider.embed).not.toHaveBeenCalled();
+  });
+
   it('retries transient provider failures and logs safe metadata', async () => {
     (provider.embed as jest.Mock)
       .mockRejectedValueOnce(new TypeError('network raw private chunk'))
