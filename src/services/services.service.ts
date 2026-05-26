@@ -133,6 +133,7 @@ export class ServicesService {
       name: string;
       description: string;
       category: string;
+      categoryId: string | null;
       price: number;
       image: string | null;
       skills: string[];
@@ -177,6 +178,7 @@ export class ServicesService {
       .addSelect('s.name', 'name')
       .addSelect('s.description', 'description')
       .addSelect('c.name', 'category')
+      .addSelect('s."categoryId"', 'categoryId')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
@@ -194,6 +196,7 @@ export class ServicesService {
         name: string;
         description: string;
         category: string | null;
+        categoryId: string | null;
         price: string;
         image: string | null;
         skills: string[] | string;
@@ -209,6 +212,7 @@ export class ServicesService {
         name: row.name,
         description: row.description,
         category: row.category ?? '',
+        categoryId: row.categoryId,
         price: Number(row.price),
         image: row.image,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
@@ -385,13 +389,17 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .where('o."userId" = :userId', { userId })
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -466,7 +474,10 @@ export class ServicesService {
         `COUNT(DISTINCT CASE WHEN o.status IN (:...activeStatuses) THEN o.id END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(item.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN item.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
       .andWhere('service."userId" = :userId', { userId })
       .setParameter('activeStatuses', [
@@ -474,6 +485,7 @@ export class ServicesService {
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
@@ -558,12 +570,16 @@ export class ServicesService {
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
         'activeOrders',
       )
-      .addSelect('COALESCE(SUM(o.amount), 0)', 'totalIncome')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
         OrderStatus.InProgress,
       ])
+      .setParameter('completedStatus', OrderStatus.Completed)
       .getRawOne<{
         totalProjects: string | null;
         activeOrders: string | null;
