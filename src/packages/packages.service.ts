@@ -1,12 +1,38 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
+import { Category } from '../categories/entities/category.entity';
+import { Order } from '../orders/entities/order.entity';
+import { OrderItem } from '../orders/entities/order-item.entity';
+import { Service } from '../services/entities/service.entity';
+import { ServiceType } from '../services/entities/service-type.enum';
 import { CreatePackageDto } from './dto/create-package.dto';
+import { GetAdminPackagesQueryDto } from './dto/get-admin-packages-query.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
-import { Service } from '../services/entities/service.entity';
-import { Category } from '../categories/entities/category.entity';
-import { ServiceType } from '../services/entities/service-type.enum';
+
+export interface AdminPackageListItem {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  packageType: string;
+  price: number;
+  categoryId: string | null;
+  category: { id: string; name: string; slug: string } | null;
+  services: { id: string; name: string }[];
+  createdAt: Date;
+  ordersCount: number;
+}
+
+export interface AdminPackageOrderRow {
+  id: string;
+  clientName: string;
+  clientLastName: string;
+  createdAt: Date;
+  amount: number;
+  status: string;
+}
 
 @Injectable()
 export class PackagesService {
@@ -17,6 +43,10 @@ export class PackagesService {
     private readonly serviceRepository: Repository<Service>,
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
   ) { }
 
   async create(createPackageDto: CreatePackageDto): Promise<ServicePackage> {
@@ -81,7 +111,156 @@ export class PackagesService {
 
   async remove(id: string): Promise<void> {
     const servicePackage = await this.findOne(id);
+    const referencingOrderItems = await this.orderItemRepository.count({
+      where: { packageId: id },
+    });
+    if (referencingOrderItems > 0) {
+      throw new ConflictException(
+        'Нельзя удалить пакет, который используется в заказах. Удалите или измените связанные заказы.',
+      );
+    }
     await this.packageRepository.remove(servicePackage);
+  }
+
+  async findAllPackagesForAdmin(query: GetAdminPackagesQueryDto): Promise<{
+    data: AdminPackageListItem[];
+    total: number;
+    offset: number;
+    limit: number;
+  }> {
+    const { offset = 0, limit = 20 } = query;
+    const search = query.search?.trim();
+
+    const qb = this.packageRepository
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.category', 'c')
+      .leftJoinAndSelect('p.services', 's');
+
+    if (search) {
+      qb.where(
+        new Brackets((sub) => {
+          sub
+            .where('p.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('p.description ILIKE :search', { search: `%${search}%` })
+            .orWhere('p.packageType ILIKE :search', { search: `%${search}%` })
+            .orWhere('c.name ILIKE :search', { search: `%${search}%` });
+        }),
+      );
+    }
+
+    const total = await qb.getCount();
+
+    const packages = await qb
+      .orderBy('p.createdAt', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getMany();
+
+    const packageIds = packages.map((pkg) => pkg.id);
+    const ordersMap = await this.buildOrdersCountMap(packageIds);
+
+    return {
+      data: packages.map((pkg) => this.mapPackageListItem(pkg, ordersMap.get(pkg.id) ?? 0)),
+      total,
+      offset,
+      limit,
+    };
+  }
+
+  async findOnePackageForAdmin(id: string): Promise<{
+    package: ServicePackage;
+    ordersCount: number;
+    totalItemsAmount: number;
+    orders: AdminPackageOrderRow[];
+  }> {
+    const servicePackage = await this.packageRepository.findOne({
+      where: { id },
+      relations: ['category', 'services', 'services.category'],
+    });
+
+    if (!servicePackage) {
+      throw new NotFoundException(`Пакет с ID ${id} не найден`);
+    }
+
+    const ordersCount = await this.orderItemRepository
+      .createQueryBuilder('oi')
+      .select('COUNT(DISTINCT oi."orderId")', 'count')
+      .where('oi."packageId" = :packageId', { packageId: id })
+      .getRawOne<{ count: string }>()
+      .then((row) => Number(row?.count ?? 0));
+
+    const ordersRaw = await this.orderRepository
+      .createQueryBuilder('o')
+      .innerJoin('o.item', 'item', 'item."packageId" = :packageId', { packageId: id })
+      .leftJoin('o.user', 'u')
+      .select('o.id', 'id')
+      .addSelect('u.name', 'clientName')
+      .addSelect('u.lastName', 'clientLastName')
+      .addSelect('o."createdAt"', 'createdAt')
+      .addSelect('o.amount', 'amount')
+      .addSelect('o.status', 'status')
+      .orderBy('o."createdAt"', 'DESC')
+      .getRawMany<{
+        id: string;
+        clientName: string | null;
+        clientLastName: string | null;
+        createdAt: Date;
+        amount: string;
+        status: string;
+      }>();
+
+    const orders: AdminPackageOrderRow[] = ordersRaw.map((row) => ({
+      id: row.id,
+      clientName: row.clientName ?? '',
+      clientLastName: row.clientLastName ?? '',
+      createdAt: row.createdAt,
+      amount: Number(row.amount),
+      status: row.status,
+    }));
+
+    const totalItemsAmount = (servicePackage.services ?? []).reduce(
+      (sum, service) => sum + Number(service.price),
+      0,
+    );
+
+    return {
+      package: servicePackage,
+      ordersCount,
+      totalItemsAmount,
+      orders,
+    };
+  }
+
+  private async buildOrdersCountMap(packageIds: string[]): Promise<Map<string, number>> {
+    if (packageIds.length === 0) return new Map();
+
+    const rows = await this.orderItemRepository
+      .createQueryBuilder('oi')
+      .select('oi."packageId"', 'packageId')
+      .addSelect('COUNT(DISTINCT oi."orderId")', 'count')
+      .where('oi."packageId" IN (:...ids)', { ids: packageIds })
+      .groupBy('oi."packageId"')
+      .getRawMany<{ packageId: string; count: string }>();
+
+    return new Map(rows.map((row) => [row.packageId, Number(row.count)]));
+  }
+
+  private mapPackageListItem(pkg: ServicePackage, ordersCount: number): AdminPackageListItem {
+    return {
+      id: pkg.id,
+      name: pkg.name,
+      description: pkg.description,
+      tags: pkg.tags ?? [],
+      packageType: pkg.packageType,
+      price: Number(pkg.price),
+      categoryId: pkg.categoryId,
+      category: pkg.category
+        ? { id: pkg.category.id, name: pkg.category.name, slug: pkg.category.slug }
+        : null,
+      services: (pkg.services ?? []).map((service) => ({ id: service.id, name: service.name })),
+      createdAt: pkg.createdAt,
+      ordersCount,
+    };
   }
 
   private async ensureCategoryExists(categoryId: string): Promise<void> {

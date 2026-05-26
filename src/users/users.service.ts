@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
+import { FirebaseService } from '../auth/firebase/firebase.service';
 import { OrdersService } from '../orders/orders.service';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
@@ -12,10 +13,13 @@ import { User } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly ordersService: OrdersService,
+    private readonly firebaseService: FirebaseService,
   ) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -228,8 +232,21 @@ export class UsersService {
     return await this.userRepository.save(user);
   }
 
+  async removeFirebaseAuthUser(firebaseUid: string | null | undefined): Promise<void> {
+    if (!firebaseUid) {
+      return;
+    }
+
+    try {
+      await this.firebaseService.getAuth().deleteUser(firebaseUid);
+    } catch (error) {
+      this.logger.warn(`Failed to delete Firebase user ${firebaseUid}: ${(error as Error).message}`);
+    }
+  }
+
   async remove(id: string): Promise<void> {
     const user = await this.findOne(id);
+    await this.removeFirebaseAuthUser(user.firebaseUid);
     await this.userRepository.remove(user);
   }
 

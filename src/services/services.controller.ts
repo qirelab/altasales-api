@@ -151,10 +151,14 @@ export class ServicesController {
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete contractor by ID for admin (old scenario)' })
+  @ApiOperation({
+    summary: 'Delete contractor (expert) by ID for admin',
+    description: 'Removes contractor from services catalog and deletes linked user account.',
+  })
   @ApiParam({ name: 'id', description: 'Contractor ID' })
-  @ApiResponse({ status: 204, description: 'Contractor deleted' })
+  @ApiResponse({ status: 204, description: 'Contractor and linked user deleted' })
   @ApiResponse({ status: 404, description: 'Contractor not found' })
+  @ApiResponse({ status: 409, description: 'Contractor has related orders' })
   async removeContractorForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.servicesService.removeContractorForAdmin(id);
   }
