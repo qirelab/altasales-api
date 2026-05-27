@@ -18,11 +18,11 @@ export class GetAdminServicesQueryDto {
   @Min(0)
   offset?: number = 0;
 
-  @ApiPropertyOptional({ example: 20, default: 20, minimum: 1, maximum: 100 })
+  @ApiPropertyOptional({ example: 20, default: 20, minimum: 1, maximum: 150 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(150)
   limit?: number = 20;
 }
