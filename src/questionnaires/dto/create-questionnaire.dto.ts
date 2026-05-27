@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsString,
   IsArray,
   IsIn,
@@ -8,6 +9,7 @@ import {
   IsOptional,
   IsNotEmpty,
   ValidateNested,
+  Max,
   Min,
   ArrayMinSize,
   Matches,
@@ -84,7 +86,8 @@ export class CreateQuestionnaireDto {
 
   @ApiProperty({ enum: LEAD_GENERATION_TYPES, isArray: true })
   @IsArray()
-  @ArrayMinSize(1, { message: 'Выберите хотя бы один тип лидогенерации' })
+  @ArrayMinSize(1, { message: 'Выберите тип лидогенерации' })
+  @ArrayMaxSize(1, { message: 'Можно выбрать только один тип лидогенерации' })
   @IsIn(LEAD_GENERATION_TYPES, { each: true })
   leadGenerationTypes: LeadGenerationType[];
 
@@ -127,4 +130,11 @@ export class CreateQuestionnaireDto {
   @IsNumber()
   @Min(1, { message: 'Средний чек должен быть больше 0' })
   averageCheck: number;
+
+  @ApiPropertyOptional({ example: 20, description: 'Конверсия лид → продажа, %' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1, { message: 'Конверсия должна быть больше 0' })
+  @Max(100, { message: 'Конверсия не может быть больше 100' })
+  conversionRate?: number;
 }
