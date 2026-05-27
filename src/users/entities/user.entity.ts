@@ -51,6 +51,14 @@ export class User {
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
+  @ApiProperty({
+    example: '40',
+    description: 'ROP project ID for file storage',
+    nullable: true,
+  })
+  @Column({ type: 'varchar', nullable: true })
+  ropProjectId: string | null;
+
   @ApiPropertyOptional({
     description: 'When the user last viewed recommendation notifications',
   })

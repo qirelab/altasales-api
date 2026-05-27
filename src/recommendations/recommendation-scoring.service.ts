@@ -31,6 +31,7 @@ type AiRecommendationCandidate = {
 };
 
 const MAX_CATALOG_FOR_LLM = 50;
+const AI_RECOMMENDATION_CACHE_TTL_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class RecommendationScoringService {
@@ -53,7 +54,9 @@ export class RecommendationScoringService {
 
     const matchedSignals = SIGNAL_GROUPS.filter(
       (group) =>
-        group.diagnosticTerms.some((term) => this.includesTerm(context, term)) &&
+        group.diagnosticTerms.some((term) =>
+          this.includesTerm(context, term),
+        ) &&
         group.serviceTerms.some((term) => this.includesTerm(serviceText, term)),
     );
     const score = matchedSignals.reduce((sum, group) => sum + group.weight, 0);
@@ -82,7 +85,10 @@ export class RecommendationScoringService {
       const response = await this.llmProxy.chat({
         agentId: AgentId.Recommendations,
         task: LlmTask.Reason,
-        dataClass: DataClass.NoPii,
+        declaredDataClass: DataClass.NoPii,
+        policy: {
+          cacheTtlMs: AI_RECOMMENDATION_CACHE_TTL_MS,
+        },
         messages: [
           {
             role: 'system',
@@ -120,7 +126,8 @@ export class RecommendationScoringService {
 
         usedServiceIds.add(service.id);
         const fallback = this.scoreService(service, context);
-        const priority = this.normalizePriority(item.priority) ?? fallback.priority;
+        const priority =
+          this.normalizePriority(item.priority) ?? fallback.priority;
         const diagnosticSignals = this.normalizeSignals([
           'ai_generated',
           ...(item.diagnosticSignals ?? fallback.diagnosticSignals),
@@ -135,7 +142,8 @@ export class RecommendationScoringService {
             fallback.rationale ||
             `${service.name} was selected by AI based on onboarding diagnostics.`,
           diagnosticSignals,
-          score: fallback.score > 0 ? fallback.score : this.scorePriority(priority),
+          score:
+            fallback.score > 0 ? fallback.score : this.scorePriority(priority),
         });
       }
 
@@ -205,9 +213,7 @@ export class RecommendationScoringService {
 
   normalizeSignals(signals: string[]): string[] {
     return Array.from(
-      new Set(
-        signals.map((s) => s.trim()).filter((s) => s.length > 0),
-      ),
+      new Set(signals.map((s) => s.trim()).filter((s) => s.length > 0)),
     );
   }
 
@@ -260,7 +266,11 @@ export class RecommendationScoringService {
     priority: RecommendationPriority | string | undefined,
   ): RecommendationPriority | undefined {
     if (!priority) return undefined;
-    if (Object.values(RecommendationPriority).includes(priority as RecommendationPriority)) {
+    if (
+      Object.values(RecommendationPriority).includes(
+        priority as RecommendationPriority,
+      )
+    ) {
       return priority as RecommendationPriority;
     }
     return undefined;
