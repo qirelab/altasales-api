@@ -76,4 +76,22 @@ describe('RecommendationScoringService', () => {
     ).resolves.toEqual([]);
     expect(Logger.prototype.warn).toHaveBeenCalled();
   });
+
+  it('does not declare user diagnostics as no_pii for proxy calls', async () => {
+    llmProxy.chat.mockResolvedValueOnce({ content: '{"recommendations":[]}' });
+
+    await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: { contact: 'client@example.com' },
+        diagnostics: ['Call +7 999 111 22 33'],
+      },
+      [],
+      'call client',
+    );
+
+    expect(llmProxy.chat).toHaveBeenCalledWith(
+      expect.not.objectContaining({ declaredDataClass: expect.anything() }),
+    );
+  });
 });

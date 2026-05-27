@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AgentId } from '../ai/enums/agent-id.enum';
-import { DataClass } from '../ai/enums/data-class.enum';
 import { LlmTask } from '../ai/enums/llm-task.enum';
 import { LlmProxyService } from '../ai/llm-proxy.service';
 import { Service } from '../services/entities/service.entity';
@@ -85,7 +84,6 @@ export class RecommendationScoringService {
       const response = await this.llmProxy.chat({
         agentId: AgentId.Recommendations,
         task: LlmTask.Reason,
-        declaredDataClass: DataClass.NoPii,
         policy: {
           cacheTtlMs: AI_RECOMMENDATION_CACHE_TTL_MS,
         },
