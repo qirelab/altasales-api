@@ -14,10 +14,15 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import type { LeadGenerationType, SalesDirection } from '../entities/questionnaire.entity';
+import type {
+  LeadGenerationType,
+  PreferredMessenger,
+  SalesDirection,
+} from '../entities/questionnaire.entity';
 
 const SALES_DIRECTIONS: SalesDirection[] = ['B2B', 'B2C', 'B2G', 'B2B2C', 'C2C', 'B2P', 'D2C'];
 const LEAD_GENERATION_TYPES: LeadGenerationType[] = ['inbound', 'outbound'];
+const PREFERRED_MESSENGERS: PreferredMessenger[] = ['max', 'telegram'];
 
 class UpdateDesiredResultDto {
   @ApiPropertyOptional({ enum: ['1m', '3m', '6m'] })
@@ -63,6 +68,11 @@ export class UpdateQuestionnaireAnswersDto {
     message: 'Некорректный формат телефона',
   })
   phone?: string;
+
+  @ApiPropertyOptional({ enum: PREFERRED_MESSENGERS })
+  @IsOptional()
+  @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
+  preferredMessenger?: PreferredMessenger;
 
   @ApiPropertyOptional({ example: 'ООО "ТехноСтарт"' })
   @IsOptional()
