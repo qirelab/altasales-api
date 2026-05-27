@@ -9,5 +9,3 @@ export const AppDataSource = new DataSource({
   migrations: [__dirname + '/../migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',
 });
-
-export default AppDataSource;
