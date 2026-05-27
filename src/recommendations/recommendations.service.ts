@@ -20,6 +20,13 @@ import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.
 import { Recommendation } from './entities/recommendation.entity';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 
+export type PackageInnerServiceItem = {
+  id: string;
+  name: string;
+  type: ServiceType;
+  price: number;
+};
+
 export type UserRecommendationListItem = {
   id: string;
   serviceId: string | null;
@@ -30,6 +37,7 @@ export type UserRecommendationListItem = {
   price: number;
   status: RecommendationStatus;
   createdAt: Date;
+  services?: PackageInnerServiceItem[];
 };
 
 @Injectable()
@@ -74,7 +82,7 @@ export class RecommendationsService {
   async findAssignedToUserList(
     userId: string,
   ): Promise<UserRecommendationListItem[]> {
-    return this.recommendationRepository
+    const rows = await this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
@@ -99,6 +107,37 @@ export class RecommendationsService {
       }))
       .orderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem>();
+
+    const packageIds = rows
+      .filter((row) => row.packageId)
+      .map((row) => row.packageId as string);
+
+    if (packageIds.length === 0) {
+      return rows;
+    }
+
+    const packagesWithServices = await this.packageRepository.find({
+      where: packageIds.map((id) => ({ id })),
+      relations: ['services'],
+    });
+    const innerServicesByPackageId = new Map<string, PackageInnerServiceItem[]>();
+    packagesWithServices.forEach((pkg) => {
+      innerServicesByPackageId.set(
+        pkg.id,
+        (pkg.services ?? []).map((service) => ({
+          id: service.id,
+          name: service.name,
+          type: service.type,
+          price: Number(service.price),
+        })),
+      );
+    });
+
+    return rows.map((row) => (
+      row.packageId
+        ? { ...row, services: innerServicesByPackageId.get(row.packageId) ?? [] }
+        : row
+    ));
   }
 
   async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
