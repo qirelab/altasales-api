@@ -606,6 +606,11 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
+    if (order.item?.packageId) {
+      throw new BadRequestException(
+        'Package order status is derived from sub-items; update sub-item statuses instead',
+      );
+    }
 
     order.status = dto.status;
     const savedOrder = await this.orderRepository.save(order);
@@ -678,6 +683,13 @@ export class OrdersService {
       const prevStatus = item.status;
       item.status = recalculatedStatus;
       const savedItem = await itemRepo.save(item);
+
+      const orderRepo = queryRunner.manager.getRepository(Order);
+      const parentOrder = await orderRepo.findOne({ where: { id: savedItem.orderId } });
+      if (parentOrder && parentOrder.status !== recalculatedStatus) {
+        parentOrder.status = recalculatedStatus;
+        await orderRepo.save(parentOrder);
+      }
 
       if (prevStatus !== recalculatedStatus) {
         const recommendation = await queryRunner.manager.getRepository(Recommendation).findOne({
