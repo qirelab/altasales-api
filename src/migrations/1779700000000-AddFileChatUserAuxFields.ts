@@ -8,6 +8,15 @@ export class AddFileChatUserAuxFields1779700000000 implements MigrationInterface
       ADD COLUMN IF NOT EXISTS "orderId" uuid NULL
     `);
 
+    // Cleanup orphan orderId before adding the FK — protects against rows
+    // inserted via `synchronize: true` whose referenced order was later deleted.
+    await queryRunner.query(`
+      UPDATE "chat_conversation"
+      SET "orderId" = NULL
+      WHERE "orderId" IS NOT NULL
+        AND "orderId" NOT IN (SELECT "id" FROM "order")
+    `);
+
     await queryRunner.query(`
       DO $$
       BEGIN
@@ -78,6 +87,15 @@ export class AddFileChatUserAuxFields1779700000000 implements MigrationInterface
     await queryRunner.query(`
       ALTER TABLE "file_entity"
       ADD COLUMN IF NOT EXISTS "orderItemId" uuid NULL
+    `);
+
+    // Cleanup orphan orderItemId before adding the FK — protects against rows
+    // inserted via `synchronize: true` whose referenced order_item was later deleted.
+    await queryRunner.query(`
+      UPDATE "file_entity"
+      SET "orderItemId" = NULL
+      WHERE "orderItemId" IS NOT NULL
+        AND "orderItemId" NOT IN (SELECT "id" FROM "order_item")
     `);
 
     await queryRunner.query(`
