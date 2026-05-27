@@ -608,7 +608,7 @@ export class OrdersService {
     }
     if (order.item?.packageId) {
       throw new BadRequestException(
-        'Package order status is derived from sub-items; update sub-item statuses instead',
+        'Статус пакета вычисляется по статусам услуг внутри — обновите статусы услуг',
       );
     }
 
@@ -631,7 +631,7 @@ export class OrdersService {
       throw new NotFoundException(`Order item with id ${itemId} not found`);
     }
     if (item.packageId) {
-      throw new BadRequestException('Use sub-item status endpoint for package items');
+      throw new BadRequestException('Для пакета используйте смену статуса по каждой услуге пакета');
     }
 
     item.status = status;
@@ -665,10 +665,10 @@ export class OrdersService {
         throw new NotFoundException(`Order item with id ${itemId} not found`);
       }
       if (!item.packageId) {
-        throw new BadRequestException('Provided item is not a package item');
+        throw new BadRequestException('Эта позиция заказа не является пакетом');
       }
       if (!item.subItems.length) {
-        throw new BadRequestException('Package item does not contain sub-items');
+        throw new BadRequestException('В пакете нет услуг');
       }
 
       const subItem = item.subItems.find((entry) => entry.id === subItemId);
