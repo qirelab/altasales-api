@@ -464,6 +464,7 @@ export class OrdersService {
     data: Array<{
       id: string;
       itemsCount: number;
+      typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
       clientName: string;
       clientLastName: string;
       date: Date;
@@ -502,8 +503,18 @@ export class OrdersService {
     const rows = await baseQb
       .clone()
       .leftJoin('o.item', 'item')
+      .leftJoin('item.service', 'svc')
       .select('o.id', 'id')
       .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
+      .addSelect(
+        `CASE
+           WHEN item.id IS NULL THEN 'Услуга'
+           WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
+           WHEN svc.type IN ('Услуга', 'Документ', 'Подрядчик') THEN svc.type
+           ELSE 'Услуга'
+         END`,
+        'typeLabel',
+      )
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
@@ -516,6 +527,7 @@ export class OrdersService {
       .getRawMany<{
         id: string;
         itemsCount: string;
+        typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
         clientName: string;
         clientLastName: string;
         date: Date;
@@ -528,6 +540,7 @@ export class OrdersService {
       data: rows.map((row) => ({
         id: row.id,
         itemsCount: Number(row.itemsCount),
+        typeLabel: row.typeLabel,
         clientName: row.clientName,
         clientLastName: row.clientLastName,
         date: row.date,
