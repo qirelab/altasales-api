@@ -1,10 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { REGISTRATION_GIFT_RUB } from '../balance-transactions/balance.constants';
+import { BalanceService } from '../balance-transactions/balance.service';
 import {
   RecommendationsService,
   type UserRecommendationListItem,
 } from '../recommendations/recommendations.service';
+import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { UpdateQuestionnaireAnswersDto } from './dto/update-questionnaire-answers.dto';
 import { Questionnaire } from './entities/questionnaire.entity';
@@ -21,6 +24,8 @@ export class QuestionnairesService {
     private readonly recommendationsService: RecommendationsService,
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
+    private readonly balanceService: BalanceService,
+    private readonly websocketGateway: WebSocketGatewayService,
   ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
@@ -29,6 +34,24 @@ export class QuestionnairesService {
       answers: dto,
     });
     const saved = await this.repo.save(questionnaire);
+
+    try {
+      const alreadyCredited = await this.balanceService.hasRegistrationGift(userId);
+      if (!alreadyCredited) {
+        await this.balanceService.creditRegistrationGift(userId);
+
+        const balance = await this.balanceService.getBalance(userId);
+        this.websocketGateway.emitToUser(userId, 'balance:gift_credited', {
+          amount: REGISTRATION_GIFT_RUB,
+          balance,
+        });
+        this.logger.log(`Questionnaire gift credited for user ${userId}`);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to credit questionnaire gift for user ${userId}: ${error.message}`,
+      );
+    }
 
     this.notifyAdmins(saved, userId).catch((error) => {
       this.logger.error(`Failed to notify admins: ${error.message}`);

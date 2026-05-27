@@ -118,13 +118,21 @@ export class BalanceService {
     });
   }
 
+  async hasRegistrationGift(userId: string): Promise<boolean> {
+    const existing = await this.balanceTransactionRepository.findOne({
+      where: { userId, type: BalanceTransactionType.RegistrationBonus },
+      select: ['id'],
+    });
+    return Boolean(existing);
+  }
+
   async creditRegistrationGift(userId: string, manager?: EntityManager): Promise<BalanceTransaction> {
     return this.addToBalance(
       userId,
       REGISTRATION_GIFT_RUB,
       BalanceTransactionType.RegistrationBonus,
       {
-        description: 'Приветственный подарочный баланс при регистрации',
+        description: 'Подарочный баланс за заполнение анкеты',
         pocket: BalancePocket.Gift,
       },
       manager,
