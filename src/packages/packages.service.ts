@@ -288,12 +288,12 @@ export class PackagesService {
     }
 
     const invalidServiceIds = services
-      .filter((service) => service.type !== ServiceType.Service)
+      .filter((service) => service.type === ServiceType.Contractor)
       .map((service) => service.id);
 
     if (invalidServiceIds.length > 0) {
       throw new ConflictException(
-        `В пакет можно добавлять только услуги. Неверные ID: ${invalidServiceIds.join(', ')}`,
+        `В пакет нельзя добавлять подрядчиков. Неверные ID: ${invalidServiceIds.join(', ')}`,
       );
     }
 
