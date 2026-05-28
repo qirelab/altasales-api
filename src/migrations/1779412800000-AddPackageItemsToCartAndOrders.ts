@@ -34,7 +34,7 @@ export class AddPackageItemsToCartAndOrders1779412800000 implements MigrationInt
           AND tc.table_name = 'cart_item'
           AND tc.constraint_type = 'UNIQUE'
         GROUP BY tc.constraint_name
-        HAVING array_agg(kcu.column_name ORDER BY kcu.ordinal_position) = ARRAY['cartId', 'serviceId'];
+        HAVING array_agg(kcu.column_name::text ORDER BY kcu.ordinal_position) = ARRAY['cartId', 'serviceId']::text[];
 
         IF con_name IS NOT NULL THEN
           EXECUTE format('ALTER TABLE "cart_item" DROP CONSTRAINT %I', con_name);
