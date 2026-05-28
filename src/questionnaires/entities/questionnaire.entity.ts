@@ -45,6 +45,7 @@ export interface QuestionnaireAnswers {
   components: QuestionnaireComponents;
   targetRevenue: number;
   averageCheck: number;
+  conversionRate?: number;
 }
 
 @Entity('questionnaires')
