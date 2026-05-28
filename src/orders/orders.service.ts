@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { PaymentService } from '../payment/payment.service';
 import { Service } from '../services/entities/service.entity';
@@ -234,7 +234,7 @@ export class OrdersService {
         let resolvedAmount = Number(checkoutItem.amount);
         if (checkoutItem.serviceId) {
           const service = await this.serviceRepository.findOne({
-            where: { id: checkoutItem.serviceId },
+            where: { id: checkoutItem.serviceId, deletedAt: IsNull() },
           });
           if (!service) {
             throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
@@ -242,7 +242,7 @@ export class OrdersService {
         }
         if (checkoutItem.packageId) {
           const servicePackage = await this.packageRepository.findOne({
-            where: { id: checkoutItem.packageId },
+            where: { id: checkoutItem.packageId, deletedAt: IsNull() },
           });
           if (!servicePackage) {
             throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
@@ -269,7 +269,7 @@ export class OrdersService {
         await queryRunner.manager.save(OrderItem, item);
         if (checkoutItem.packageId) {
           const servicePackage = await this.packageRepository.findOne({
-            where: { id: checkoutItem.packageId },
+            where: { id: checkoutItem.packageId, deletedAt: IsNull() },
             relations: ['services'],
           });
           const packageServices = servicePackage?.services ?? [];

@@ -1,4 +1,13 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn, ManyToMany } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  DeleteDateColumn,
+  ManyToOne,
+  JoinColumn,
+  ManyToMany,
+} from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Category } from '../../categories/entities/category.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
@@ -74,6 +83,9 @@ export class Service {
   @ApiProperty({ description: 'Creation date' })
   @CreateDateColumn()
   createdAt: Date;
+
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
 
   @ApiPropertyOptional({
     description: 'Packages containing this service',

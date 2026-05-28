@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
@@ -19,6 +19,8 @@ import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.
 import { UpdateAdminRecommendationDto } from './dto/update-admin-recommendation.dto';
 import { Recommendation } from './entities/recommendation.entity';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
+import { activePackageWhere } from '../packages/package-visibility';
+import { filterActiveServices } from '../services/service-visibility';
 
 export type PackageInnerServiceItem = {
   id: string;
@@ -68,13 +70,7 @@ export class RecommendationsService {
       .leftJoinAndSelect('package.category', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(new Brackets((qb) => {
-        qb
-          .where('service.type IN (:...serviceTypes)', {
-            serviceTypes: [ServiceType.Service, ServiceType.Document],
-          })
-          .orWhere('package.id IS NOT NULL');
-      }))
+      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
@@ -98,13 +94,7 @@ export class RecommendationsService {
       .addSelect('recommendation.status', 'status')
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(new Brackets((qb) => {
-        qb
-          .where('service.type IN (:...serviceTypes)', {
-            serviceTypes: [ServiceType.Service, ServiceType.Document],
-          })
-          .orWhere('package.id IS NOT NULL');
-      }))
+      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem>();
 
@@ -124,7 +114,7 @@ export class RecommendationsService {
     packagesWithServices.forEach((pkg) => {
       innerServicesByPackageId.set(
         pkg.id,
-        (pkg.services ?? []).map((service) => ({
+        filterActiveServices(pkg.services).map((service) => ({
           id: service.id,
           name: service.name,
           type: service.type,
@@ -149,13 +139,7 @@ export class RecommendationsService {
       .leftJoinAndSelect('package.category', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(new Brackets((qb) => {
-        qb
-          .where('service.type IN (:...serviceTypes)', {
-            serviceTypes: [ServiceType.Service, ServiceType.Document],
-          })
-          .orWhere('package.id IS NOT NULL');
-      }))
+      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
@@ -348,7 +332,7 @@ export class RecommendationsService {
 
   private async ensureServiceCanBeRecommended(serviceId: string): Promise<void> {
     const service = await this.serviceRepository.findOne({
-      where: { id: serviceId },
+      where: { id: serviceId, deletedAt: IsNull() },
     });
     if (!service) {
       throw new NotFoundException(`Service with id ${serviceId} not found`);
@@ -366,7 +350,7 @@ export class RecommendationsService {
 
   private async ensurePackageCanBeRecommended(packageId: string): Promise<void> {
     const servicePackage = await this.packageRepository.findOne({
-      where: { id: packageId },
+      where: { id: packageId, ...activePackageWhere() },
     });
     if (!servicePackage) {
       throw new NotFoundException(`Package with id ${packageId} not found`);
@@ -413,5 +397,16 @@ export class RecommendationsService {
           : 'This package is already recommended to this user',
       );
     }
+  }
+
+  private visibleRecommendationTargetFilter(): Brackets {
+    return new Brackets((qb) => {
+      qb
+        .where(
+          'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL',
+          { serviceTypes: [ServiceType.Service, ServiceType.Document] },
+        )
+        .orWhere('package.id IS NOT NULL AND package."deletedAt" IS NULL');
+    });
   }
 }

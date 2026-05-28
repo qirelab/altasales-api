@@ -8,6 +8,8 @@ import { UpdateCartItemDto } from './dto/update-cart-item.dto';
 import { CartItem } from './entities/cart-item.entity';
 import { Cart } from './entities/cart.entity';
 import { CartStatus } from './entities/cart-status.enum';
+import { activePackageWhere, isPackageActive } from '../packages/package-visibility';
+import { activeServiceWhere, filterActiveServices, isServiceActive } from '../services/service-visibility';
 
 @Injectable()
 export class CartService {
@@ -32,14 +34,25 @@ export class CartService {
 
     return {
       id: cart.id,
-      items: items.map((item) => ({
-        id: item.id,
-        serviceId: item.serviceId,
-        packageId: item.packageId,
-        quantity: item.quantity,
-        service: item.service,
-        package: item.package,
-      })),
+      items: items
+        .filter((item) => {
+          if (item.serviceId) return isServiceActive(item.service);
+          if (item.packageId) return isPackageActive(item.package);
+          return false;
+        })
+        .map((item) => ({
+          id: item.id,
+          serviceId: item.serviceId,
+          packageId: item.packageId,
+          quantity: item.quantity,
+          service: isServiceActive(item.service) ? item.service : null,
+          package: item.package
+            ? (() => {
+              item.package.services = filterActiveServices(item.package.services);
+              return item.package;
+            })()
+            : null,
+        })),
     };
   }
 
@@ -124,7 +137,9 @@ export class CartService {
   }
 
   private async requireService(serviceId: string): Promise<Service> {
-    const service = await this.serviceRepository.findOne({ where: { id: serviceId } });
+    const service = await this.serviceRepository.findOne({
+      where: { id: serviceId, ...activeServiceWhere() },
+    });
     if (!service) {
       throw new NotFoundException(`Service with id ${serviceId} not found`);
     }
@@ -132,7 +147,9 @@ export class CartService {
   }
 
   private async requirePackage(packageId: string): Promise<ServicePackage> {
-    const servicePackage = await this.packageRepository.findOne({ where: { id: packageId } });
+    const servicePackage = await this.packageRepository.findOne({
+      where: { id: packageId, ...activePackageWhere() },
+    });
     if (!servicePackage) {
       throw new NotFoundException(`Package with id ${packageId} not found`);
     }
