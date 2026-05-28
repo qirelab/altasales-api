@@ -40,6 +40,7 @@ export class FilesService {
     file: Express.Multer.File,
     orderItemId?: string,
     source: FileSource = FileSource.CLIENT,
+    orderItemSubItemId?: string,
   ): Promise<FileEntity> {
     const ropProjectId = await this.getOrCreateRopProject(userId);
 
@@ -58,6 +59,7 @@ export class FilesService {
       size: file.size,
       ropDocumentId: ropDocument.id,
       orderItemId: orderItemId ?? null,
+      orderItemSubItemId: orderItemSubItemId ?? null,
       source,
     });
 
