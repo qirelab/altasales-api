@@ -18,7 +18,6 @@ import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
-import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
 import { CartService } from '../cart/cart.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
@@ -298,18 +297,18 @@ export class OrdersService {
 
       const orderIds = createdOrders.map((order) => order.id);
       const primaryOrderId = orderIds[0];
+      const balancePaymentDescription =
+        orderIds.length === 1
+          ? `Оплата заказа №${primaryOrderId} с внутреннего баланса`
+          : `Оплата заказов (${orderIds.length} шт.) с внутреннего баланса`;
 
       if (paymentMethod === CheckoutPaymentMethod.Balance) {
-        await this.balanceService.addToBalance(
+        await this.balanceService.debitForOrderPayment(
           userId,
-          -totalAmount,
-          BalanceTransactionType.OrderPayment,
+          totalAmount,
           {
             orderId: primaryOrderId,
-            description:
-              orderIds.length === 1
-                ? `Оплата заказа №${primaryOrderId} с внутреннего баланса`
-                : `Оплата заказов (${orderIds.length} шт.) с внутреннего баланса`,
+            description: balancePaymentDescription,
           },
           queryRunner.manager,
         );

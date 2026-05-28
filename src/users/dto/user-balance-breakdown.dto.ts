@@ -5,15 +5,14 @@ export class UserBalanceBreakdownResponseDto {
   total: number;
 
   @ApiProperty({
-    example: 2500.0,
-    description:
-      'Остаток «основного» пула: total − gift. Списания учитываются как сначала из подарочных начислений.',
+    example: 0,
+    description: 'Остаток основного пула (начисления main минус списания с pocket=main)',
   })
   main: number;
 
   @ApiProperty({
-    example: 5000.0,
-    description: 'Остаток подарочных начислений после списаний (gift-first)',
+    example: 2500.0,
+    description: 'Остаток подарочного пула (начисления gift минус списания с pocket=gift)',
   })
   gift: number;
 }
