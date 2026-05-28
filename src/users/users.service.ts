@@ -262,8 +262,18 @@ export class UsersService {
         balance: Number(user.balance),
         role: user.role,
         notificationsSeenAt: user.notificationsSeenAt,
+        hasSeenGiftIntro: user.hasSeenGiftIntro,
       },
       stats,
     };
+  }
+
+  async markGiftIntroSeen(userId: string): Promise<void> {
+    const user = await this.findOne(userId);
+    if (user.hasSeenGiftIntro) {
+      return;
+    }
+    user.hasSeenGiftIntro = true;
+    await this.userRepository.save(user);
   }
 }

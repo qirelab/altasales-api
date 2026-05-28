@@ -72,6 +72,18 @@ export class UsersController {
     return { user: profile, stats };
   }
 
+  @Patch('profile/gift-intro-seen')
+  @UseGuards(SessionGuard)
+  @ApiOperation({ summary: 'Mark gift balance intro modal as seen for current user' })
+  @ApiCookieAuth('session')
+  @ApiResponse({ status: 200, description: 'Flag updated, profile returned' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async markGiftIntroSeen(@CurrentUser() user: CurrentUserData) {
+    await this.usersService.markGiftIntroSeen(user.id);
+    const { profile, stats } = await this.usersService.getProfile(user.id);
+    return { user: profile, stats };
+  }
+
   @Post()
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
