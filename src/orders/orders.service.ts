@@ -464,6 +464,7 @@ export class OrdersService {
     data: Array<{
       id: string;
       itemsCount: number;
+      typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
       clientName: string;
       clientLastName: string;
       date: Date;
@@ -502,8 +503,18 @@ export class OrdersService {
     const rows = await baseQb
       .clone()
       .leftJoin('o.item', 'item')
+      .leftJoin('item.service', 'svc')
       .select('o.id', 'id')
       .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
+      .addSelect(
+        `CASE
+           WHEN item.id IS NULL THEN 'Услуга'
+           WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
+           WHEN svc.type IN ('Услуга', 'Документ', 'Подрядчик') THEN svc.type
+           ELSE 'Услуга'
+         END`,
+        'typeLabel',
+      )
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
@@ -516,6 +527,7 @@ export class OrdersService {
       .getRawMany<{
         id: string;
         itemsCount: string;
+        typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
         clientName: string;
         clientLastName: string;
         date: Date;
@@ -528,6 +540,7 @@ export class OrdersService {
       data: rows.map((row) => ({
         id: row.id,
         itemsCount: Number(row.itemsCount),
+        typeLabel: row.typeLabel,
         clientName: row.clientName,
         clientLastName: row.clientLastName,
         date: row.date,
@@ -593,6 +606,11 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
+    if (order.item?.packageId) {
+      throw new BadRequestException(
+        'Статус пакета вычисляется по статусам услуг внутри — обновите статусы услуг',
+      );
+    }
 
     order.status = dto.status;
     const savedOrder = await this.orderRepository.save(order);
@@ -613,7 +631,7 @@ export class OrdersService {
       throw new NotFoundException(`Order item with id ${itemId} not found`);
     }
     if (item.packageId) {
-      throw new BadRequestException('Use sub-item status endpoint for package items');
+      throw new BadRequestException('Для пакета используйте смену статуса по каждой услуге пакета');
     }
 
     item.status = status;
@@ -647,10 +665,10 @@ export class OrdersService {
         throw new NotFoundException(`Order item with id ${itemId} not found`);
       }
       if (!item.packageId) {
-        throw new BadRequestException('Provided item is not a package item');
+        throw new BadRequestException('Эта позиция заказа не является пакетом');
       }
       if (!item.subItems.length) {
-        throw new BadRequestException('Package item does not contain sub-items');
+        throw new BadRequestException('В пакете нет услуг');
       }
 
       const subItem = item.subItems.find((entry) => entry.id === subItemId);
@@ -665,6 +683,13 @@ export class OrdersService {
       const prevStatus = item.status;
       item.status = recalculatedStatus;
       const savedItem = await itemRepo.save(item);
+
+      const orderRepo = queryRunner.manager.getRepository(Order);
+      const parentOrder = await orderRepo.findOne({ where: { id: savedItem.orderId } });
+      if (parentOrder && parentOrder.status !== recalculatedStatus) {
+        parentOrder.status = recalculatedStatus;
+        await orderRepo.save(parentOrder);
+      }
 
       if (prevStatus !== recalculatedStatus) {
         const recommendation = await queryRunner.manager.getRepository(Recommendation).findOne({
