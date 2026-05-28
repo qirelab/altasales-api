@@ -31,6 +31,7 @@ export interface QuestionnaireAnswers {
   name: string;
   phone: string;
   preferredMessenger: PreferredMessenger;
+  messengerUsername: string;
   companyName: string;
   salesDirection: SalesDirection[];
   leadGenerationTypes?: LeadGenerationType[];

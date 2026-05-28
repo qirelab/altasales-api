@@ -11,6 +11,7 @@ import {
   ValidateNested,
   Max,
   Min,
+  MaxLength,
   ArrayMinSize,
   Matches,
   IsObject,
@@ -72,6 +73,15 @@ export class CreateQuestionnaireDto {
   @IsNotEmpty({ message: 'Выберите мессенджер для связи' })
   @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
   preferredMessenger: PreferredMessenger;
+
+  @ApiProperty({ example: '@username', description: 'Имя пользователя в выбранном мессенджере' })
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите имя пользователя в мессенджере' })
+  @MaxLength(64)
+  @Matches(/^@[a-zA-Z0-9_]{5,32}$/, {
+    message: 'Введите @username (от 5 до 32 символов после @)',
+  })
+  messengerUsername: string;
 
   @ApiProperty({ example: 'ООО "ТехноСтарт"' })
   @IsString()

@@ -13,6 +13,7 @@ import {
   Matches,
   Max,
   Min,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -75,6 +76,16 @@ export class UpdateQuestionnaireAnswersDto {
   @IsOptional()
   @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
   preferredMessenger?: PreferredMessenger;
+
+  @ApiPropertyOptional({ example: '@username' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите имя пользователя в мессенджере' })
+  @MaxLength(64)
+  @Matches(/^@[a-zA-Z0-9_]{5,32}$/, {
+    message: 'Введите @username (от 5 до 32 символов после @)',
+  })
+  messengerUsername?: string;
 
   @ApiPropertyOptional({ example: 'ООО "ТехноСтарт"' })
   @IsOptional()
