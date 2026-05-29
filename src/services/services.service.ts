@@ -321,7 +321,7 @@ export class ServicesService {
     }
 
     const duplicateByUser = await this.serviceRepository.findOne({
-      where: { type: ServiceType.Contractor, userId: dto.userId },
+      where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
     });
     if (duplicateByUser) {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
