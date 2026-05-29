@@ -1,7 +1,6 @@
 import {
   Column,
   CreateDateColumn,
-  DeleteDateColumn,
   Entity,
   JoinColumn,
   JoinTable,
@@ -68,6 +67,6 @@ export class ServicePackage {
   @CreateDateColumn()
   createdAt: Date;
 
-  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
 }

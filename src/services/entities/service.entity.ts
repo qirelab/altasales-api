@@ -3,7 +3,6 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
-  DeleteDateColumn,
   ManyToOne,
   JoinColumn,
   ManyToMany,
@@ -84,7 +83,7 @@ export class Service {
   @CreateDateColumn()
   createdAt: Date;
 
-  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
 
   @ApiPropertyOptional({
