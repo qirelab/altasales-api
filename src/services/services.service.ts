@@ -382,9 +382,9 @@ export class ServicesService {
     const { entities, raw } = await qb
       .addSelect(
         (subQb) => subQb
-          .select('COUNT(ord.id)')
-          .from(Order, 'ord')
-          .where('ord."userId" = service."userId"'),
+          .select('COUNT(oi.id)')
+          .from(OrderItem, 'oi')
+          .where('oi."serviceId" = service.id'),
         'ordersCount',
       )
       .orderBy('service.createdAt', 'DESC')
@@ -417,21 +417,9 @@ export class ServicesService {
   }> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
 
-    const userId = contractor.userId;
-    if (!userId) {
-      return {
-        contractor,
-        stats: {
-          totalProjects: 0,
-          activeOrders: 0,
-          totalIncome: 0,
-        },
-        orders: [],
-      };
-    }
-
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
+      .leftJoin('o.item', 'item')
       .select('COUNT(o.id)', 'totalProjects')
       .addSelect(
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
@@ -441,7 +429,7 @@ export class ServicesService {
         `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
         'totalIncome',
       )
-      .where('o."userId" = :userId', { userId })
+      .where('item."serviceId" = :contractorId', { contractorId: id })
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
@@ -462,7 +450,7 @@ export class ServicesService {
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
-      .where('o."userId" = :userId', { userId })
+      .where('item."serviceId" = :contractorId', { contractorId: id })
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
