@@ -20,6 +20,7 @@ import { Type } from 'class-transformer';
 import type {
   LeadGenerationType,
   PreferredMessenger,
+  QuestionnaireAnswers,
   SalesDirection,
 } from '../entities/questionnaire.entity';
 
@@ -55,7 +56,7 @@ class ComponentsDto {
   @IsBoolean() salesHead: boolean;
 }
 
-export class CreateQuestionnaireDto {
+export class CreateQuestionnaireDto implements QuestionnaireAnswers {
   @ApiProperty({ example: 'Иван Иванов' })
   @IsString()
   @IsNotEmpty({ message: 'Имя обязательно' })

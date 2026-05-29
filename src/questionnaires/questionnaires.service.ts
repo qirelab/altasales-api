@@ -10,7 +10,7 @@ import {
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { UpdateQuestionnaireAnswersDto } from './dto/update-questionnaire-answers.dto';
-import { Questionnaire } from './entities/questionnaire.entity';
+import { Questionnaire, type QuestionnaireAnswers } from './entities/questionnaire.entity';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
 
@@ -29,9 +29,16 @@ export class QuestionnairesService {
   ) { }
 
   async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
+    const existing = await this.findByUserId(userId);
+
+    if (existing) {
+      existing.answers = this.dtoToAnswers(dto);
+      return this.repo.save(existing);
+    }
+
     const questionnaire = this.repo.create({
       userId,
-      answers: dto,
+      answers: this.dtoToAnswers(dto),
     });
     const saved = await this.repo.save(questionnaire);
 
@@ -58,6 +65,10 @@ export class QuestionnairesService {
     });
 
     return saved;
+  }
+
+  private dtoToAnswers(dto: CreateQuestionnaireDto): QuestionnaireAnswers {
+    return dto;
   }
 
   private isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -112,8 +123,7 @@ export class QuestionnairesService {
   }
 
   async findByUserId(userId: string): Promise<Questionnaire | null> {
-    const questionnaire = await this.repo.findOne({ where: { userId }, order: { createdAt: 'DESC' } });
-    return questionnaire ?? null;
+    return this.repo.findOne({ where: { userId } });
   }
 
   async findByUserIdForAdmin(
