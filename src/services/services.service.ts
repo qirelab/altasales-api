@@ -356,10 +356,12 @@ export class ServicesService {
   }> {
     const { offset = 0, limit = 20 } = query;
     const search = query.search?.trim();
-    const qb = this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.user', 'u')
-      .where('service.type = :type', { type: ServiceType.Contractor });
+    const qb = applyActiveServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.user', 'u')
+        .where('service.type = :type', { type: ServiceType.Contractor }),
+    );
 
     if (search) {
       qb.andWhere(
@@ -716,13 +718,14 @@ export class ServicesService {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     const userId = contractor.userId;
 
-    const orderItemsCount = await this.orderItemRepository.count({
-      where: { serviceId: contractor.id },
-    });
-    if (orderItemsCount > 0) {
-      throw new ConflictException(
-        'Нельзя удалить эксперта: есть заказы, связанные с этим профилем',
+    if (await this.serviceHasOrderReferences(id)) {
+      contractor.deletedAt = new Date();
+      await this.serviceRepository.save(contractor);
+      await this.dataSource.query(
+        `DELETE FROM "recommendation" WHERE "serviceId" = $1`,
+        [id],
       );
+      return;
     }
 
     let firebaseUid: string | null = null;
@@ -743,7 +746,7 @@ export class ServicesService {
 
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
     const contractor = await this.serviceRepository.findOne({
-      where: { id, type: ServiceType.Contractor },
+      where: { id, type: ServiceType.Contractor, ...activeServiceWhere() },
       relations: ['user'],
     });
     if (!contractor) {
