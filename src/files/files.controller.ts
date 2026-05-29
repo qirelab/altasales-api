@@ -111,6 +111,11 @@ export class FilesController {
   @ApiOperation({ summary: 'Upload a file to ROP storage' })
   @ApiConsumes('multipart/form-data')
   @ApiQuery({ name: 'orderItemId', required: false, description: 'Order item ID to attach file to' })
+  @ApiQuery({
+    name: 'orderItemSubItemId',
+    required: false,
+    description: 'Order item sub-item ID (scopes the file to one service inside a package)',
+  })
   @ApiQuery({ name: 'source', required: false, enum: FileSource, description: 'File source (client or admin)' })
   @ApiBody({
     schema: {
@@ -127,6 +132,7 @@ export class FilesController {
     @CurrentUser() user: CurrentUserData,
     @Query('orderItemId') orderItemId?: string,
     @Query('source') source?: FileSource,
+    @Query('orderItemSubItemId') orderItemSubItemId?: string,
   ) {
     if (!file) throw new BadRequestException('Файл не предоставлен');
 
@@ -135,7 +141,13 @@ export class FilesController {
       ? FileSource.ADMIN
       : FileSource.CLIENT;
 
-    const entity = await this.filesService.create(user.id, file, orderItemId, fileSource);
+    const entity = await this.filesService.create(
+      user.id,
+      file,
+      orderItemId,
+      fileSource,
+      orderItemSubItemId,
+    );
     return {
       id: entity.id,
       name: entity.originalName,

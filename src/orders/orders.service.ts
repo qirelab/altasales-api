@@ -45,6 +45,7 @@ export interface OrderItemDto {
     serviceId: string;
     service: Service;
     status: OrderStatus;
+    files: OrderFileDto[];
   }>;
   files: OrderFileDto[];
 }
@@ -154,14 +155,23 @@ export class OrdersService {
             serviceId: subItem.serviceId,
             service: subItem.service,
             status: subItem.status,
+            files: (subItem.files ?? []).map((file): OrderFileDto => ({
+              id: file.id,
+              name: file.originalName,
+              size: file.size,
+              type: file.mimeType,
+              source: file.source ?? FileSource.CLIENT,
+            })),
           })),
-          files: (order.item.files ?? []).map((file): OrderFileDto => ({
-            id: file.id,
-            name: file.originalName,
-            size: file.size,
-            type: file.mimeType,
-            source: file.source ?? FileSource.CLIENT,
-          })),
+          files: (order.item.files ?? [])
+            .filter((file) => file.orderItemSubItemId === null)
+            .map((file): OrderFileDto => ({
+              id: file.id,
+              name: file.originalName,
+              size: file.size,
+              type: file.mimeType,
+              source: file.source ?? FileSource.CLIENT,
+            })),
         }
         : null,
     };
@@ -393,6 +403,7 @@ export class OrdersService {
         'item.package.services',
         'item.subItems',
         'item.subItems.service',
+        'item.subItems.files',
         'item.files',
       ],
       order: { createdAt: 'DESC' },
@@ -451,6 +462,7 @@ export class OrdersService {
         'item.package.services',
         'item.subItems',
         'item.subItems.service',
+        'item.subItems.files',
         'item.files',
       ],
       order: { createdAt: 'DESC' },
@@ -564,6 +576,7 @@ export class OrdersService {
         'item.package.services',
         'item.subItems',
         'item.subItems.service',
+        'item.subItems.files',
         'item.files',
       ],
     });
