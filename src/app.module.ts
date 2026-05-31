@@ -17,6 +17,7 @@ import { MailModule } from './mail/mail.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { PackagesModule } from './packages/packages.module';
 import { CategoriesModule } from './categories/categories.module';
+import { TranscriptionModule } from './transcription/transcription.module';
 
 
 @Module({
@@ -39,6 +40,7 @@ import { CategoriesModule } from './categories/categories.module';
     KnowledgeModule,
     PackagesModule,
     CategoriesModule,
+    TranscriptionModule,
   ],
 })
 export class AppModule {}
