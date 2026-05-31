@@ -72,7 +72,7 @@ export class YandexSpeechKitTranscriptionService {
       job.objectStorageKey = uploaded.key;
       await this.jobRepository.save(job);
 
-      const operationId = await this.startRecognition(job, uploaded, config);
+      const operationId = await this.startRecognition(job, file, uploaded, config);
       job.externalOperationId = operationId;
       await this.jobRepository.save(job);
 
@@ -119,6 +119,7 @@ export class YandexSpeechKitTranscriptionService {
 
   private async startRecognition(
     job: TranscriptionJob,
+    file: Express.Multer.File,
     uploaded: UploadedAudioObject,
     config: RecognitionConfig,
   ): Promise<string> {
@@ -135,7 +136,7 @@ export class YandexSpeechKitTranscriptionService {
           },
           audio_format: {
             container_audio: {
-              container_audio_type: this.containerAudioType(job.mimeType),
+              container_audio_type: this.containerAudioType(file.mimetype),
             },
           },
         },

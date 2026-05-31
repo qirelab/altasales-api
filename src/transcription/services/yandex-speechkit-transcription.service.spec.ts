@@ -176,6 +176,42 @@ describe('YandexSpeechKitTranscriptionService', () => {
     );
   });
 
+  it('uses the extracted audio file MIME for SpeechKit format on video jobs', async () => {
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: true }))
+      .mockResolvedValueOnce(
+        textResponse(
+          JSON.stringify({
+            final: {
+              alternatives: [
+                {
+                  text: 'Video transcript',
+                  startTimeMs: '0',
+                  endTimeMs: '1000',
+                },
+              ],
+            },
+          }),
+        ),
+      );
+    const { service } = createService(fetcher);
+
+    await service.run(
+      jobEntity({ mimeType: 'video/mp4' }),
+      audioFile('extracted-audio.ogg', 'audio/ogg'),
+    );
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      'https://stt.api.cloud.yandex.net:443/stt/v3/recognizeFileAsync',
+      expect.objectContaining({
+        body: expect.stringContaining('"container_audio_type":"OGG_OPUS"'),
+      }),
+    );
+  });
+
   it('marks timeout as a safe provider timeout', async () => {
     process.env.TRANSCRIPTION_OPERATION_TIMEOUT_MS = '1';
     process.env.TRANSCRIPTION_POLL_INTERVAL_MS = '1';

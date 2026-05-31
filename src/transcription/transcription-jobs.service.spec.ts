@@ -26,7 +26,7 @@ const JOB_ID = '00000000-0000-4000-8000-000000000010';
 
 describe('TranscriptionJobsService', () => {
   it('creates a queued job for the current user and starts async processing', async () => {
-    const { service, repository, processor } = createService();
+    const { service, repository, audioProcessor } = createService();
     const file = audioFile('call.mp3', 'audio/mpeg');
 
     const result = await service.createFromUpload(USER, file, {
@@ -51,7 +51,39 @@ describe('TranscriptionJobsService', () => {
         segments: [],
       }),
     );
-    expect(processor.runAsync).toHaveBeenCalledWith(
+    expect(audioProcessor.runAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ id: JOB_ID, userId: USER.id }),
+      file,
+    );
+  });
+
+  it('creates a queued video job with original video metadata and starts video processing', async () => {
+    const { service, repository, videoProcessor } = createService();
+    const file = videoFile('demo.mp4', 'video/mp4');
+
+    const result = await service.createFromVideoUpload(USER, file, {
+      language: 'ru-RU',
+    });
+
+    expect(result).toEqual({
+      jobId: JOB_ID,
+      status: TranscriptionJobStatus.QUEUED,
+      createdAt: expect.any(Date),
+    });
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER.id,
+        status: TranscriptionJobStatus.QUEUED,
+        originalFileName: 'demo.mp4',
+        mimeType: 'video/mp4',
+        size: file.size,
+        language: 'ru-RU',
+        provider: 'yandex_speechkit',
+        text: null,
+        segments: [],
+      }),
+    );
+    expect(videoProcessor.runAsync).toHaveBeenCalledWith(
       expect.objectContaining({ id: JOB_ID, userId: USER.id }),
       file,
     );
@@ -90,7 +122,7 @@ describe('TranscriptionJobsService', () => {
   it.each(['ru', 'ru-ru', 'ru-RU-extra-long-value'])(
     'rejects invalid language %s before creating a job',
     async (language) => {
-      const { service, repository, processor } = createService();
+      const { service, repository, audioProcessor, videoProcessor } = createService();
 
       await expect(
         service.createFromUpload(USER, audioFile('call.mp3', 'audio/mpeg'), {
@@ -100,7 +132,8 @@ describe('TranscriptionJobsService', () => {
 
       expect(repository.create).not.toHaveBeenCalled();
       expect(repository.save).not.toHaveBeenCalled();
-      expect(processor.runAsync).not.toHaveBeenCalled();
+      expect(audioProcessor.runAsync).not.toHaveBeenCalled();
+      expect(videoProcessor.runAsync).not.toHaveBeenCalled();
     },
   );
 
@@ -162,12 +195,21 @@ function createService(existingJob: TranscriptionJob | null = jobEntity()) {
   const processor = {
     runAsync: jest.fn(),
   };
+  const videoProcessor = {
+    runAsync: jest.fn(),
+  };
   const service = new TranscriptionJobsService(
     repository as never,
     processor as never,
+    videoProcessor as never,
   );
 
-  return { service, repository, processor };
+  return {
+    service,
+    repository,
+    audioProcessor: processor,
+    videoProcessor,
+  };
 }
 
 function jobEntity(overrides: Partial<TranscriptionJob> = {}): TranscriptionJob {
@@ -199,6 +241,19 @@ function audioFile(
   mimetype: string,
 ): Express.Multer.File {
   const buffer = Buffer.from('audio');
+  return {
+    originalname,
+    mimetype,
+    size: buffer.length,
+    buffer,
+  } as Express.Multer.File;
+}
+
+function videoFile(
+  originalname: string,
+  mimetype: string,
+): Express.Multer.File {
+  const buffer = Buffer.from('video');
   return {
     originalname,
     mimetype,

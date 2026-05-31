@@ -15,6 +15,7 @@ import {
 import { TranscriptionTranscriptResponseDto } from './dto/transcription-transcript-response.dto';
 import { TranscriptionJob } from './entities/transcription-job.entity';
 import { TranscriptionJobStatus } from './enums/transcription-job-status.enum';
+import { VideoTranscriptionProcessingService } from './services/video-transcription-processing.service';
 import { YandexSpeechKitTranscriptionService } from './services/yandex-speechkit-transcription.service';
 
 const DEFAULT_LANGUAGE = 'ru-RU';
@@ -26,6 +27,7 @@ export class TranscriptionJobsService {
     @InjectRepository(TranscriptionJob)
     private readonly jobRepository: Repository<TranscriptionJob>,
     private readonly transcriptionService: YandexSpeechKitTranscriptionService,
+    private readonly videoTranscriptionService: VideoTranscriptionProcessingService,
   ) {}
 
   createFromUpload(
@@ -33,7 +35,19 @@ export class TranscriptionJobsService {
     file: Express.Multer.File,
     input: { language?: string },
   ): Promise<TranscriptionCreateJobResponseDto> {
-    return this.createJob(user, file, input);
+    return this.createJob(user, file, input, (job) => {
+      this.transcriptionService.runAsync(job, file);
+    });
+  }
+
+  createFromVideoUpload(
+    user: CurrentUserData,
+    file: Express.Multer.File,
+    input: { language?: string },
+  ): Promise<TranscriptionCreateJobResponseDto> {
+    return this.createJob(user, file, input, (job) => {
+      this.videoTranscriptionService.runAsync(job, file);
+    });
   }
 
   async getJobForUser(
@@ -65,6 +79,7 @@ export class TranscriptionJobsService {
     user: CurrentUserData,
     file: Express.Multer.File,
     input: { language?: string },
+    startProcessing: (job: TranscriptionJob) => void,
   ): Promise<TranscriptionCreateJobResponseDto> {
     const language = this.resolveLanguage(input.language);
     const job = await this.jobRepository.save(
@@ -87,7 +102,7 @@ export class TranscriptionJobsService {
       }),
     );
 
-    this.transcriptionService.runAsync(job, file);
+    startProcessing(job);
 
     return {
       jobId: job.id,

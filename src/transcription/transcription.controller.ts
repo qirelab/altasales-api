@@ -27,11 +27,17 @@ type UploadFileMetadata = {
 };
 
 const DEFAULT_MAX_AUDIO_SIZE_MB = 100;
+const DEFAULT_MAX_VIDEO_SIZE_MB = 500;
 const SUPPORTED_AUDIO_TYPES = new Map([
   ['audio/mpeg', new Set(['.mp3'])],
   ['audio/wav', new Set(['.wav'])],
   ['audio/x-wav', new Set(['.wav'])],
   ['audio/ogg', new Set(['.ogg'])],
+]);
+const SUPPORTED_VIDEO_TYPES = new Map([
+  ['video/mp4', new Set(['.mp4'])],
+  ['video/webm', new Set(['.webm'])],
+  ['video/quicktime', new Set(['.mov'])],
 ]);
 
 function getMaxAudioSizeBytes(): number {
@@ -42,12 +48,25 @@ function getMaxAudioSizeBytes(): number {
   return sizeMb * 1024 * 1024;
 }
 
+export function getMaxVideoSizeBytes(): number {
+  const parsed = Number(process.env.TRANSCRIPTION_MAX_VIDEO_SIZE_MB);
+  const sizeMb = Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_MAX_VIDEO_SIZE_MB;
+  return sizeMb * 1024 * 1024;
+}
+
 export function isSupportedTranscriptionAudioFile(file: UploadFileMetadata): boolean {
   const extension = extname(file.originalname).toLowerCase();
   return SUPPORTED_AUDIO_TYPES.get(file.mimetype)?.has(extension) ?? false;
 }
 
-const uploadOptions = {
+export function isSupportedTranscriptionVideoFile(file: UploadFileMetadata): boolean {
+  const extension = extname(file.originalname).toLowerCase();
+  return SUPPORTED_VIDEO_TYPES.get(file.mimetype)?.has(extension) ?? false;
+}
+
+const audioUploadOptions = {
   limits: { fileSize: getMaxAudioSizeBytes() },
   fileFilter: (_req, file, cb) => {
     if (isSupportedTranscriptionAudioFile(file)) {
@@ -56,6 +75,18 @@ const uploadOptions = {
     }
 
     cb(new BadRequestException('Unsupported audio file type'), false);
+  },
+} satisfies MulterOptions;
+
+const videoUploadOptions = {
+  limits: { fileSize: getMaxVideoSizeBytes() },
+  fileFilter: (_req, file, cb) => {
+    if (isSupportedTranscriptionVideoFile(file)) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new BadRequestException('Unsupported video file type'), false);
   },
 } satisfies MulterOptions;
 
@@ -79,7 +110,7 @@ export class TranscriptionController {
     },
   })
   @ApiResponse({ status: 201, description: 'Transcription job queued' })
-  @UseInterceptors(FileInterceptor('file', uploadOptions))
+  @UseInterceptors(FileInterceptor('file', audioUploadOptions))
   upload(
     @UploadedFile() file: Express.Multer.File,
     @Body('language') language: string | undefined,
@@ -90,6 +121,33 @@ export class TranscriptionController {
     }
 
     return this.jobsService.createFromUpload(user, file, { language });
+  }
+
+  @Post('video')
+  @ApiOperation({ summary: 'Upload video and start transcription' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        language: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Transcription job queued' })
+  @UseInterceptors(FileInterceptor('file', videoUploadOptions))
+  uploadVideo(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('language') language: string | undefined,
+    @CurrentUser() user: CurrentUserData,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    return this.jobsService.createFromVideoUpload(user, file, { language });
   }
 
   @Get('jobs/:id')
