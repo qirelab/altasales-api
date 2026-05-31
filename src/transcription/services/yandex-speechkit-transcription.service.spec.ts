@@ -9,6 +9,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
   const env = process.env;
   let loggerLogSpy: jest.SpyInstance;
   let loggerErrorSpy: jest.SpyInstance;
+  let loggerWarnSpy: jest.SpyInstance;
 
   beforeEach(() => {
     process.env = {
@@ -21,6 +22,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
     };
     loggerLogSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     loggerErrorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    loggerWarnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
   });
 
   afterEach(() => {
@@ -36,6 +38,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
     await service.run(job, audioFile('call.mp3', 'audio/mpeg'));
 
     expect(storage.uploadAudio).not.toHaveBeenCalled();
+    expect(storage.deleteObject).not.toHaveBeenCalled();
     expect(repository.save).toHaveBeenLastCalledWith(
       expect.objectContaining({
         status: TranscriptionJobStatus.FAILED,
@@ -71,7 +74,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
           }),
         ),
       );
-    const { service, repository } = createService(fetcher);
+    const { service, repository, storage } = createService(fetcher);
     const job = jobEntity({ mimeType: 'audio/mpeg', language: 'ru-RU' });
 
     await service.run(job, audioFile('call.mp3', 'audio/mpeg'));
@@ -115,6 +118,12 @@ describe('YandexSpeechKitTranscriptionService', () => {
         safeErrorMessage: null,
       }),
     );
+    expect(storage.deleteObject).toHaveBeenCalledWith(
+      `transcription/${JOB_ID}/call.mp3`,
+    );
+    expect(
+      repository.save.mock.invocationCallOrder.at(-1),
+    ).toBeLessThan(storage.deleteObject.mock.invocationCallOrder[0]);
     expect(loggerLogSpy).toHaveBeenCalledWith(
       expect.not.objectContaining({ text: 'Hello world' }),
     );
@@ -143,7 +152,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
           }),
         ),
       );
-    const { service, repository } = createService(fetcher);
+    const { service, repository, storage } = createService(fetcher);
 
     await service.run(jobEntity(), audioFile('call.mp3', 'audio/mpeg'));
 
@@ -162,6 +171,9 @@ describe('YandexSpeechKitTranscriptionService', () => {
         ],
       }),
     );
+    expect(storage.deleteObject).toHaveBeenCalledWith(
+      `transcription/${JOB_ID}/call.mp3`,
+    );
   });
 
   it('marks timeout as a safe provider timeout', async () => {
@@ -171,7 +183,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
       .mockResolvedValue(jsonResponse({ id: 'operation-1', done: false }));
-    const { service, repository } = createService(fetcher);
+    const { service, repository, storage } = createService(fetcher);
 
     await service.run(jobEntity(), audioFile('call.wav', 'audio/wav'));
 
@@ -182,6 +194,12 @@ describe('YandexSpeechKitTranscriptionService', () => {
         safeErrorMessage: 'Transcription failed',
       }),
     );
+    expect(storage.deleteObject).toHaveBeenCalledWith(
+      `transcription/${JOB_ID}/call.mp3`,
+    );
+    expect(
+      repository.save.mock.invocationCallOrder.at(-1),
+    ).toBeLessThan(storage.deleteObject.mock.invocationCallOrder[0]);
   });
 
   it('maps empty recognition results to safe invalid response failure', async () => {
@@ -190,7 +208,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
       .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
       .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: true }))
       .mockResolvedValueOnce(textResponse('{"result":{}}'));
-    const { service, repository } = createService(fetcher);
+    const { service, repository, storage } = createService(fetcher);
 
     await service.run(jobEntity(), audioFile('call.ogg', 'audio/ogg'));
 
@@ -198,6 +216,99 @@ describe('YandexSpeechKitTranscriptionService', () => {
       expect.objectContaining({
         status: TranscriptionJobStatus.FAILED,
         errorCode: 'TRANSCRIPTION_RESPONSE_INVALID',
+      }),
+    );
+    expect(storage.deleteObject).toHaveBeenCalledWith(
+      `transcription/${JOB_ID}/call.mp3`,
+    );
+  });
+
+  it('does not fail a successful job when temporary audio cleanup fails', async () => {
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: true }))
+      .mockResolvedValueOnce(
+        textResponse(
+          JSON.stringify({
+            final: {
+              alternatives: [
+                {
+                  text: 'Kept in Postgres',
+                  startTimeMs: '0',
+                  endTimeMs: '900',
+                },
+              ],
+            },
+          }),
+        ),
+      );
+    const { service, repository, storage } = createService(fetcher);
+    storage.deleteObject.mockRejectedValue(
+      new Error('secret-key raw transcript https://storage.yandexcloud.net/bucket/key'),
+    );
+
+    await service.run(jobEntity(), audioFile('call.mp3', 'audio/mpeg'));
+
+    expect(repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: TranscriptionJobStatus.SUCCEEDED,
+        text: 'Kept in Postgres',
+        segments: [
+          {
+            startMs: 0,
+            endMs: 900,
+            text: 'Kept in Postgres',
+            speaker: null,
+            confidence: null,
+          },
+        ],
+        errorCode: null,
+      }),
+    );
+    expect(loggerWarnSpy).toHaveBeenCalledWith({
+      eventName: 'TRANSCRIPTION_SOURCE_OBJECT_CLEANUP_FAILED',
+      jobId: JOB_ID,
+      provider: 'yandex_speechkit',
+      errorCode: 'TRANSCRIPTION_OBJECT_CLEANUP_FAILED',
+    });
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        text: 'Kept in Postgres',
+        objectStorageKey: `transcription/${JOB_ID}/call.mp3`,
+      }),
+    );
+    expect(loggerErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not mask the primary transcription error when cleanup fails', async () => {
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: true }))
+      .mockResolvedValueOnce(textResponse(''));
+    const { service, repository, storage } = createService(fetcher);
+    storage.deleteObject.mockRejectedValue(new Error('cleanup failed with raw body'));
+
+    await service.run(jobEntity(), audioFile('call.mp3', 'audio/mpeg'));
+
+    expect(repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: TranscriptionJobStatus.FAILED,
+        errorCode: 'TRANSCRIPTION_RESPONSE_INVALID',
+        safeErrorMessage: 'Transcription failed',
+      }),
+    );
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'TRANSCRIPTION_FAILED',
+        errorCode: 'TRANSCRIPTION_RESPONSE_INVALID',
+      }),
+    );
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: 'TRANSCRIPTION_SOURCE_OBJECT_CLEANUP_FAILED',
+        errorCode: 'TRANSCRIPTION_OBJECT_CLEANUP_FAILED',
       }),
     );
   });
@@ -212,6 +323,7 @@ function createService(fetcher: jest.Mock = jest.fn()) {
       key: `transcription/${JOB_ID}/call.mp3`,
       uri: 'https://storage.yandexcloud.net/bucket/transcription/job/call.mp3',
     })),
+    deleteObject: jest.fn(async () => undefined),
   };
   const service = new YandexSpeechKitTranscriptionService(
     repository as never,

@@ -64,6 +64,61 @@ describe('YandexObjectStorageService', () => {
     });
   });
 
+  it('deletes temporary audio objects with a safe bucket-scoped request', async () => {
+    const client = { send: jest.fn().mockResolvedValue({}) };
+    const service = new YandexObjectStorageService(client as never);
+
+    await service.deleteObject('transcription/job-1/call.mp3');
+
+    expect(client.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Bucket: 'transcription-bucket',
+          Key: 'transcription/job-1/call.mp3',
+        }),
+      }),
+    );
+    expect(loggerLogSpy).not.toHaveBeenCalled();
+    expect(loggerErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips delete safely when the object key is empty', async () => {
+    const client = { send: jest.fn() };
+    const service = new YandexObjectStorageService(client as never);
+
+    await service.deleteObject('   ');
+
+    expect(client.send).not.toHaveBeenCalled();
+  });
+
+  it('fails delete safely when Object Storage config is missing', async () => {
+    delete process.env.YANDEX_OBJECT_STORAGE_BUCKET;
+    const service = new YandexObjectStorageService({ send: jest.fn() } as never);
+
+    await expect(
+      service.deleteObject('transcription/job-1/call.mp3'),
+    ).rejects.toMatchObject<Partial<TranscriptionProviderError>>({
+      safeErrorCode: 'TRANSCRIPTION_OBJECT_CLEANUP_FAILED',
+    });
+  });
+
+  it('maps SDK delete failures to safe errors without exposing raw details', async () => {
+    const service = new YandexObjectStorageService({
+      send: jest.fn().mockRejectedValue(
+        new Error(
+          'secret-key https://storage.yandexcloud.net/transcription-bucket/transcription/job-1/call.mp3',
+        ),
+      ),
+    } as never);
+
+    await expect(
+      service.deleteObject('transcription/job-1/call.mp3'),
+    ).rejects.toMatchObject<Partial<TranscriptionProviderError>>({
+      safeErrorCode: 'TRANSCRIPTION_OBJECT_CLEANUP_FAILED',
+      message: 'Temporary audio cleanup failed',
+    });
+  });
+
   it('maps SDK upload failures to safe errors', async () => {
     const service = new YandexObjectStorageService({
       send: jest.fn().mockRejectedValue(new Error('raw sdk failure')),

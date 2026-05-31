@@ -57,6 +57,7 @@ export class YandexSpeechKitTranscriptionService {
 
   async run(job: TranscriptionJob, file: Express.Multer.File): Promise<void> {
     const startedAt = Date.now();
+    let cleanupKey = job.objectStorageKey?.trim() || null;
 
     try {
       const config = this.getConfig();
@@ -67,6 +68,7 @@ export class YandexSpeechKitTranscriptionService {
       await this.jobRepository.save(job);
 
       const uploaded = await this.objectStorage.uploadAudio(job.id, file);
+      cleanupKey = uploaded.key;
       job.objectStorageKey = uploaded.key;
       await this.jobRepository.save(job);
 
@@ -110,6 +112,8 @@ export class YandexSpeechKitTranscriptionService {
         errorCode,
         latencyMs: Date.now() - startedAt,
       });
+    } finally {
+      await this.cleanupTemporaryAudio(job, cleanupKey);
     }
   }
 
@@ -329,6 +333,32 @@ export class YandexSpeechKitTranscriptionService {
     return isTranscriptionProviderError(error)
       ? error.safeErrorCode
       : 'TRANSCRIPTION_PROVIDER_UNAVAILABLE';
+  }
+
+  private async cleanupTemporaryAudio(
+    job: TranscriptionJob,
+    objectStorageKey: string | null,
+  ): Promise<void> {
+    if (!objectStorageKey) {
+      return;
+    }
+
+    try {
+      await this.objectStorage.deleteObject(objectStorageKey);
+    } catch (error) {
+      this.logger.warn({
+        eventName: 'TRANSCRIPTION_SOURCE_OBJECT_CLEANUP_FAILED',
+        jobId: job.id,
+        provider: job.provider,
+        errorCode: this.safeCleanupErrorCode(error),
+      });
+    }
+  }
+
+  private safeCleanupErrorCode(error: unknown): TranscriptionSafeErrorCode {
+    return isTranscriptionProviderError(error)
+      ? error.safeErrorCode
+      : 'TRANSCRIPTION_OBJECT_CLEANUP_FAILED';
   }
 
   private getPositiveInteger(value: string | undefined, fallback: number): number {
