@@ -42,24 +42,22 @@ type UploadFileMetadata = {
 };
 
 const DEFAULT_MAX_FILE_SIZE_MB = 100;
-const SUPPORTED_MIME_TYPES = new Set([
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/plain',
-  'text/csv',
-  'text/markdown',
-  'application/json',
-]);
-const SUPPORTED_EXTENSIONS = new Set([
-  '.pdf',
-  '.docx',
-  '.xlsx',
-  '.txt',
-  '.csv',
-  '.json',
-  '.md',
-  '.markdown',
+const SUPPORTED_UPLOAD_TYPES = new Map([
+  ['application/pdf', new Set(['.pdf'])],
+  [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    new Set(['.docx']),
+  ],
+  [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    new Set(['.xlsx']),
+  ],
+  ['text/plain', new Set(['.txt', '.md', '.markdown'])],
+  ['text/csv', new Set(['.csv'])],
+  ['text/markdown', new Set(['.md', '.markdown'])],
+  ['application/json', new Set(['.json'])],
+  ['image/png', new Set(['.png'])],
+  ['image/jpeg', new Set(['.jpg', '.jpeg'])],
 ]);
 
 function getMaxFileSizeBytes(): number {
@@ -72,8 +70,7 @@ function getMaxFileSizeBytes(): number {
 
 export function isSupportedKnowledgeUploadFile(file: UploadFileMetadata): boolean {
   const extension = extname(file.originalname).toLowerCase();
-  return SUPPORTED_MIME_TYPES.has(file.mimetype)
-    && SUPPORTED_EXTENSIONS.has(extension);
+  return SUPPORTED_UPLOAD_TYPES.get(file.mimetype)?.has(extension) ?? false;
 }
 
 const uploadOptions = {

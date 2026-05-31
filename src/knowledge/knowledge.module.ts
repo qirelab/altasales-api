@@ -11,7 +11,10 @@ import { KnowledgeDocumentsService } from './services/knowledge-documents.servic
 import { KnowledgeExtractionService } from './services/knowledge-extraction.service';
 import { KnowledgeHtmlExtractionService } from './services/knowledge-html-extraction.service';
 import { KnowledgeIngestionService } from './services/knowledge-ingestion.service';
+import { KnowledgeOcrService } from './services/knowledge-ocr.service';
+import { KnowledgePdfPageRendererService } from './services/knowledge-pdf-page-renderer.service';
 import { KnowledgeSearchService } from './services/knowledge-search.service';
+import { KnowledgeTesseractCliOcrProvider } from './services/knowledge-tesseract-cli-ocr-provider.service';
 import { KnowledgeUrlSourceService } from './services/knowledge-url-source.service';
 import { KNOWLEDGE_VECTOR_STORE } from './vector-store/knowledge-vector-store.interface';
 import { QdrantKnowledgeVectorStore } from './vector-store/qdrant-knowledge-vector-store.service';
@@ -31,6 +34,9 @@ import { QdrantKnowledgeVectorStore } from './vector-store/qdrant-knowledge-vect
     KnowledgeDocumentsService,
     KnowledgeExtractionService,
     KnowledgeHtmlExtractionService,
+    KnowledgeOcrService,
+    KnowledgePdfPageRendererService,
+    KnowledgeTesseractCliOcrProvider,
     KnowledgeChunkingService,
     KnowledgeIngestionService,
     KnowledgeSearchService,
