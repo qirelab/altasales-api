@@ -9,8 +9,10 @@ import { KnowledgeController } from './knowledge.controller';
 import { KnowledgeChunkingService } from './services/knowledge-chunking.service';
 import { KnowledgeDocumentsService } from './services/knowledge-documents.service';
 import { KnowledgeExtractionService } from './services/knowledge-extraction.service';
+import { KnowledgeHtmlExtractionService } from './services/knowledge-html-extraction.service';
 import { KnowledgeIngestionService } from './services/knowledge-ingestion.service';
 import { KnowledgeSearchService } from './services/knowledge-search.service';
+import { KnowledgeUrlSourceService } from './services/knowledge-url-source.service';
 import { KNOWLEDGE_VECTOR_STORE } from './vector-store/knowledge-vector-store.interface';
 import { QdrantKnowledgeVectorStore } from './vector-store/qdrant-knowledge-vector-store.service';
 
@@ -28,9 +30,11 @@ import { QdrantKnowledgeVectorStore } from './vector-store/qdrant-knowledge-vect
   providers: [
     KnowledgeDocumentsService,
     KnowledgeExtractionService,
+    KnowledgeHtmlExtractionService,
     KnowledgeChunkingService,
     KnowledgeIngestionService,
     KnowledgeSearchService,
+    KnowledgeUrlSourceService,
     QdrantKnowledgeVectorStore,
     {
       provide: KNOWLEDGE_VECTOR_STORE,

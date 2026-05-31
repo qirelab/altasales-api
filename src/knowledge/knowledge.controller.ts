@@ -28,6 +28,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
+import { CreateKnowledgeUrlDocumentDto } from './dto/create-knowledge-url-document.dto';
 import { ListKnowledgeDocumentsDto } from './dto/list-knowledge-documents.dto';
 import { SearchKnowledgeDto } from './dto/search-knowledge.dto';
 import { UpdateKnowledgeDocumentDto } from './dto/update-knowledge-document.dto';
@@ -130,6 +131,18 @@ export class KnowledgeController {
     });
   }
 
+  @Post('documents/url')
+  @ApiOperation({ summary: 'Fetch and index a single knowledge URL' })
+  @ApiResponse({ status: 201, description: 'Knowledge URL indexing started' })
+  async createFromUrl(@Body() dto: CreateKnowledgeUrlDocumentDto) {
+    return this.documentsService.createFromUrl({
+      url: dto.url,
+      purpose: dto.purpose,
+      title: dto.title,
+      metadata: this.mergeObjectMetadata(dto.metadata, dto.tags),
+    });
+  }
+
   @Get('documents')
   @ApiOperation({ summary: 'List knowledge documents' })
   @ApiQuery({ name: 'purpose', required: false })
@@ -211,6 +224,17 @@ export class KnowledgeController {
     } catch {
       throw new BadRequestException('Knowledge metadata must be a JSON object');
     }
+  }
+
+  private mergeObjectMetadata(
+    metadata?: Record<string, unknown>,
+    tags?: string[],
+  ): Record<string, unknown> {
+    const merged = { ...(metadata ?? {}) };
+    if (tags?.length) {
+      merged.tags = tags;
+    }
+    return merged;
   }
 
   private hasUpdateFields(dto: UpdateKnowledgeDocumentDto): boolean {
