@@ -26,11 +26,14 @@ export class SessionGuard implements CanActivate {
       request.user = user;
       return true;
     } catch (error) {
+      const hostname = request.hostname;
+      const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
       response.clearCookie('session', {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        secure: !isLocal,
+        sameSite: isLocal ? 'lax' : 'none',
+        domain: isLocal ? undefined : '.altasales.qirelab.com',
+        path: '/',
       });
 
       if (error.code === 'auth/id-token-expired') {
