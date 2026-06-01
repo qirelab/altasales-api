@@ -153,12 +153,14 @@ export class ServicesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete contractor (expert) by ID for admin',
-    description: 'Removes contractor from services catalog and deletes linked user account.',
+    description:
+      'Hard-deletes the contractor and linked user account when there are no linked orders. '
+      + 'If linked orders exist, soft-deletes the contractor (hides it from admin lists) '
+      + 'and keeps the user account so historical orders remain intact.',
   })
   @ApiParam({ name: 'id', description: 'Contractor ID' })
-  @ApiResponse({ status: 204, description: 'Contractor and linked user deleted' })
+  @ApiResponse({ status: 204, description: 'Contractor removed (hard or soft)' })
   @ApiResponse({ status: 404, description: 'Contractor not found' })
-  @ApiResponse({ status: 409, description: 'Contractor has related orders' })
   async removeContractorForAdmin(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.servicesService.removeContractorForAdmin(id);
   }
