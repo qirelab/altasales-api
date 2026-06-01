@@ -71,4 +71,11 @@ export class User {
   })
   @CreateDateColumn()
   createdAt: Date;
+
+  @ApiProperty({
+    example: false,
+    description: 'Whether the gift balance intro modal has been seen by the user',
+  })
+  @Column({ type: 'boolean', default: false })
+  hasSeenGiftIntro: boolean;
 }

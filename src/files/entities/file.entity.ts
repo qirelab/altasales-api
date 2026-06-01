@@ -10,6 +10,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { ChatMessage } from '../../chat/entities/chat-message.entity';
 import { OrderItem } from '../../orders/entities/order-item.entity';
+import { OrderItemSubItem } from '../../orders/entities/order-item-sub-item.entity';
 
 export enum FileSource {
   CLIENT = 'client',
@@ -67,6 +68,14 @@ export class FileEntity {
   @ManyToOne(() => OrderItem, (orderItem) => orderItem.files, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'orderItemId' })
   orderItem: OrderItem | null;
+
+  @ApiProperty({ description: 'Order item sub-item ID (file scoped to a single service inside a package)', nullable: true })
+  @Column({ type: 'uuid', nullable: true })
+  orderItemSubItemId: string | null;
+
+  @ManyToOne(() => OrderItemSubItem, (subItem) => subItem.files, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'orderItemSubItemId' })
+  orderItemSubItem: OrderItemSubItem | null;
 
   @ApiProperty({ enum: FileSource, description: 'File source (client or admin)', default: FileSource.CLIENT })
   @Column({ type: 'enum', enum: FileSource, default: FileSource.CLIENT })

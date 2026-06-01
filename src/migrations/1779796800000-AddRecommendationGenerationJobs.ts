@@ -59,6 +59,22 @@ export class AddRecommendationGenerationJobs1779796800000 implements MigrationIn
     `);
 
     await queryRunner.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'user'
+            AND column_name = 'notificationsSeenAt'
+            AND data_type = 'timestamp without time zone'
+        ) THEN
+          ALTER TABLE "user"
+            ALTER COLUMN "notificationsSeenAt" TYPE timestamptz
+            USING "notificationsSeenAt" AT TIME ZONE 'UTC';
+        END IF;
+      END $$;
+    `);
+
+    await queryRunner.query(`
       ALTER TABLE "recommendation"
       ALTER COLUMN "serviceId" DROP NOT NULL
     `);
@@ -175,8 +191,19 @@ export class AddRecommendationGenerationJobs1779796800000 implements MigrationIn
     }
 
     await queryRunner.query(`
-      ALTER TABLE "user"
-      DROP COLUMN IF EXISTS "notificationsSeenAt"
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'user'
+            AND column_name = 'notificationsSeenAt'
+            AND data_type = 'timestamp with time zone'
+        ) THEN
+          ALTER TABLE "user"
+            ALTER COLUMN "notificationsSeenAt" TYPE timestamp
+            USING "notificationsSeenAt" AT TIME ZONE 'UTC';
+        END IF;
+      END $$;
     `);
 
     await queryRunner.query(`

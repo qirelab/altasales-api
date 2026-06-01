@@ -4,7 +4,6 @@ import { UserRecord } from 'firebase-admin/auth';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
-import { BalanceService } from '../balance-transactions/balance.service';
 import { FirebaseService } from './firebase/firebase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -18,7 +17,6 @@ export class AuthService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
-    private readonly balanceService: BalanceService,
   ) { }
 
   // TODO: only for testing
@@ -56,7 +54,6 @@ export class AuthService {
       });
 
       const savedUser = await queryRunner.manager.save(User, user);
-      await this.balanceService.creditRegistrationGift(savedUser.id, queryRunner.manager);
 
       await queryRunner.commitTransaction();
 
@@ -221,7 +218,6 @@ export class AuthService {
         });
 
         dbUser = await queryRunner.manager.save(User, dbUser);
-        await this.balanceService.creditRegistrationGift(dbUser.id, queryRunner.manager);
         await queryRunner.commitTransaction();
       } catch (error) {
         await queryRunner.rollbackTransaction();

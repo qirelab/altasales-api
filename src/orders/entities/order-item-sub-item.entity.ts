@@ -3,11 +3,13 @@ import {
   Column,
   PrimaryGeneratedColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
   Unique,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
+import { FileEntity } from '../../files/entities/file.entity';
 import { OrderStatus } from './order-status.enum';
 import { OrderItem } from './order-item.entity';
 
@@ -46,4 +48,7 @@ export class OrderItemSubItem {
   @ApiProperty({ enum: OrderStatus, description: 'Sub-item status' })
   @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.Planned })
   status: OrderStatus;
+
+  @OneToMany(() => FileEntity, (file) => file.orderItemSubItem)
+  files: FileEntity[];
 }

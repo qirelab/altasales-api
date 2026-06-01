@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsString,
   IsArray,
   IsIn,
@@ -8,7 +9,9 @@ import {
   IsOptional,
   IsNotEmpty,
   ValidateNested,
+  Max,
   Min,
+  MaxLength,
   ArrayMinSize,
   Matches,
   IsObject,
@@ -17,6 +20,7 @@ import { Type } from 'class-transformer';
 import type {
   LeadGenerationType,
   PreferredMessenger,
+  QuestionnaireAnswers,
   SalesDirection,
 } from '../entities/questionnaire.entity';
 
@@ -52,7 +56,7 @@ class ComponentsDto {
   @IsBoolean() salesHead: boolean;
 }
 
-export class CreateQuestionnaireDto {
+export class CreateQuestionnaireDto implements QuestionnaireAnswers {
   @ApiProperty({ example: 'Иван Иванов' })
   @IsString()
   @IsNotEmpty({ message: 'Имя обязательно' })
@@ -71,6 +75,15 @@ export class CreateQuestionnaireDto {
   @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
   preferredMessenger: PreferredMessenger;
 
+  @ApiProperty({ example: '@username', description: 'Контакт в выбранном мессенджере: @username или номер телефона' })
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите контакт в мессенджере' })
+  @MaxLength(64)
+  @Matches(/^(@[a-zA-Z0-9_]{5,32}|\+?[\d\s\-()]{7,30})$/, {
+    message: 'Введите @username или номер телефона',
+  })
+  messengerUsername: string;
+
   @ApiProperty({ example: 'ООО "ТехноСтарт"' })
   @IsString()
   @IsNotEmpty({ message: 'Название компании обязательно' })
@@ -84,7 +97,8 @@ export class CreateQuestionnaireDto {
 
   @ApiProperty({ enum: LEAD_GENERATION_TYPES, isArray: true })
   @IsArray()
-  @ArrayMinSize(1, { message: 'Выберите хотя бы один тип лидогенерации' })
+  @ArrayMinSize(1, { message: 'Выберите тип лидогенерации' })
+  @ArrayMaxSize(1, { message: 'Можно выбрать только один тип лидогенерации' })
   @IsIn(LEAD_GENERATION_TYPES, { each: true })
   leadGenerationTypes: LeadGenerationType[];
 
@@ -127,4 +141,11 @@ export class CreateQuestionnaireDto {
   @IsNumber()
   @Min(1, { message: 'Средний чек должен быть больше 0' })
   averageCheck: number;
+
+  @ApiPropertyOptional({ example: 20, description: 'Конверсия лид → продажа, %' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1, { message: 'Конверсия должна быть больше 0' })
+  @Max(100, { message: 'Конверсия не может быть больше 100' })
+  conversionRate?: number;
 }

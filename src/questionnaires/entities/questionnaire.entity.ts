@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -31,6 +32,7 @@ export interface QuestionnaireAnswers {
   name: string;
   phone: string;
   preferredMessenger: PreferredMessenger;
+  messengerUsername: string;
   companyName: string;
   salesDirection: SalesDirection[];
   leadGenerationTypes?: LeadGenerationType[];
@@ -45,9 +47,11 @@ export interface QuestionnaireAnswers {
   components: QuestionnaireComponents;
   targetRevenue: number;
   averageCheck: number;
+  conversionRate?: number;
 }
 
 @Entity('questionnaires')
+@Index('UQ_questionnaires_userId', ['userId'], { unique: true })
 export class Questionnaire {
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
   @PrimaryGeneratedColumn('uuid')

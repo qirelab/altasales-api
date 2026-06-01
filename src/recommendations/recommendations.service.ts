@@ -6,10 +6,12 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
+import { activePackageWhere } from '../packages/package-visibility';
+import { filterActiveServices } from '../services/service-visibility';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
@@ -37,6 +39,13 @@ import {
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
 
+export type PackageInnerServiceItem = {
+  id: string;
+  name: string;
+  type: ServiceType;
+  price: number;
+};
+
 export type UserRecommendationListItem = {
   id: string;
   serviceId: string | null;
@@ -51,6 +60,7 @@ export type UserRecommendationListItem = {
   dependencyIds: string[];
   diagnosticSignals: string[];
   createdAt: Date;
+  services?: PackageInnerServiceItem[];
 };
 
 export type AdminRecommendationListItem = {
@@ -103,13 +113,7 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoinAndSelect('package.category', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(new Brackets((qb) => {
-        qb
-          .where('service.type IN (:...serviceTypes)', {
-            serviceTypes: [ServiceType.Service, ServiceType.Document],
-          })
-          .orWhere('package.id IS NOT NULL');
-      }))
+      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy(
         `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
         'ASC',
@@ -121,7 +125,7 @@ export class RecommendationsService implements OnModuleInit {
   async findAssignedToUserList(
     userId: string,
   ): Promise<UserRecommendationListItem[]> {
-    return this.recommendationRepository
+    const rows = await this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
@@ -141,19 +145,44 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(new Brackets((qb) => {
-        qb
-          .where('service.type IN (:...serviceTypes)', {
-            serviceTypes: [ServiceType.Service, ServiceType.Document],
-          })
-          .orWhere('package.id IS NOT NULL');
-      }))
+      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy(
         `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
         'ASC',
       )
       .addOrderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem>();
+
+    const packageIds = rows
+      .filter((row) => row.packageId)
+      .map((row) => row.packageId as string);
+
+    if (packageIds.length === 0) {
+      return rows;
+    }
+
+    const packagesWithServices = await this.packageRepository.find({
+      where: packageIds.map((id) => ({ id })),
+      relations: ['services'],
+    });
+    const innerServicesByPackageId = new Map<string, PackageInnerServiceItem[]>();
+    packagesWithServices.forEach((pkg) => {
+      innerServicesByPackageId.set(
+        pkg.id,
+        filterActiveServices(pkg.services).map((service) => ({
+          id: service.id,
+          name: service.name,
+          type: service.type,
+          price: Number(service.price),
+        })),
+      );
+    });
+
+    return rows.map((row) => (
+      row.packageId
+        ? { ...row, services: innerServicesByPackageId.get(row.packageId) ?? [] }
+        : row
+    ));
   }
 
   async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
@@ -165,13 +194,7 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoinAndSelect('package.category', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(new Brackets((qb) => {
-        qb
-          .where('service.type IN (:...serviceTypes)', {
-            serviceTypes: [ServiceType.Service, ServiceType.Document],
-          })
-          .orWhere('package.id IS NOT NULL');
-      }))
+      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy(
         `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
         'ASC',
@@ -426,6 +449,7 @@ export class RecommendationsService implements OnModuleInit {
       .where('service.type IN (:...serviceTypes)', {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
       })
+      .andWhere('service."deletedAt" IS NULL')
       .orderBy('service."createdAt"', 'DESC')
       .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
       .getMany() as Promise<ServiceCandidate[]>;
@@ -553,7 +577,7 @@ export class RecommendationsService implements OnModuleInit {
 
   private async ensureServiceCanBeRecommended(serviceId: string): Promise<void> {
     const service = await this.serviceRepository.findOne({
-      where: { id: serviceId },
+      where: { id: serviceId, deletedAt: IsNull() },
     });
     if (!service) {
       throw new NotFoundException(`Service with id ${serviceId} not found`);
@@ -567,7 +591,7 @@ export class RecommendationsService implements OnModuleInit {
 
   private async ensurePackageCanBeRecommended(packageId: string): Promise<void> {
     const servicePackage = await this.packageRepository.findOne({
-      where: { id: packageId },
+      where: { id: packageId, ...activePackageWhere() },
     });
     if (!servicePackage) {
       throw new NotFoundException(`Package with id ${packageId} not found`);
@@ -625,5 +649,16 @@ export class RecommendationsService implements OnModuleInit {
         typeof error === 'object' &&
         (error as { code?: unknown }).code === '23505',
     );
+  }
+
+  private visibleRecommendationTargetFilter(): Brackets {
+    return new Brackets((qb) => {
+      qb
+        .where(
+          'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL',
+          { serviceTypes: [ServiceType.Service, ServiceType.Document] },
+        )
+        .orWhere('package.id IS NOT NULL AND package."deletedAt" IS NULL');
+    });
   }
 }

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, In, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { PaymentService } from '../payment/payment.service';
 import { Service } from '../services/entities/service.entity';
@@ -18,7 +18,6 @@ import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
-import { BalanceTransactionType } from '../balance-transactions/entities/balance-transaction-type.enum';
 import { CartService } from '../cart/cart.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
@@ -46,6 +45,7 @@ export interface OrderItemDto {
     serviceId: string;
     service: Service;
     status: OrderStatus;
+    files: OrderFileDto[];
   }>;
   files: OrderFileDto[];
 }
@@ -155,14 +155,23 @@ export class OrdersService {
             serviceId: subItem.serviceId,
             service: subItem.service,
             status: subItem.status,
+            files: (subItem.files ?? []).map((file): OrderFileDto => ({
+              id: file.id,
+              name: file.originalName,
+              size: file.size,
+              type: file.mimeType,
+              source: file.source ?? FileSource.CLIENT,
+            })),
           })),
-          files: (order.item.files ?? []).map((file): OrderFileDto => ({
-            id: file.id,
-            name: file.originalName,
-            size: file.size,
-            type: file.mimeType,
-            source: file.source ?? FileSource.CLIENT,
-          })),
+          files: (order.item.files ?? [])
+            .filter((file) => file.orderItemSubItemId === null)
+            .map((file): OrderFileDto => ({
+              id: file.id,
+              name: file.originalName,
+              size: file.size,
+              type: file.mimeType,
+              source: file.source ?? FileSource.CLIENT,
+            })),
         }
         : null,
     };
@@ -234,7 +243,7 @@ export class OrdersService {
         let resolvedAmount = Number(checkoutItem.amount);
         if (checkoutItem.serviceId) {
           const service = await this.serviceRepository.findOne({
-            where: { id: checkoutItem.serviceId },
+            where: { id: checkoutItem.serviceId, deletedAt: IsNull() },
           });
           if (!service) {
             throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
@@ -242,7 +251,7 @@ export class OrdersService {
         }
         if (checkoutItem.packageId) {
           const servicePackage = await this.packageRepository.findOne({
-            where: { id: checkoutItem.packageId },
+            where: { id: checkoutItem.packageId, deletedAt: IsNull() },
           });
           if (!servicePackage) {
             throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
@@ -269,7 +278,7 @@ export class OrdersService {
         await queryRunner.manager.save(OrderItem, item);
         if (checkoutItem.packageId) {
           const servicePackage = await this.packageRepository.findOne({
-            where: { id: checkoutItem.packageId },
+            where: { id: checkoutItem.packageId, deletedAt: IsNull() },
             relations: ['services'],
           });
           const packageServices = servicePackage?.services ?? [];
@@ -298,18 +307,18 @@ export class OrdersService {
 
       const orderIds = createdOrders.map((order) => order.id);
       const primaryOrderId = orderIds[0];
+      const balancePaymentDescription =
+        orderIds.length === 1
+          ? `Оплата заказа №${primaryOrderId} с внутреннего баланса`
+          : `Оплата заказов (${orderIds.length} шт.) с внутреннего баланса`;
 
       if (paymentMethod === CheckoutPaymentMethod.Balance) {
-        await this.balanceService.addToBalance(
+        await this.balanceService.debitForOrderPayment(
           userId,
-          -totalAmount,
-          BalanceTransactionType.OrderPayment,
+          totalAmount,
           {
             orderId: primaryOrderId,
-            description:
-              orderIds.length === 1
-                ? `Оплата заказа №${primaryOrderId} с внутреннего баланса`
-                : `Оплата заказов (${orderIds.length} шт.) с внутреннего баланса`,
+            description: balancePaymentDescription,
           },
           queryRunner.manager,
         );
@@ -394,6 +403,7 @@ export class OrdersService {
         'item.package.services',
         'item.subItems',
         'item.subItems.service',
+        'item.subItems.files',
         'item.files',
       ],
       order: { createdAt: 'DESC' },
@@ -452,6 +462,7 @@ export class OrdersService {
         'item.package.services',
         'item.subItems',
         'item.subItems.service',
+        'item.subItems.files',
         'item.files',
       ],
       order: { createdAt: 'DESC' },
@@ -464,6 +475,7 @@ export class OrdersService {
     data: Array<{
       id: string;
       itemsCount: number;
+      typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
       clientName: string;
       clientLastName: string;
       date: Date;
@@ -502,8 +514,18 @@ export class OrdersService {
     const rows = await baseQb
       .clone()
       .leftJoin('o.item', 'item')
+      .leftJoin('item.service', 'svc')
       .select('o.id', 'id')
       .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
+      .addSelect(
+        `CASE
+           WHEN item.id IS NULL THEN 'Услуга'
+           WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
+           WHEN svc.type IN ('Услуга', 'Документ', 'Подрядчик') THEN svc.type
+           ELSE 'Услуга'
+         END`,
+        'typeLabel',
+      )
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
@@ -516,6 +538,7 @@ export class OrdersService {
       .getRawMany<{
         id: string;
         itemsCount: string;
+        typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
         clientName: string;
         clientLastName: string;
         date: Date;
@@ -528,6 +551,7 @@ export class OrdersService {
       data: rows.map((row) => ({
         id: row.id,
         itemsCount: Number(row.itemsCount),
+        typeLabel: row.typeLabel,
         clientName: row.clientName,
         clientLastName: row.clientLastName,
         date: row.date,
@@ -552,6 +576,7 @@ export class OrdersService {
         'item.package.services',
         'item.subItems',
         'item.subItems.service',
+        'item.subItems.files',
         'item.files',
       ],
     });
@@ -593,6 +618,11 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
+    if (order.item?.packageId) {
+      throw new BadRequestException(
+        'Статус пакета вычисляется по статусам услуг внутри — обновите статусы услуг',
+      );
+    }
 
     order.status = dto.status;
     const savedOrder = await this.orderRepository.save(order);
@@ -613,7 +643,7 @@ export class OrdersService {
       throw new NotFoundException(`Order item with id ${itemId} not found`);
     }
     if (item.packageId) {
-      throw new BadRequestException('Use sub-item status endpoint for package items');
+      throw new BadRequestException('Для пакета используйте смену статуса по каждой услуге пакета');
     }
 
     item.status = status;
@@ -647,10 +677,10 @@ export class OrdersService {
         throw new NotFoundException(`Order item with id ${itemId} not found`);
       }
       if (!item.packageId) {
-        throw new BadRequestException('Provided item is not a package item');
+        throw new BadRequestException('Эта позиция заказа не является пакетом');
       }
       if (!item.subItems.length) {
-        throw new BadRequestException('Package item does not contain sub-items');
+        throw new BadRequestException('В пакете нет услуг');
       }
 
       const subItem = item.subItems.find((entry) => entry.id === subItemId);
@@ -658,21 +688,28 @@ export class OrdersService {
         throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
       }
 
+      await subItemRepo.update({ id: subItemId }, { status });
       subItem.status = status;
-      await subItemRepo.save(subItem);
 
       const recalculatedStatus = this.calculatePackageItemStatusFromSubItems(item.subItems);
       const prevStatus = item.status;
+      await itemRepo.update({ id: itemId }, { status: recalculatedStatus });
       item.status = recalculatedStatus;
-      const savedItem = await itemRepo.save(item);
+
+      const orderRepo = queryRunner.manager.getRepository(Order);
+      const parentOrder = await orderRepo.findOne({ where: { id: item.orderId } });
+      if (parentOrder && parentOrder.status !== recalculatedStatus) {
+        parentOrder.status = recalculatedStatus;
+        await orderRepo.save(parentOrder);
+      }
 
       if (prevStatus !== recalculatedStatus) {
         const recommendation = await queryRunner.manager.getRepository(Recommendation).findOne({
-          where: { orderId: savedItem.orderId },
+          where: { orderId: item.orderId },
         });
         if (recommendation) {
           recommendation.status = this.mapOrderStatusToRecommendationStatus(recalculatedStatus);
-          recommendation.orderId = recalculatedStatus === OrderStatus.Cancelled ? null : savedItem.orderId;
+          recommendation.orderId = recalculatedStatus === OrderStatus.Cancelled ? null : item.orderId;
           await queryRunner.manager.getRepository(Recommendation).save(recommendation);
         }
       }

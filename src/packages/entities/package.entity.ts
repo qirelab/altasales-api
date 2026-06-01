@@ -66,4 +66,7 @@ export class ServicePackage {
   @ApiProperty({ description: 'Creation date' })
   @CreateDateColumn()
   createdAt: Date;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
 }

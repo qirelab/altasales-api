@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -10,14 +11,21 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   Min,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import type { LeadGenerationType, SalesDirection } from '../entities/questionnaire.entity';
+import type {
+  LeadGenerationType,
+  PreferredMessenger,
+  SalesDirection,
+} from '../entities/questionnaire.entity';
 
 const SALES_DIRECTIONS: SalesDirection[] = ['B2B', 'B2C', 'B2G', 'B2B2C', 'C2C', 'B2P', 'D2C'];
 const LEAD_GENERATION_TYPES: LeadGenerationType[] = ['inbound', 'outbound'];
+const PREFERRED_MESSENGERS: PreferredMessenger[] = ['max', 'telegram'];
 
 class UpdateDesiredResultDto {
   @ApiPropertyOptional({ enum: ['1m', '3m', '6m'] })
@@ -64,6 +72,21 @@ export class UpdateQuestionnaireAnswersDto {
   })
   phone?: string;
 
+  @ApiPropertyOptional({ enum: PREFERRED_MESSENGERS })
+  @IsOptional()
+  @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
+  preferredMessenger?: PreferredMessenger;
+
+  @ApiPropertyOptional({ example: '@username' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите контакт в мессенджере' })
+  @MaxLength(64)
+  @Matches(/^(@[a-zA-Z0-9_]{5,32}|\+?[\d\s\-()]{7,30})$/, {
+    message: 'Введите @username или номер телефона',
+  })
+  messengerUsername?: string;
+
   @ApiPropertyOptional({ example: 'ООО "ТехноСтарт"' })
   @IsOptional()
   @IsString()
@@ -80,7 +103,8 @@ export class UpdateQuestionnaireAnswersDto {
   @ApiPropertyOptional({ enum: LEAD_GENERATION_TYPES, isArray: true })
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, { message: 'Выберите хотя бы один тип лидогенерации' })
+  @ArrayMinSize(1, { message: 'Выберите тип лидогенерации' })
+  @ArrayMaxSize(1, { message: 'Можно выбрать только один тип лидогенерации' })
   @IsIn(LEAD_GENERATION_TYPES, { each: true })
   leadGenerationTypes?: LeadGenerationType[];
 
@@ -131,4 +155,11 @@ export class UpdateQuestionnaireAnswersDto {
   @IsNumber()
   @Min(1, { message: 'Средний чек должен быть больше 0' })
   averageCheck?: number;
+
+  @ApiPropertyOptional({ example: 20, description: 'Конверсия лид → продажа, %' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1, { message: 'Конверсия должна быть больше 0' })
+  @Max(100, { message: 'Конверсия не может быть больше 100' })
+  conversionRate?: number;
 }

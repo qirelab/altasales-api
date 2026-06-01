@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, Repository } from 'typeorm';
+import { Brackets, DataSource, In, IsNull, Repository } from 'typeorm';
 import { Category } from '../categories/entities/category.entity';
 import { Order } from '../orders/entities/order.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
@@ -10,6 +10,8 @@ import { CreatePackageDto } from './dto/create-package.dto';
 import { GetAdminPackagesQueryDto } from './dto/get-admin-packages-query.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
+import { filterActiveServices } from '../services/service-visibility';
+import { activePackageWhere, applyActivePackageFilter } from './package-visibility';
 
 export interface AdminPackageListItem {
   id: string;
@@ -47,6 +49,7 @@ export class PackagesService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
+    private readonly dataSource: DataSource,
   ) { }
 
   async create(createPackageDto: CreatePackageDto): Promise<ServicePackage> {
@@ -66,15 +69,17 @@ export class PackagesService {
   }
 
   async findAll(): Promise<ServicePackage[]> {
-    return this.packageRepository.find({
+    const packages = await this.packageRepository.find({
+      where: activePackageWhere(),
       relations: ['category'],
       order: { createdAt: 'DESC' },
     });
+    return packages.map((pkg) => this.withActivePackageServices(pkg));
   }
 
   async findOne(id: string): Promise<ServicePackage> {
     const servicePackage = await this.packageRepository.findOne({
-      where: { id },
+      where: { id, ...activePackageWhere() },
       relations: ['category'],
     });
 
@@ -82,7 +87,7 @@ export class PackagesService {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
-    return servicePackage;
+    return this.withActivePackageServices(servicePackage);
   }
 
   async update(id: string, updatePackageDto: UpdatePackageDto): Promise<ServicePackage> {
@@ -111,15 +116,26 @@ export class PackagesService {
 
   async remove(id: string): Promise<void> {
     const servicePackage = await this.findOne(id);
-    const referencingOrderItems = await this.orderItemRepository.count({
-      where: { packageId: id },
-    });
-    if (referencingOrderItems > 0) {
-      throw new ConflictException(
-        'Нельзя удалить пакет, который используется в заказах. Удалите или измените связанные заказы.',
+    const hasOrders = await this.packageHasOrderReferences(id);
+
+    if (hasOrders) {
+      servicePackage.deletedAt = new Date();
+      await this.packageRepository.save(servicePackage);
+      await this.dataSource.query(
+        `DELETE FROM "recommendation" WHERE "packageId" = $1`,
+        [id],
       );
+      return;
     }
+
     await this.packageRepository.remove(servicePackage);
+  }
+
+  private async packageHasOrderReferences(packageId: string): Promise<boolean> {
+    const orderItems = await this.orderItemRepository.count({
+      where: { packageId },
+    });
+    return orderItems > 0;
   }
 
   async findAllPackagesForAdmin(query: GetAdminPackagesQueryDto): Promise<{
@@ -131,10 +147,13 @@ export class PackagesService {
     const { offset = 0, limit = 20 } = query;
     const search = query.search?.trim();
 
-    const qb = this.packageRepository
-      .createQueryBuilder('p')
-      .leftJoinAndSelect('p.category', 'c')
-      .leftJoinAndSelect('p.services', 's');
+    const qb = applyActivePackageFilter(
+      this.packageRepository
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.category', 'c')
+        .leftJoinAndSelect('p.services', 's'),
+      'p',
+    );
 
     if (search) {
       qb.where(
@@ -174,13 +193,15 @@ export class PackagesService {
     orders: AdminPackageOrderRow[];
   }> {
     const servicePackage = await this.packageRepository.findOne({
-      where: { id },
+      where: { id, ...activePackageWhere() },
       relations: ['category', 'services', 'services.category'],
     });
 
     if (!servicePackage) {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
+
+    servicePackage.services = filterActiveServices(servicePackage.services);
 
     const ordersCount = await this.orderItemRepository
       .createQueryBuilder('oi')
@@ -257,7 +278,10 @@ export class PackagesService {
       category: pkg.category
         ? { id: pkg.category.id, name: pkg.category.name, slug: pkg.category.slug }
         : null,
-      services: (pkg.services ?? []).map((service) => ({ id: service.id, name: service.name })),
+      services: filterActiveServices(pkg.services).map((service) => ({
+        id: service.id,
+        name: service.name,
+      })),
       createdAt: pkg.createdAt,
       ordersCount,
     };
@@ -278,6 +302,7 @@ export class PackagesService {
     const services = await this.serviceRepository.find({
       where: {
         id: In(serviceIds),
+        deletedAt: IsNull(),
       },
     });
     const serviceIdsSet = new Set(services.map((service) => service.id));
@@ -288,15 +313,20 @@ export class PackagesService {
     }
 
     const invalidServiceIds = services
-      .filter((service) => service.type !== ServiceType.Service)
+      .filter((service) => service.type === ServiceType.Contractor)
       .map((service) => service.id);
 
     if (invalidServiceIds.length > 0) {
       throw new ConflictException(
-        `В пакет можно добавлять только услуги. Неверные ID: ${invalidServiceIds.join(', ')}`,
+        `В пакет нельзя добавлять подрядчиков. Неверные ID: ${invalidServiceIds.join(', ')}`,
       );
     }
 
     return services;
+  }
+
+  private withActivePackageServices(servicePackage: ServicePackage): ServicePackage {
+    servicePackage.services = filterActiveServices(servicePackage.services);
+    return servicePackage;
   }
 }

@@ -5,12 +5,29 @@ import { User } from '../users/entities/user.entity';
 import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
 import { BalancePocket } from './entities/balance-pocket.enum';
-import { REGISTRATION_GIFT_RUB } from './balance.constants';
+import { ORDER_GIFT_MAX_SHARE, REGISTRATION_GIFT_RUB } from './balance.constants';
 
 export interface UserBalanceBreakdown {
   total: number;
   main: number;
   gift: number;
+}
+
+export interface OrderPaymentSplit {
+  fromGift: number;
+  fromMain: number;
+}
+
+export function computeOrderPaymentSplit(
+  orderAmount: number,
+  breakdown: UserBalanceBreakdown,
+): OrderPaymentSplit {
+  const maxGiftDebit = orderAmount * ORDER_GIFT_MAX_SHARE;
+  const fromGift = Math.min(breakdown.gift, maxGiftDebit);
+  return {
+    fromGift,
+    fromMain: orderAmount - fromGift,
+  };
 }
 
 export interface AddToBalanceMeta {
@@ -37,33 +54,66 @@ export class BalanceService {
     return Number(user.balance);
   }
 
-  async getBalanceBreakdown(userId: string): Promise<UserBalanceBreakdown> {
-    const user = await this.userRepository.findOne({ where: { id: userId }, select: ['id', 'balance'] });
+  async getBalanceBreakdown(userId: string, manager?: EntityManager): Promise<UserBalanceBreakdown> {
+    const userRepo = manager ? manager.getRepository(User) : this.userRepository;
+    const txRepo = manager ? manager.getRepository(BalanceTransaction) : this.balanceTransactionRepository;
+    const user = await userRepo.findOne({ where: { id: userId }, select: ['id', 'balance'] });
     if (!user) {
       throw new NotFoundException(`Пользователь с ID ${userId} не найден`);
     }
     const total = Number(user.balance);
-    const raw = await this.balanceTransactionRepository
+    const raw = await txRepo
       .createQueryBuilder('t')
       .select(
         `COALESCE(SUM(CASE WHEN t."amount" > 0 AND (t."pocket" = :gift OR t."type" = :registrationBonus) THEN t."amount" ELSE 0 END), 0)`,
         'giftCredits',
       )
       .addSelect(
-        `COALESCE(SUM(CASE WHEN t."amount" < 0 THEN -t."amount" ELSE 0 END), 0)`,
-        'debitVolume',
+        `COALESCE(SUM(CASE WHEN t."amount" > 0 AND NOT (t."pocket" = :gift OR t."type" = :registrationBonus) THEN t."amount" ELSE 0 END), 0)`,
+        'mainCredits',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN t."amount" < 0 AND t."pocket" = :gift THEN -t."amount" ELSE 0 END), 0)`,
+        'giftDebits',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN t."amount" < 0 AND t."pocket" = :main THEN -t."amount" ELSE 0 END), 0)`,
+        'mainDebits',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN t."amount" < 0 AND t."pocket" IS NULL THEN -t."amount" ELSE 0 END), 0)`,
+        'unassignedDebits',
       )
       .where('t."userId" = :userId', { userId })
       .setParameter('gift', BalancePocket.Gift)
+      .setParameter('main', BalancePocket.Main)
       .setParameter('registrationBonus', BalanceTransactionType.RegistrationBonus)
-      .getRawOne<{ giftCredits: string | number; debitVolume: string | number }>();
+      .getRawOne<{
+        giftCredits: string | number;
+        mainCredits: string | number;
+        giftDebits: string | number;
+        mainDebits: string | number;
+        unassignedDebits: string | number;
+      }>();
 
     const giftCredits = Number(raw?.giftCredits ?? 0);
-    const debitVolume = Number(raw?.debitVolume ?? 0);
-    const giftConsumed = Math.min(debitVolume, giftCredits);
-    const giftRemainingRaw = Math.max(0, giftCredits - giftConsumed);
-    const giftRemaining = Math.min(giftRemainingRaw, total);
-    const mainRemaining = total - giftRemaining;
+    const mainCredits = Number(raw?.mainCredits ?? 0);
+    const giftDebits = Number(raw?.giftDebits ?? 0);
+    const mainDebits = Number(raw?.mainDebits ?? 0);
+    const unassignedDebits = Number(raw?.unassignedDebits ?? 0);
+
+    let giftRemaining = Math.max(0, giftCredits - giftDebits);
+    const fromGiftUnassigned = Math.min(giftRemaining, unassignedDebits);
+    giftRemaining -= fromGiftUnassigned;
+    const unassignedLeft = unassignedDebits - fromGiftUnassigned;
+
+    let mainRemaining = Math.max(0, mainCredits - mainDebits - unassignedLeft);
+
+    giftRemaining = Math.min(giftRemaining, total);
+    mainRemaining = Math.min(mainRemaining, Math.max(0, total - giftRemaining));
+    if (giftRemaining + mainRemaining < total - 0.01) {
+      mainRemaining = Math.max(0, total - giftRemaining);
+    }
 
     return {
       total,
@@ -118,13 +168,21 @@ export class BalanceService {
     });
   }
 
+  async hasRegistrationGift(userId: string): Promise<boolean> {
+    const existing = await this.balanceTransactionRepository.findOne({
+      where: { userId, type: BalanceTransactionType.RegistrationBonus },
+      select: ['id'],
+    });
+    return Boolean(existing);
+  }
+
   async creditRegistrationGift(userId: string, manager?: EntityManager): Promise<BalanceTransaction> {
     return this.addToBalance(
       userId,
       REGISTRATION_GIFT_RUB,
       BalanceTransactionType.RegistrationBonus,
       {
-        description: 'Приветственный подарочный баланс при регистрации',
+        description: 'Подарочный баланс за заполнение анкеты',
         pocket: BalancePocket.Gift,
       },
       manager,
@@ -147,5 +205,63 @@ export class BalanceService {
       { orderId, paymentInvId, description, pocket },
       manager,
     );
+  }
+
+  assertSufficientBalanceForOrder(amount: number, breakdown: UserBalanceBreakdown): void {
+    if (amount <= 0) {
+      throw new BadRequestException('Сумма оплаты должна быть больше нуля');
+    }
+    if (breakdown.total < amount) {
+      throw new BadRequestException(
+        `Недостаточно средств на балансе. Доступно: ${breakdown.total} ₽, требуется: ${amount} ₽`,
+      );
+    }
+
+    const { fromMain } = computeOrderPaymentSplit(amount, breakdown);
+    if (breakdown.main < fromMain - 0.01) {
+      const maxGift = amount * ORDER_GIFT_MAX_SHARE;
+      throw new BadRequestException(
+        `Недостаточно средств на основном балансе. С подарочного можно оплатить не более ${maxGift} ₽ `
+        + `(50% от суммы заказа), с основного требуется ${fromMain} ₽, доступно ${breakdown.main} ₽`,
+      );
+    }
+  }
+
+  async debitForOrderPayment(
+    userId: string,
+    amount: number,
+    meta: Pick<AddToBalanceMeta, 'orderId' | 'description'>,
+    manager?: EntityManager,
+  ): Promise<BalanceTransaction[]> {
+    const breakdown = await this.getBalanceBreakdown(userId, manager);
+    this.assertSufficientBalanceForOrder(amount, breakdown);
+
+    const { fromGift, fromMain } = computeOrderPaymentSplit(amount, breakdown);
+    const transactions: BalanceTransaction[] = [];
+
+    if (fromGift > 0) {
+      transactions.push(
+        await this.addToBalance(
+          userId,
+          -fromGift,
+          BalanceTransactionType.OrderPayment,
+          { ...meta, pocket: BalancePocket.Gift },
+          manager,
+        ),
+      );
+    }
+    if (fromMain > 0) {
+      transactions.push(
+        await this.addToBalance(
+          userId,
+          -fromMain,
+          BalanceTransactionType.OrderPayment,
+          { ...meta, pocket: BalancePocket.Main },
+          manager,
+        ),
+      );
+    }
+
+    return transactions;
   }
 }

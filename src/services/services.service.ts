@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, In, Repository } from 'typeorm';
+import { Brackets, DataSource, In, IsNull, Repository } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { Category } from '../categories/entities/category.entity';
 import { Order } from '../orders/entities/order.entity';
@@ -18,6 +18,8 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
+import { applyActivePackageFilter } from '../packages/package-visibility';
+import { activeServiceWhere, applyActiveServiceFilter } from './service-visibility';
 
 @Injectable()
 export class ServicesService {
@@ -66,9 +68,11 @@ export class ServicesService {
   }> {
     const categoryIds = query.categoryIds ?? [];
 
-    const qb = this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.category', 'category');
+    const qb = applyActiveServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.category', 'category'),
+    );
 
     if (query.name?.trim()) {
       qb.andWhere('service.name ILIKE :name', {
@@ -95,9 +99,12 @@ export class ServicesService {
       }
     }
 
-    const packageQb = this.packageRepository
-      .createQueryBuilder('sp')
-      .leftJoinAndSelect('sp.category', 'category');
+    const packageQb = applyActivePackageFilter(
+      this.packageRepository
+        .createQueryBuilder('sp')
+        .leftJoinAndSelect('sp.category', 'category'),
+      'sp',
+    );
 
     if (categoryIds.length > 0) {
       packageQb.andWhere('sp."categoryId" IN (:...categoryIds)', { categoryIds });
@@ -155,12 +162,15 @@ export class ServicesService {
     const { offset = 0, limit = 20 } = query;
     const search = query.search?.trim();
 
-    const baseQb = this.serviceRepository
-      .createQueryBuilder('s')
-      .leftJoin('s.category', 'c')
-      .where('s.type IN (:...types)', {
-        types: [ServiceType.Service, ServiceType.Document],
-      });
+    const baseQb = applyActiveServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.category', 'c')
+        .where('s.type IN (:...types)', {
+          types: [ServiceType.Service, ServiceType.Document],
+        }),
+      's',
+    );
 
     if (search) {
       baseQb.andWhere(
@@ -234,10 +244,11 @@ export class ServicesService {
   }
 
   async getAllSkills(): Promise<string[]> {
-    const services = await this.serviceRepository
-      .createQueryBuilder('service')
-      .select('service.skills')
-      .getMany();
+    const services = await applyActiveServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .select('service.skills'),
+    ).getMany();
 
     const skillsSet = new Set<string>();
     for (const service of services) {
@@ -249,7 +260,10 @@ export class ServicesService {
   }
 
   async findOne(id: string): Promise<Service> {
-    const service = await this.serviceRepository.findOne({ where: { id }, relations: ['category'] });
+    const service = await this.serviceRepository.findOne({
+      where: { id, ...activeServiceWhere() },
+      relations: ['category'],
+    });
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
@@ -268,7 +282,36 @@ export class ServicesService {
 
   async remove(id: string): Promise<void> {
     const service = await this.findOne(id);
+
+    if (await this.serviceHasOrderReferences(id)) {
+      service.deletedAt = new Date();
+      await this.serviceRepository.save(service);
+      await Promise.all([
+        this.dataSource.query(
+          `DELETE FROM "package_services" WHERE "serviceId" = $1`,
+          [id],
+        ),
+        this.dataSource.query(
+          `DELETE FROM "recommendation" WHERE "serviceId" = $1`,
+          [id],
+        ),
+      ]);
+      return;
+    }
+
     await this.serviceRepository.remove(service);
+  }
+
+  private async serviceHasOrderReferences(serviceId: string): Promise<boolean> {
+    const [directOrderItems, subItemRows] = await Promise.all([
+      this.orderItemRepository.count({ where: { serviceId } }),
+      this.dataSource.query<{ count: string }[]>(
+        `SELECT COUNT(*)::text AS count FROM "order_item_sub_item" WHERE "serviceId" = $1`,
+        [serviceId],
+      ),
+    ]);
+
+    return directOrderItems > 0 || Number(subItemRows[0]?.count ?? 0) > 0;
   }
 
   async createContractor(dto: CreateAdminContractorDto): Promise<Service> {
@@ -278,7 +321,7 @@ export class ServicesService {
     }
 
     const duplicateByUser = await this.serviceRepository.findOne({
-      where: { type: ServiceType.Contractor, userId: dto.userId },
+      where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
     });
     if (duplicateByUser) {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
@@ -286,7 +329,7 @@ export class ServicesService {
 
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
-      name: 'Подрядчик',
+      name: dto.name,
       description: dto.description,
       categoryId: null,
       price: dto.ratePerHour,
@@ -313,10 +356,12 @@ export class ServicesService {
   }> {
     const { offset = 0, limit = 20 } = query;
     const search = query.search?.trim();
-    const qb = this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.user', 'u')
-      .where('service.type = :type', { type: ServiceType.Contractor });
+    const qb = applyActiveServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.user', 'u')
+        .where('service.type = :type', { type: ServiceType.Contractor }),
+    );
 
     if (search) {
       qb.andWhere(
@@ -339,9 +384,9 @@ export class ServicesService {
     const { entities, raw } = await qb
       .addSelect(
         (subQb) => subQb
-          .select('COUNT(ord.id)')
-          .from(Order, 'ord')
-          .where('ord."userId" = service."userId"'),
+          .select('COUNT(oi.id)')
+          .from(OrderItem, 'oi')
+          .where('oi."serviceId" = service.id'),
         'ordersCount',
       )
       .orderBy('service.createdAt', 'DESC')
@@ -374,21 +419,9 @@ export class ServicesService {
   }> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
 
-    const userId = contractor.userId;
-    if (!userId) {
-      return {
-        contractor,
-        stats: {
-          totalProjects: 0,
-          activeOrders: 0,
-          totalIncome: 0,
-        },
-        orders: [],
-      };
-    }
-
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
+      .leftJoin('o.item', 'item')
       .select('COUNT(o.id)', 'totalProjects')
       .addSelect(
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
@@ -398,7 +431,7 @@ export class ServicesService {
         `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
         'totalIncome',
       )
-      .where('o."userId" = :userId', { userId })
+      .where('item."serviceId" = :contractorId', { contractorId: id })
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
@@ -419,7 +452,7 @@ export class ServicesService {
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
-      .where('o."userId" = :userId', { userId })
+      .where('item."serviceId" = :contractorId', { contractorId: id })
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
@@ -560,7 +593,7 @@ export class ServicesService {
     }>;
   }> {
     const service = await this.serviceRepository.findOne({
-      where: { id, type: In([ServiceType.Service, ServiceType.Document]) },
+      where: { id, type: In([ServiceType.Service, ServiceType.Document]), deletedAt: IsNull() },
       relations: ['category'],
     });
     if (!service) {
@@ -637,6 +670,7 @@ export class ServicesService {
 
   async updateContractorForAdmin(id: string, dto: UpdateAdminContractorDto): Promise<Service> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
+    if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
     if (dto.ratePerHour !== undefined) {
@@ -652,7 +686,7 @@ export class ServicesService {
       }
 
       const duplicateByUser = await this.serviceRepository.findOne({
-        where: { type: ServiceType.Contractor, userId: dto.userId },
+        where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
       });
       if (duplicateByUser) {
         throw new ConflictException('Для этого пользователя уже создан подрядчик');
@@ -673,13 +707,14 @@ export class ServicesService {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     const userId = contractor.userId;
 
-    const orderItemsCount = await this.orderItemRepository.count({
-      where: { serviceId: contractor.id },
-    });
-    if (orderItemsCount > 0) {
-      throw new ConflictException(
-        'Нельзя удалить эксперта: есть заказы, связанные с этим профилем',
+    if (await this.serviceHasOrderReferences(id)) {
+      contractor.deletedAt = new Date();
+      await this.serviceRepository.save(contractor);
+      await this.dataSource.query(
+        `DELETE FROM "recommendation" WHERE "serviceId" = $1`,
+        [id],
       );
+      return;
     }
 
     let firebaseUid: string | null = null;
@@ -700,7 +735,7 @@ export class ServicesService {
 
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
     const contractor = await this.serviceRepository.findOne({
-      where: { id, type: ServiceType.Contractor },
+      where: { id, type: ServiceType.Contractor, ...activeServiceWhere() },
       relations: ['user'],
     });
     if (!contractor) {
