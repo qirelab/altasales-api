@@ -1,7 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsInt, IsNumber, IsOptional, IsString, IsUUID, IsUrl, Min } from 'class-validator';
+import { IsArray, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, IsUrl, Min } from 'class-validator';
 
 export class CreateAdminContractorDto {
+  @ApiProperty({ example: 'Иван Иванов — внедрение CRM', description: 'Display name shown in the catalog' })
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
   @ApiPropertyOptional({ example: 'https://example.com/contractor.jpg', description: 'Contractor image URL' })
   @IsOptional()
   @IsUrl()

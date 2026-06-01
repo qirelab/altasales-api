@@ -329,7 +329,7 @@ export class ServicesService {
 
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
-      name: 'Подрядчик',
+      name: dto.name,
       description: dto.description,
       categoryId: null,
       price: dto.ratePerHour,
@@ -680,6 +680,7 @@ export class ServicesService {
 
   async updateContractorForAdmin(id: string, dto: UpdateAdminContractorDto): Promise<Service> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
+    if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
     if (dto.ratePerHour !== undefined) {
