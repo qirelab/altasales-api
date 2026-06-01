@@ -688,16 +688,16 @@ export class OrdersService {
         throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
       }
 
+      await subItemRepo.update({ id: subItemId }, { status });
       subItem.status = status;
-      await subItemRepo.save(subItem);
 
       const recalculatedStatus = this.calculatePackageItemStatusFromSubItems(item.subItems);
       const prevStatus = item.status;
+      await itemRepo.update({ id: itemId }, { status: recalculatedStatus });
       item.status = recalculatedStatus;
-      const savedItem = await itemRepo.save(item);
 
       const orderRepo = queryRunner.manager.getRepository(Order);
-      const parentOrder = await orderRepo.findOne({ where: { id: savedItem.orderId } });
+      const parentOrder = await orderRepo.findOne({ where: { id: item.orderId } });
       if (parentOrder && parentOrder.status !== recalculatedStatus) {
         parentOrder.status = recalculatedStatus;
         await orderRepo.save(parentOrder);
@@ -705,11 +705,11 @@ export class OrdersService {
 
       if (prevStatus !== recalculatedStatus) {
         const recommendation = await queryRunner.manager.getRepository(Recommendation).findOne({
-          where: { orderId: savedItem.orderId },
+          where: { orderId: item.orderId },
         });
         if (recommendation) {
           recommendation.status = this.mapOrderStatusToRecommendationStatus(recalculatedStatus);
-          recommendation.orderId = recalculatedStatus === OrderStatus.Cancelled ? null : savedItem.orderId;
+          recommendation.orderId = recalculatedStatus === OrderStatus.Cancelled ? null : item.orderId;
           await queryRunner.manager.getRepository(Recommendation).save(recommendation);
         }
       }

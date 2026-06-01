@@ -321,7 +321,7 @@ export class ServicesService {
     }
 
     const duplicateByUser = await this.serviceRepository.findOne({
-      where: { type: ServiceType.Contractor, userId: dto.userId },
+      where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
     });
     if (duplicateByUser) {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
@@ -329,7 +329,7 @@ export class ServicesService {
 
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
-      name: 'Подрядчик',
+      name: dto.name,
       description: dto.description,
       categoryId: null,
       price: dto.ratePerHour,
@@ -356,10 +356,12 @@ export class ServicesService {
   }> {
     const { offset = 0, limit = 20 } = query;
     const search = query.search?.trim();
-    const qb = this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.user', 'u')
-      .where('service.type = :type', { type: ServiceType.Contractor });
+    const qb = applyActiveServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.user', 'u')
+        .where('service.type = :type', { type: ServiceType.Contractor }),
+    );
 
     if (search) {
       qb.andWhere(
@@ -382,9 +384,9 @@ export class ServicesService {
     const { entities, raw } = await qb
       .addSelect(
         (subQb) => subQb
-          .select('COUNT(ord.id)')
-          .from(Order, 'ord')
-          .where('ord."userId" = service."userId"'),
+          .select('COUNT(oi.id)')
+          .from(OrderItem, 'oi')
+          .where('oi."serviceId" = service.id'),
         'ordersCount',
       )
       .orderBy('service.createdAt', 'DESC')
@@ -417,21 +419,9 @@ export class ServicesService {
   }> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
 
-    const userId = contractor.userId;
-    if (!userId) {
-      return {
-        contractor,
-        stats: {
-          totalProjects: 0,
-          activeOrders: 0,
-          totalIncome: 0,
-        },
-        orders: [],
-      };
-    }
-
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
+      .leftJoin('o.item', 'item')
       .select('COUNT(o.id)', 'totalProjects')
       .addSelect(
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
@@ -441,7 +431,7 @@ export class ServicesService {
         `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
         'totalIncome',
       )
-      .where('o."userId" = :userId', { userId })
+      .where('item."serviceId" = :contractorId', { contractorId: id })
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
@@ -462,7 +452,7 @@ export class ServicesService {
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('o.amount', 'amount')
       .addSelect('o.status', 'status')
-      .where('o."userId" = :userId', { userId })
+      .where('item."serviceId" = :contractorId', { contractorId: id })
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
@@ -680,6 +670,7 @@ export class ServicesService {
 
   async updateContractorForAdmin(id: string, dto: UpdateAdminContractorDto): Promise<Service> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
+    if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
     if (dto.ratePerHour !== undefined) {
@@ -695,7 +686,7 @@ export class ServicesService {
       }
 
       const duplicateByUser = await this.serviceRepository.findOne({
-        where: { type: ServiceType.Contractor, userId: dto.userId },
+        where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
       });
       if (duplicateByUser) {
         throw new ConflictException('Для этого пользователя уже создан подрядчик');
@@ -716,13 +707,14 @@ export class ServicesService {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     const userId = contractor.userId;
 
-    const orderItemsCount = await this.orderItemRepository.count({
-      where: { serviceId: contractor.id },
-    });
-    if (orderItemsCount > 0) {
-      throw new ConflictException(
-        'Нельзя удалить эксперта: есть заказы, связанные с этим профилем',
+    if (await this.serviceHasOrderReferences(id)) {
+      contractor.deletedAt = new Date();
+      await this.serviceRepository.save(contractor);
+      await this.dataSource.query(
+        `DELETE FROM "recommendation" WHERE "serviceId" = $1`,
+        [id],
       );
+      return;
     }
 
     let firebaseUid: string | null = null;
@@ -743,7 +735,7 @@ export class ServicesService {
 
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
     const contractor = await this.serviceRepository.findOne({
-      where: { id, type: ServiceType.Contractor },
+      where: { id, type: ServiceType.Contractor, ...activeServiceWhere() },
       relations: ['user'],
     });
     if (!contractor) {
