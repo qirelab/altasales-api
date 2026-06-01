@@ -14,6 +14,7 @@ import { User } from '../../users/entities/user.entity';
 import { Service } from '../../services/entities/service.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
 import { Order } from '../../orders/entities/order.entity';
+import { RecommendationPriority } from './recommendation-priority.enum';
 import { RecommendationStatus } from './recommendation-status.enum';
 
 @Entity()
@@ -91,11 +92,45 @@ export class Recommendation {
   })
   status: RecommendationStatus;
 
+  @ApiProperty({
+    enum: RecommendationPriority,
+    description: 'Recommendation urgency',
+    default: RecommendationPriority.Medium,
+  })
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: RecommendationPriority.Medium,
+  })
+  priority: RecommendationPriority;
+
+  @ApiPropertyOptional({ description: 'Human-readable rationale' })
+  @Column({ type: 'text', nullable: true })
+  rationale: string | null;
+
+  @ApiProperty({
+    description: 'Prerequisite recommendation IDs',
+    type: [String],
+  })
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  dependencyIds: string[];
+
+  @ApiProperty({
+    description: 'Diagnostic signals that led to this recommendation',
+    type: [String],
+  })
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  diagnosticSignals: string[];
+
+  @ApiPropertyOptional({ description: 'When recommendation was AI-generated' })
+  @Column({ type: 'timestamptz', nullable: true })
+  generatedAt: Date | null;
+
   @ApiProperty({ description: 'Recommendation creation date' })
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
   @ApiProperty({ description: 'Recommendation update date' })
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt: Date;
 }

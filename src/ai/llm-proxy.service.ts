@@ -7,6 +7,7 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { AiCacheService } from './ai-cache.service';
 import { AiMonitoringService } from './ai-monitoring.service';
 import { AiError, isAiError } from './errors/ai-error';
 import { AgentId } from './enums/agent-id.enum';
@@ -48,6 +49,12 @@ type SafeException = Error & {
   safeErrorCode?: SafeLlmErrorCode;
 };
 
+type ProviderCallResult = {
+  response: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
+  cacheKey?: string;
+  cacheHit?: boolean;
+};
+
 @Injectable()
 export class LlmProxyService {
   constructor(
@@ -57,6 +64,8 @@ export class LlmProxyService {
     @Optional()
     @Inject(LLM_PROVIDER_ADAPTERS)
     private readonly providerRegistry?: LlmProviderRegistry,
+    @Optional()
+    private readonly aiCache?: AiCacheService,
   ) {}
 
   async chat(request: LlmChatRequest): Promise<LlmChatResponse> {
@@ -68,6 +77,8 @@ export class LlmProxyService {
     let provider: LlmProviderAdapter | undefined;
     let fallbackUsed = false;
     let fallbackReasonCode: SafeLlmErrorCode | undefined;
+    let cacheKey: string | undefined;
+    let cacheHit: boolean | undefined;
 
     try {
       this.validateRequest(request);
@@ -106,6 +117,8 @@ export class LlmProxyService {
       provider = providerCallResult.provider;
       fallbackUsed = providerCallResult.fallbackUsed;
       fallbackReasonCode = providerCallResult.fallbackReasonCode;
+      cacheKey = providerCallResult.cacheKey;
+      cacheHit = providerCallResult.cacheHit;
       const providerResponse = providerCallResult.response;
 
       currentStage = AiMonitoringStage.SafetyScan;
@@ -124,6 +137,8 @@ export class LlmProxyService {
         usage: providerResponse.usage,
         dataClass: effectiveDataClass,
         anonymizationStats,
+        cacheKey,
+        cacheHit,
       };
 
       this.monitoring.log({
@@ -210,9 +225,9 @@ export class LlmProxyService {
   private isValidMessage(message: LlmMessage): boolean {
     return Boolean(
       message &&
-        ['system', 'user', 'assistant'].includes(message.role) &&
-        typeof message.content === 'string' &&
-        message.content.trim().length > 0,
+      ['system', 'user', 'assistant'].includes(message.role) &&
+      typeof message.content === 'string' &&
+      message.content.trim().length > 0,
     );
   }
 
@@ -270,7 +285,8 @@ export class LlmProxyService {
     }
 
     const descriptions =
-      Object.keys(anonymizationResult.semanticPlaceholderDescriptions).length > 0
+      Object.keys(anonymizationResult.semanticPlaceholderDescriptions).length >
+      0
         ? ` Semantic placeholder descriptions: ${JSON.stringify(
             anonymizationResult.semanticPlaceholderDescriptions,
           )}.`
@@ -329,7 +345,10 @@ export class LlmProxyService {
       throw this.safePolicyError('AI_MODEL_NOT_ALLOWED', MODEL_POLICY_ERROR);
     }
 
-    throw this.safePolicyError('AI_PROVIDER_NOT_ALLOWED', PROVIDER_POLICY_ERROR);
+    throw this.safePolicyError(
+      'AI_PROVIDER_NOT_ALLOWED',
+      PROVIDER_POLICY_ERROR,
+    );
   }
 
   private getRegisteredProviders(): LlmProviderAdapter[] {
@@ -395,18 +414,24 @@ export class LlmProxyService {
     response: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
     fallbackUsed: boolean;
     fallbackReasonCode?: SafeLlmErrorCode;
+    cacheKey?: string;
+    cacheHit?: boolean;
   }> {
     try {
+      const callResult = await this.callProvider(
+        request,
+        provider,
+        messages,
+        effectiveDataClass,
+        'primary',
+      );
+
       return {
         provider,
-        response: await this.callProvider(
-          request,
-          provider,
-          messages,
-          effectiveDataClass,
-          'primary',
-        ),
+        response: callResult.response,
         fallbackUsed: false,
+        cacheKey: callResult.cacheKey,
+        cacheHit: callResult.cacheHit,
       };
     } catch (error) {
       if (!this.shouldUseFallback(error)) {
@@ -433,7 +458,7 @@ export class LlmProxyService {
       try {
         const fallbackProvider = this.selectProvider(request, 'fallback');
         this.assertProviderPolicy(effectiveDataClass, fallbackProvider);
-        const response = await this.callProvider(
+        const callResult = await this.callProvider(
           request,
           fallbackProvider,
           messages,
@@ -457,9 +482,11 @@ export class LlmProxyService {
 
         return {
           provider: fallbackProvider,
-          response,
+          response: callResult.response,
           fallbackUsed: true,
           fallbackReasonCode,
+          cacheKey: callResult.cacheKey,
+          cacheHit: callResult.cacheHit,
         };
       } catch (fallbackError) {
         this.monitoring.log({
@@ -483,6 +510,46 @@ export class LlmProxyService {
   }
 
   private async callProvider(
+    request: LlmChatRequest,
+    provider: LlmProviderAdapter,
+    messages: LlmMessage[],
+    effectiveDataClass: DataClass,
+    providerAlias: 'primary' | 'fallback',
+  ): Promise<ProviderCallResult> {
+    const providerCall = () =>
+      this.executeProviderCall(
+        request,
+        provider,
+        messages,
+        effectiveDataClass,
+        providerAlias,
+      );
+
+    if (!this.aiCache || !request.policy?.cacheTtlMs) {
+      return { response: await providerCall() };
+    }
+
+    const cached = await this.aiCache.remember(
+      'llm:chat',
+      this.buildCachePayload(
+        request,
+        provider,
+        messages,
+        effectiveDataClass,
+        providerAlias,
+      ),
+      providerCall,
+      request.policy.cacheTtlMs,
+    );
+
+    return {
+      response: cached.value,
+      cacheKey: cached.key,
+      cacheHit: cached.hit,
+    };
+  }
+
+  private async executeProviderCall(
     request: LlmChatRequest,
     provider: LlmProviderAdapter,
     messages: LlmMessage[],
@@ -582,15 +649,17 @@ export class LlmProxyService {
   }
 
   private safeValidationError(): BadRequestException {
-    const error = new BadRequestException(VALIDATION_ERROR) as BadRequestException &
-      SafeException;
+    const error = new BadRequestException(
+      VALIDATION_ERROR,
+    ) as BadRequestException & SafeException;
     error.safeErrorCode = 'AI_VALIDATION_FAILED';
     return error;
   }
 
   private safeRestoreError(): BadRequestException {
-    const error = new BadRequestException(RESTORE_ERROR) as BadRequestException &
-      SafeException;
+    const error = new BadRequestException(
+      RESTORE_ERROR,
+    ) as BadRequestException & SafeException;
     error.safeErrorCode = 'AI_RESTORE_FAILED';
     return error;
   }
@@ -624,7 +693,10 @@ export class LlmProxyService {
   }
 
   private toSafeException(error: unknown): Error {
-    if (error instanceof BadRequestException || error instanceof ForbiddenException) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ForbiddenException
+    ) {
       return error;
     }
 
@@ -682,6 +754,24 @@ export class LlmProxyService {
     return 'provider_error';
   }
 
+  private buildCachePayload(
+    request: LlmChatRequest,
+    provider: LlmProviderAdapter,
+    messages: LlmMessage[],
+    effectiveDataClass: DataClass,
+    providerAlias: 'primary' | 'fallback',
+  ): Record<string, unknown> {
+    return {
+      agentId: request.agentId,
+      task: request.task,
+      providerAlias,
+      providerId: provider.providerId,
+      modelId: provider.modelId,
+      effectiveDataClass,
+      messages,
+    };
+  }
+
   private parseCsv(value: string | undefined): string[] {
     return (value ?? '')
       .split(',')
@@ -689,7 +779,10 @@ export class LlmProxyService {
       .filter(Boolean);
   }
 
-  private getPositiveInteger(value: string | undefined, fallback: number): number {
+  private getPositiveInteger(
+    value: string | undefined,
+    fallback: number,
+  ): number {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       return fallback;

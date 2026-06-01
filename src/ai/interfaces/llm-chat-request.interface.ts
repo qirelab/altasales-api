@@ -11,5 +11,6 @@ export interface LlmChatRequest {
   declaredDataClass?: DataClass;
   policy?: {
     providers?: LlmProvider[];
+    cacheTtlMs?: number;
   };
 }
