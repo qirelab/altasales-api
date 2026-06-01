@@ -450,7 +450,7 @@ export class RecommendationsService implements OnModuleInit {
         serviceTypes: [ServiceType.Service, ServiceType.Document],
       })
       .andWhere('service."deletedAt" IS NULL')
-      .orderBy('service."createdAt"', 'DESC')
+      .orderBy('service.createdAt', 'DESC')
       .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
       .getMany() as Promise<ServiceCandidate[]>;
   }
