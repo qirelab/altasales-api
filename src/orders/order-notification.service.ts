@@ -115,7 +115,8 @@ export class OrderNotificationService {
     client: User,
     amount: number,
   ): Promise<void> {
-    const clientName = [client.name, client.lastName].filter(Boolean).join(' ');
+    const fullName = [client.name, client.lastName].filter(Boolean).join(' ');
+    const clientName = fullName || client.email;
     const payload: OrderPaidSocketPayload = {
       primaryOrderId: order.id,
       orderIds,
@@ -143,7 +144,7 @@ export class OrderNotificationService {
 
     await this.mailService.notifyAdminsAboutPaidOrder({
       orderId: order.id,
-      clientName: clientName || client.email,
+      clientName,
       amount,
       adminOrderUrl,
     });
@@ -183,7 +184,7 @@ export class OrderNotificationService {
         ],
       });
     if (user.adminOrderNotificationsSeenAt) {
-      qb.andWhere('o."createdAt" > :seenAt', {
+      qb.andWhere('o."updatedAt" > :seenAt', {
         seenAt: user.adminOrderNotificationsSeenAt,
       });
     }

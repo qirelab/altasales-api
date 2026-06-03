@@ -3,6 +3,7 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  UpdateDateColumn,
   OneToOne,
   ManyToOne,
   JoinColumn,
@@ -35,6 +36,10 @@ export class Order {
   @ApiProperty({ example: '2025-02-04T12:00:00Z', description: 'Order date' })
   @CreateDateColumn()
   createdAt: Date;
+
+  @ApiProperty({ example: '2025-02-04T12:00:00Z', description: 'Order last update date' })
+  @UpdateDateColumn()
+  updatedAt: Date;
 
   @ApiProperty({ example: 125000, description: 'Total order amount' })
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
