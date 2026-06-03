@@ -27,6 +27,7 @@ import {
   type RecommendationGenerationJobSummary,
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
+import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
 import {
   RecommendationScoringService,
   type GeneratedRecommendationItem,
@@ -89,6 +90,7 @@ export class RecommendationsService implements OnModuleInit {
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly scoringService: RecommendationScoringService,
+    private readonly relevanceRanker: QuestionnaireRelevanceRankerService,
     private readonly generationJobService: RecommendationGenerationJobService,
     private readonly notificationService: RecommendationNotificationService,
   ) {}
@@ -378,7 +380,13 @@ export class RecommendationsService implements OnModuleInit {
         .sort((a, b) => b.score - a.score);
     }
 
-    ranked = ranked.slice(0, limit);
+    ranked = this.relevanceRanker.rankRecommendations(
+      dto,
+      services,
+      ranked,
+      context,
+      limit,
+    );
 
     if (dto.persist === false) {
       return ranked;
@@ -459,9 +467,10 @@ export class RecommendationsService implements OnModuleInit {
     userId: string,
     item: GeneratedRecommendationItem,
   ): Promise<Recommendation> {
-    // AI generation currently ranks services only; packages need their own candidate/upsert path.
+    const where = { userId, serviceId: item.serviceId };
+
     const existing = await this.recommendationRepository.findOne({
-      where: { userId, serviceId: item.serviceId },
+      where,
     });
 
     if (existing) {
@@ -492,7 +501,7 @@ export class RecommendationsService implements OnModuleInit {
         throw error;
       }
       const retryExisting = await this.recommendationRepository.findOne({
-        where: { userId, serviceId: item.serviceId },
+        where,
       });
       if (!retryExisting) throw error;
       retryExisting.priority = item.priority;

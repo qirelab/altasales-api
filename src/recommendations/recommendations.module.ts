@@ -14,6 +14,7 @@ import { Recommendation } from './entities/recommendation.entity';
 import { RecommendationGenerationJobService } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
 import { RecommendationScoringService } from './recommendation-scoring.service';
+import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
 
@@ -37,6 +38,7 @@ import { RecommendationsService } from './recommendations.service';
   providers: [
     RecommendationsService,
     RecommendationScoringService,
+    QuestionnaireRelevanceRankerService,
     RecommendationGenerationJobService,
     RecommendationNotificationService,
   ],
