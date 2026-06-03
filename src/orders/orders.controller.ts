@@ -12,7 +12,9 @@ import {
   HttpStatus,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiOkResponse } from '@nestjs/swagger';
+import { PaginatedAdminOrdersResponseDto } from './dto/paginated-admin-orders-response.dto';
+import { PaginatedOrdersResponseDto } from './dto/paginated-orders-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -36,7 +38,7 @@ export class OrdersController {
 
   @Get()
   @ApiOperation({ summary: 'Get current user orders (paginated, optional status filter)' })
-  @ApiResponse({ status: 200, description: 'Paginated list of user orders with items' })
+  @ApiOkResponse({ type: PaginatedOrdersResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getMyOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
     return this.ordersService.findByUserId(user.id, query);
@@ -46,7 +48,7 @@ export class OrdersController {
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.EXPERT)
   @ApiOperation({ summary: 'Get orders assigned to current expert' })
-  @ApiResponse({ status: 200, description: 'Paginated list of expert-assigned orders with items' })
+  @ApiOkResponse({ type: PaginatedOrdersResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async getExpertOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
@@ -59,11 +61,7 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Get all orders for admin (paginated, with search)',
   })
-  @ApiResponse({
-    status: 200,
-    description:
-      'Paginated list with order id, items count, client name, date, amount and status',
-  })
+  @ApiOkResponse({ type: PaginatedAdminOrdersResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async getAdminOrders(@Query() query: GetAdminOrdersQueryDto) {
