@@ -27,9 +27,11 @@ import {
   type RecommendationGenerationJobSummary,
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
+import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
 import {
   RecommendationScoringService,
   type GeneratedRecommendationItem,
+  type PackageCandidate,
   type ServiceCandidate,
 } from './recommendation-scoring.service';
 import {
@@ -38,6 +40,7 @@ import {
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
+const RECOMMENDABLE_PACKAGE_SCAN_LIMIT = 200;
 
 export type PackageInnerServiceItem = {
   id: string;
@@ -89,6 +92,7 @@ export class RecommendationsService implements OnModuleInit {
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly scoringService: RecommendationScoringService,
+    private readonly relevanceRanker: QuestionnaireRelevanceRankerService,
     private readonly generationJobService: RecommendationGenerationJobService,
     private readonly notificationService: RecommendationNotificationService,
   ) {}
@@ -364,21 +368,29 @@ export class RecommendationsService implements OnModuleInit {
 
     const limit = dto.limit ?? 5;
     const services = await this.findRecommendableServices();
+    const packages = await this.findRecommendablePackages();
+    const candidates = this.scoringService.buildCatalogTargets(services, packages);
     const context = this.scoringService.buildDiagnosticContext(dto);
     let ranked = await this.scoringService.generateAiRecommendations(
       dto,
-      services,
+      candidates,
       context,
     );
 
     if (ranked.length === 0) {
-      ranked = services
-        .map((service) => this.scoringService.scoreService(service, context))
+      ranked = candidates
+        .map((candidate) => this.scoringService.scoreCandidate(candidate, context))
         .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score);
     }
 
-    ranked = ranked.slice(0, limit);
+    ranked = this.relevanceRanker.rankRecommendations(
+      dto,
+      candidates,
+      ranked,
+      context,
+      limit,
+    );
 
     if (dto.persist === false) {
       return ranked;
@@ -455,13 +467,33 @@ export class RecommendationsService implements OnModuleInit {
       .getMany() as Promise<ServiceCandidate[]>;
   }
 
+  private async findRecommendablePackages(): Promise<PackageCandidate[]> {
+    const packages = await this.packageRepository
+      .createQueryBuilder('servicePackage')
+      .leftJoinAndSelect('servicePackage.category', 'category')
+      .leftJoinAndSelect('servicePackage.services', 'service')
+      .leftJoinAndSelect('service.category', 'serviceCategory')
+      .where('servicePackage."deletedAt" IS NULL')
+      .orderBy('servicePackage."createdAt"', 'DESC')
+      .take(RECOMMENDABLE_PACKAGE_SCAN_LIMIT)
+      .getMany();
+
+    return packages.map((servicePackage) => ({
+      ...servicePackage,
+      services: filterActiveServices(servicePackage.services) as ServiceCandidate[],
+    })) as PackageCandidate[];
+  }
+
   private async upsertGeneratedRecommendation(
     userId: string,
     item: GeneratedRecommendationItem,
   ): Promise<Recommendation> {
-    // AI generation currently ranks services only; packages need their own candidate/upsert path.
+    const where = item.packageId
+      ? { userId, packageId: item.packageId }
+      : { userId, serviceId: item.serviceId! };
+
     const existing = await this.recommendationRepository.findOne({
-      where: { userId, serviceId: item.serviceId },
+      where,
     });
 
     if (existing) {
@@ -474,8 +506,8 @@ export class RecommendationsService implements OnModuleInit {
 
     const recommendation = this.recommendationRepository.create({
       userId,
-      serviceId: item.serviceId,
-      packageId: null,
+      serviceId: item.serviceId ?? null,
+      packageId: item.packageId ?? null,
       status: RecommendationStatus.Recommended,
       priority: item.priority,
       rationale: item.rationale,
@@ -492,7 +524,7 @@ export class RecommendationsService implements OnModuleInit {
         throw error;
       }
       const retryExisting = await this.recommendationRepository.findOne({
-        where: { userId, serviceId: item.serviceId },
+        where,
       });
       if (!retryExisting) throw error;
       retryExisting.priority = item.priority;
@@ -521,6 +553,8 @@ export class RecommendationsService implements OnModuleInit {
 
     return recommendations.map((item) => ({
       serviceId: item.serviceId,
+      packageId: item.packageId,
+      targetType: item.targetType,
       serviceName: item.serviceName,
       priority: item.priority,
       rationale: item.rationale,

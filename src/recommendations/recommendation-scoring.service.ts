@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AgentId } from '../ai/enums/agent-id.enum';
 import { LlmTask } from '../ai/enums/llm-task.enum';
 import { LlmProxyService } from '../ai/llm-proxy.service';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
@@ -12,9 +13,32 @@ export type ServiceCandidate = Service & {
   category?: { name?: string } | null;
 };
 
+export type PackageCandidate = ServicePackage & {
+  category?: { name?: string } | null;
+  services?: ServiceCandidate[];
+};
+
+export type RecommendationTargetCandidate = {
+  id: string;
+  targetType: 'service' | 'package';
+  serviceId: string | null;
+  packageId: string | null;
+  name: string;
+  description: string;
+  category: string | null;
+  price: number;
+  type?: string;
+  skills: string[];
+  tags: string[];
+  packageType?: string | null;
+  services: ServiceCandidate[];
+};
+
 export type GeneratedRecommendationItem = {
-  serviceId: string;
+  serviceId: string | null;
+  packageId: string | null;
   serviceName: string;
+  targetType: 'service' | 'package';
   priority: RecommendationPriority;
   rationale: string;
   diagnosticSignals: string[];
@@ -23,7 +47,8 @@ export type GeneratedRecommendationItem = {
 };
 
 type AiRecommendationCandidate = {
-  serviceId: string;
+  serviceId?: string | null;
+  packageId?: string | null;
   priority?: RecommendationPriority | string;
   rationale?: string;
   diagnosticSignals?: string[];
@@ -38,34 +63,54 @@ export class RecommendationScoringService {
 
   constructor(private readonly llmProxy: LlmProxyService) {}
 
+  buildCatalogTargets(
+    services: ServiceCandidate[],
+    packages: PackageCandidate[] = [],
+  ): RecommendationTargetCandidate[] {
+    return [
+      ...packages.map((servicePackage) =>
+        this.toPackageTarget(servicePackage),
+      ),
+      ...services.map((service) => this.toServiceTarget(service)),
+    ];
+  }
+
   scoreService(
     service: ServiceCandidate,
     context: string,
   ): GeneratedRecommendationItem {
-    const serviceText = this.normalizeText(
-      [
-        service.name,
-        service.description,
-        service.category?.name,
-        ...(service.skills ?? []),
-      ].join(' '),
-    );
+    return this.scoreCandidate(this.toServiceTarget(service), context);
+  }
 
+  scorePackage(
+    servicePackage: PackageCandidate,
+    context: string,
+  ): GeneratedRecommendationItem {
+    return this.scoreCandidate(this.toPackageTarget(servicePackage), context);
+  }
+
+  scoreCandidate(
+    candidate: RecommendationTargetCandidate,
+    context: string,
+  ): GeneratedRecommendationItem {
+    const targetText = this.buildCandidateSearchText(candidate);
     const matchedSignals = SIGNAL_GROUPS.filter(
       (group) =>
         group.diagnosticTerms.some((term) =>
           this.includesTerm(context, term),
         ) &&
-        group.serviceTerms.some((term) => this.includesTerm(serviceText, term)),
+        group.serviceTerms.some((term) => this.includesTerm(targetText, term)),
     );
     const score = matchedSignals.reduce((sum, group) => sum + group.weight, 0);
     const priority = this.resolvePriority(score, matchedSignals);
 
     return {
-      serviceId: service.id,
-      serviceName: service.name,
+      serviceId: candidate.serviceId,
+      packageId: candidate.packageId,
+      serviceName: candidate.name,
+      targetType: candidate.targetType,
       priority,
-      rationale: this.buildRationale(service.name, priority, matchedSignals),
+      rationale: this.buildRationale(candidate.name, priority, matchedSignals),
       diagnosticSignals: matchedSignals.map((group) => group.signal),
       score,
     };
@@ -73,13 +118,13 @@ export class RecommendationScoringService {
 
   async generateAiRecommendations(
     dto: GenerateRecommendationsDto,
-    services: ServiceCandidate[],
+    candidates: RecommendationTargetCandidate[],
     context: string,
   ): Promise<GeneratedRecommendationItem[]> {
     if (!context) return [];
 
     try {
-      const catalogSlice = services.slice(0, MAX_CATALOG_FOR_LLM);
+      const catalogSlice = this.selectCatalogForLlm(candidates, context);
 
       const response = await this.llmProxy.chat({
         agentId: AgentId.Recommendations,
@@ -91,22 +136,32 @@ export class RecommendationScoringService {
           {
             role: 'system',
             content:
-              'You are an AI recommendation engine for AltaSales. Pick relevant service IDs from the provided catalog. Return only valid JSON.',
+              'You are an AI recommendation engine for AltaSales. Pick relevant services or packages from the provided catalog. Return only valid JSON.',
           },
           {
             role: 'user',
             content: JSON.stringify({
               instruction:
-                'Return {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"short reason","diagnosticSignals":["signal"]}]}',
+                'Return {"recommendations":[{"serviceId":"..." OR "packageId":"...","priority":"urgent|medium|low","rationale":"short reason","diagnosticSignals":["signal"]}]}. Use packageId when the whole package is a better fit than a single service.',
               clientProfile: dto.clientProfile ?? {},
               diagnostics: dto.diagnostics ?? [],
-              catalog: catalogSlice.map((service) => ({
-                serviceId: service.id,
-                name: service.name,
-                description: service.description,
-                category: service.category?.name ?? null,
-                type: service.type,
-                skills: service.skills ?? [],
+              catalog: catalogSlice.map((candidate) => ({
+                targetType: candidate.targetType,
+                serviceId: candidate.serviceId,
+                packageId: candidate.packageId,
+                name: candidate.name,
+                description: candidate.description,
+                category: candidate.category,
+                type: candidate.type,
+                skills: candidate.skills,
+                tags: candidate.tags,
+                packageType: candidate.packageType,
+                includedServices: candidate.services.map((service) => ({
+                  name: service.name,
+                  description: service.description,
+                  category: service.category?.name ?? null,
+                  skills: service.skills ?? [],
+                })),
               })),
             }),
           },
@@ -114,16 +169,22 @@ export class RecommendationScoringService {
       });
 
       const parsed = this.parseAiRecommendationResponse(response.content);
-      const servicesById = new Map(services.map((s) => [s.id, s]));
+      const candidatesByKey = new Map(
+        candidates.map((candidate) => [
+          this.getCandidateKey(candidate),
+          candidate,
+        ]),
+      );
       const result: GeneratedRecommendationItem[] = [];
-      const usedServiceIds = new Set<string>();
+      const usedTargetKeys = new Set<string>();
 
       for (const item of parsed) {
-        const service = servicesById.get(item.serviceId);
-        if (!service || usedServiceIds.has(service.id)) continue;
+        const key = this.getAiCandidateKey(item);
+        const candidate = key ? candidatesByKey.get(key) : undefined;
+        if (!candidate || usedTargetKeys.has(key!)) continue;
 
-        usedServiceIds.add(service.id);
-        const fallback = this.scoreService(service, context);
+        usedTargetKeys.add(key!);
+        const fallback = this.scoreCandidate(candidate, context);
         const priority =
           this.normalizePriority(item.priority) ?? fallback.priority;
         const diagnosticSignals = this.normalizeSignals([
@@ -132,13 +193,12 @@ export class RecommendationScoringService {
         ]);
 
         result.push({
-          serviceId: service.id,
-          serviceName: service.name,
+          ...fallback,
           priority,
           rationale:
             item.rationale?.trim() ||
             fallback.rationale ||
-            `${service.name} was selected by AI based on onboarding diagnostics.`,
+            `${candidate.name} was selected by AI based on onboarding diagnostics.`,
           diagnosticSignals,
           score:
             fallback.score > 0 ? fallback.score : this.scorePriority(priority),
@@ -171,9 +231,7 @@ export class RecommendationScoringService {
     }
 
     if (!Array.isArray(parsed.recommendations)) return [];
-    return parsed.recommendations.filter(
-      (item) => item && typeof item.serviceId === 'string',
-    );
+    return parsed.recommendations.filter((item) => Boolean(this.getAiCandidateKey(item)));
   }
 
   resolvePriority(
@@ -203,7 +261,7 @@ export class RecommendationScoringService {
     return text
       .normalize('NFKC')
       .toLowerCase()
-      .replace(/ё/g, 'е')
+      .replace(/\u0451/g, '\u0435')
       .replace(/[^\p{L}\p{N}_]+/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -212,6 +270,113 @@ export class RecommendationScoringService {
   normalizeSignals(signals: string[]): string[] {
     return Array.from(
       new Set(signals.map((s) => s.trim()).filter((s) => s.length > 0)),
+    );
+  }
+
+  getCandidateKey(candidate: RecommendationTargetCandidate): string {
+    return candidate.targetType === 'package'
+      ? `package:${candidate.packageId}`
+      : `service:${candidate.serviceId}`;
+  }
+
+  getRecommendationKey(item: Pick<GeneratedRecommendationItem, 'serviceId' | 'packageId'>): string {
+    return item.packageId ? `package:${item.packageId}` : `service:${item.serviceId}`;
+  }
+
+  private toServiceTarget(service: ServiceCandidate): RecommendationTargetCandidate {
+    return {
+      id: service.id,
+      targetType: 'service',
+      serviceId: service.id,
+      packageId: null,
+      name: service.name,
+      description: service.description,
+      category: service.category?.name ?? null,
+      price: Number(service.price ?? 0),
+      type: service.type,
+      skills: service.skills ?? [],
+      tags: [],
+      packageType: null,
+      services: [],
+    };
+  }
+
+  private toPackageTarget(
+    servicePackage: PackageCandidate,
+  ): RecommendationTargetCandidate {
+    return {
+      id: servicePackage.id,
+      targetType: 'package',
+      serviceId: null,
+      packageId: servicePackage.id,
+      name: servicePackage.name,
+      description: servicePackage.description,
+      category: servicePackage.category?.name ?? null,
+      price: Number(servicePackage.price ?? 0),
+      skills: [],
+      tags: servicePackage.tags ?? [],
+      packageType: servicePackage.packageType ?? null,
+      services: servicePackage.services ?? [],
+    };
+  }
+
+  private selectCatalogForLlm(
+    candidates: RecommendationTargetCandidate[],
+    context: string,
+  ): RecommendationTargetCandidate[] {
+    const scored = candidates.map((candidate, index) => ({
+      candidate,
+      index,
+      score: this.scoreCandidate(candidate, context).score,
+    }));
+    const hasPositiveScore = scored.some((item) => item.score > 0);
+
+    if (!hasPositiveScore) {
+      return this.interleaveCatalogTargets(candidates).slice(0, MAX_CATALOG_FOR_LLM);
+    }
+
+    return scored
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.index - b.index;
+      })
+      .slice(0, MAX_CATALOG_FOR_LLM)
+      .map((item) => item.candidate);
+  }
+
+  private interleaveCatalogTargets(
+    candidates: RecommendationTargetCandidate[],
+  ): RecommendationTargetCandidate[] {
+    const packages = candidates.filter((candidate) => candidate.targetType === 'package');
+    const services = candidates.filter((candidate) => candidate.targetType === 'service');
+    const result: RecommendationTargetCandidate[] = [];
+    const maxLength = Math.max(packages.length, services.length);
+
+    for (let index = 0; index < maxLength; index += 1) {
+      if (packages[index]) result.push(packages[index]);
+      if (services[index]) result.push(services[index]);
+    }
+
+    return result;
+  }
+
+  private buildCandidateSearchText(candidate: RecommendationTargetCandidate): string {
+    return this.normalizeText(
+      [
+        candidate.name,
+        candidate.description,
+        candidate.category,
+        candidate.type,
+        candidate.packageType,
+        ...candidate.skills,
+        ...candidate.tags,
+        ...candidate.services.flatMap((service) => [
+          service.name,
+          service.description,
+          service.category?.name,
+          ...(service.skills ?? []),
+        ]),
+      ].join(' '),
     );
   }
 
@@ -230,7 +395,6 @@ export class RecommendationScoringService {
     }
 
     const [singleTerm] = termTokens;
-    // Prefix matching is limited to longer stems to avoid noisy short-token hits.
     return textTokens.some(
       (token) =>
         token === singleTerm ||
@@ -278,5 +442,15 @@ export class RecommendationScoringService {
     if (priority === RecommendationPriority.Urgent) return 7;
     if (priority === RecommendationPriority.Medium) return 3;
     return 1;
+  }
+
+  private getAiCandidateKey(item: AiRecommendationCandidate): string | null {
+    if (typeof item.packageId === 'string' && item.packageId.length > 0) {
+      return `package:${item.packageId}`;
+    }
+    if (typeof item.serviceId === 'string' && item.serviceId.length > 0) {
+      return `service:${item.serviceId}`;
+    }
+    return null;
   }
 }
