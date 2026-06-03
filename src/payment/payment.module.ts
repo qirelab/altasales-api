@@ -9,6 +9,7 @@ import { RobokassaService } from './robokassa.service';
 import { CartModule } from '../cart/cart.module';
 import { BalanceTransactionsModule } from '../balance-transactions/balance-transactions.module';
 import { AuthModule } from '../auth/auth.module';
+import { OrderNotificationsModule } from '../orders/order-notifications.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
     CartModule,
     BalanceTransactionsModule,
     AuthModule,
+    OrderNotificationsModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService, RobokassaService],
