@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -14,7 +14,8 @@ export const ORDER_PAID_CLIENT_MESSAGE =
   'Спасибо за заказ! Наш менеджер свяжется с вами в течение 24 часов.';
 
 export interface OrderPaidSocketPayload {
-  orderId: string;
+  primaryOrderId: string;
+  orderIds: string[];
   userId: string;
   clientName: string;
   amount: number;
@@ -53,9 +54,10 @@ export class OrderNotificationService {
 
     const userIds = Array.from(new Set(orders.map((order) => order.userId)));
     if (userIds.length > 1) {
-      this.logger.warn(
-        `notifyOrderPaid: orders span multiple users (${userIds.join(', ')}); using first`,
+      this.logger.error(
+        `notifyOrderPaid: orders span multiple users (${userIds.join(', ')}); skipping notifications`,
       );
+      return;
     }
 
     const client = orders[0].user;
@@ -72,7 +74,12 @@ export class OrderNotificationService {
     );
 
     await this.sendClientChatMessage(client.id);
-    await this.notifyAdmins(orders[0], client, totalAmount);
+    await this.notifyAdmins(
+      orders[0],
+      orders.map((order) => order.id),
+      client,
+      totalAmount,
+    );
   }
 
   private async sendClientChatMessage(clientId: string): Promise<void> {
@@ -104,12 +111,14 @@ export class OrderNotificationService {
 
   private async notifyAdmins(
     order: Order,
+    orderIds: string[],
     client: User,
     amount: number,
   ): Promise<void> {
     const clientName = [client.name, client.lastName].filter(Boolean).join(' ');
     const payload: OrderPaidSocketPayload = {
-      orderId: order.id,
+      primaryOrderId: order.id,
+      orderIds,
       userId: client.id,
       clientName,
       amount,
@@ -147,7 +156,7 @@ export class OrderNotificationService {
   }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
-      throw new Error(`User ${userId} not found`);
+      throw new NotFoundException(`User ${userId} not found`);
     }
     user.adminOrderNotificationsSeenAt = new Date();
     const saved = await this.userRepository.save(user);
@@ -162,11 +171,17 @@ export class OrderNotificationService {
   }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
-      throw new Error(`User ${userId} not found`);
+      throw new NotFoundException(`User ${userId} not found`);
     }
     const qb = this.orderRepository
       .createQueryBuilder('o')
-      .where('o.status != :pending', { pending: OrderStatus.PendingPayment });
+      .where('o.status IN (:...statuses)', {
+        statuses: [
+          OrderStatus.Planned,
+          OrderStatus.InProgress,
+          OrderStatus.Completed,
+        ],
+      });
     if (user.adminOrderNotificationsSeenAt) {
       qb.andWhere('o."createdAt" > :seenAt', {
         seenAt: user.adminOrderNotificationsSeenAt,

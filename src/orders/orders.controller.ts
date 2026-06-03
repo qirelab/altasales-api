@@ -174,7 +174,13 @@ export class OrdersController {
   @Roles(UserRole.ADMIN)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark paid-order admin notifications as seen' })
-  @ApiResponse({ status: 200, description: 'Notifications marked as seen' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications marked as seen',
+    schema: {
+      example: { adminOrderNotificationsSeenAt: '2026-06-03T08:45:12.123Z' },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async markAdminOrderNotificationsSeen(@CurrentUser() user: CurrentUserData) {
@@ -187,7 +193,11 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Get unseen paid-order count for admin badge',
   })
-  @ApiResponse({ status: 200, description: 'Unseen orders summary' })
+  @ApiResponse({
+    status: 200,
+    description: 'Unseen orders summary',
+    schema: { example: { unseenCount: 3, hasUnseen: true } },
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async getAdminOrderNotificationsSummary(@CurrentUser() user: CurrentUserData) {
