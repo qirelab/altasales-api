@@ -238,6 +238,8 @@ export class MailService {
       .map(
         (item) => `
           <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; ` +
+            `font-size: 11px; color: #6B7280;">${item.orderId}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; ` +
@@ -250,12 +252,12 @@ export class MailService {
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #E75E32;">Спасибо за заказ!</h2>
         <p>Здравствуйте, ${data.clientName}!</p>
-        <p>Мы получили ваш заказ. Наш менеджер свяжется с вами в течение 24 часов, ` +
-      `чтобы согласовать детали.</p>
+        <p>Мы получили ваш заказ. Наш менеджер скоро свяжется с вами, чтобы согласовать детали.</p>
         <h3 style="color: #1A202C; margin: 20px 0 10px;">Ваш заказ</h3>
         <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px;">
           <thead>
             <tr style="background: #F9FAFB;">
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Номер</th>
               <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Название</th>
               <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Тип</th>
               <th style="padding: 8px; text-align: right; color: #666; font-weight: 600;">Цена</th>
@@ -264,7 +266,7 @@ export class MailService {
           <tbody>${itemRows}</tbody>
           <tfoot>
             <tr>
-              <td colspan="2" style="padding: 12px 8px; font-weight: bold; color: #1A202C;">Итого</td>
+              <td colspan="3" style="padding: 12px 8px; font-weight: bold; color: #1A202C;">Итого</td>
               <td style="padding: 12px 8px; text-align: right; font-weight: bold; color: #E75E32; ` +
                 `font-size: 16px;">${formatAmount(data.amount)}</td>
             </tr>
