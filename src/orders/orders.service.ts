@@ -14,6 +14,7 @@ import { OrderStatus } from './entities/order-status.enum';
 import { OrderNotificationService } from './order-notification.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
+import { AdminOrderListItemDto } from './dto/admin-order-list-item.dto';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
@@ -60,6 +61,7 @@ export interface OrderDto {
   deadline: Date | null;
   comments?: string | null;
   contractorChatAccess: boolean;
+  name: string;
   item: OrderItemDto | null;
   user?: User;
 }
@@ -132,6 +134,14 @@ export class OrdersService {
     await recommendationRepo.save(recommendation);
   }
 
+  private resolveOrderProductName(order: Order): string {
+    const item = order.item;
+    if (!item) {
+      return '';
+    }
+    return item.package?.name ?? item.service?.name ?? '';
+  }
+
   private transformOrderFiles(order: Order): OrderDto {
     return {
       id: order.id,
@@ -142,6 +152,7 @@ export class OrdersService {
       deadline: order.deadline,
       comments: order.comments,
       contractorChatAccess: order.contractorChatAccess,
+      name: this.resolveOrderProductName(order),
       user: order.user,
       item: order.item
         ? {
@@ -487,17 +498,7 @@ export class OrdersService {
   }
 
   async findAllForAdmin(query: GetAdminOrdersQueryDto): Promise<{
-    data: Array<{
-      id: string;
-      itemsCount: number;
-      typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
-      clientName: string;
-      clientLastName: string;
-      date: Date;
-      amount: number;
-      status: OrderStatus;
-      contractorChatAccess: boolean;
-    }>;
+    data: AdminOrderListItemDto[];
     total: number;
     offset: number;
     limit: number;
@@ -530,6 +531,7 @@ export class OrdersService {
       .clone()
       .leftJoin('o.item', 'item')
       .leftJoin('item.service', 'svc')
+      .leftJoin(ServicePackage, 'pkg', 'pkg.id = item."packageId"')
       .select('o.id', 'id')
       .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
       .addSelect(
@@ -541,6 +543,7 @@ export class OrdersService {
          END`,
         'typeLabel',
       )
+      .addSelect('COALESCE(svc.name, pkg.name)', 'name')
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
@@ -554,6 +557,7 @@ export class OrdersService {
         id: string;
         itemsCount: string;
         typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
+        name: string | null;
         clientName: string;
         clientLastName: string;
         date: Date;
@@ -567,6 +571,7 @@ export class OrdersService {
         id: row.id,
         itemsCount: Number(row.itemsCount),
         typeLabel: row.typeLabel,
+        name: row.name ?? '',
         clientName: row.clientName,
         clientLastName: row.clientLastName,
         date: row.date,
