@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ServicePackage } from '../packages/entities/package.entity';
@@ -30,6 +31,15 @@ export interface OrderFileDto {
   source: FileSource;
 }
 
+export interface ExpertPositionCheckoutPayload {
+  positionId: string;
+  executorUserId: string;
+  offeringIds: string[];
+  amount: number;
+  comments?: string;
+  paymentMethod?: CheckoutPaymentMethod;
+}
+
 export interface OrderItemDto {
   id: string;
   orderId: string;
@@ -37,18 +47,38 @@ export interface OrderItemDto {
   service: OrderItem['service'] | null;
   packageId: string | null;
   package: OrderItem['package'] | null;
+  expertPositionId: string | null;
+  expertPosition: OrderItem['expertPosition'] | null;
+  executorUserId: string | null;
+  executor: OrderItem['executor'] | null;
   hours: number | null;
   amount: number;
   status: OrderStatus;
   subItems: Array<{
     id: string;
-    serviceId: string;
-    service: Service;
+    serviceId: string | null;
+    service: Service | null;
+    expertPositionOfferingId: string | null;
+    expertPositionOffering: OrderItemSubItem['expertPositionOffering'] | null;
     status: OrderStatus;
     files: OrderFileDto[];
   }>;
   files: OrderFileDto[];
 }
+
+const ORDER_DETAIL_RELATIONS = [
+  'item',
+  'item.service',
+  'item.package',
+  'item.package.services',
+  'item.expertPosition',
+  'item.executor',
+  'item.subItems',
+  'item.subItems.service',
+  'item.subItems.expertPositionOffering',
+  'item.subItems.files',
+  'item.files',
+] as const;
 
 export interface OrderDto {
   id: string;
@@ -78,6 +108,8 @@ export class OrdersService {
     private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Recommendation)
     private readonly recommendationRepository: Repository<Recommendation>,
+    @InjectRepository(ExpertPositionOffering)
+    private readonly expertOfferingRepository: Repository<ExpertPositionOffering>,
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
     private readonly balanceService: BalanceService,
@@ -147,6 +179,10 @@ export class OrdersService {
           service: order.item.service,
           packageId: order.item.packageId,
           package: order.item.package,
+          expertPositionId: order.item.expertPositionId,
+          expertPosition: order.item.expertPosition,
+          executorUserId: order.item.executorUserId,
+          executor: order.item.executor,
           hours: order.item.hours,
           amount: order.item.amount,
           status: order.item.status,
@@ -154,6 +190,8 @@ export class OrdersService {
             id: subItem.id,
             serviceId: subItem.serviceId,
             service: subItem.service,
+            expertPositionOfferingId: subItem.expertPositionOfferingId,
+            expertPositionOffering: subItem.expertPositionOffering,
             status: subItem.status,
             files: (subItem.files ?? []).map((file): OrderFileDto => ({
               id: file.id,
@@ -386,6 +424,121 @@ export class OrdersService {
     }
   }
 
+  async checkoutExpertPosition(
+    payload: ExpertPositionCheckoutPayload,
+    userId: string,
+  ): Promise<{
+    orderId: string;
+    orderIds: string[];
+    status: OrderStatus;
+    paymentMethod: CheckoutPaymentMethod;
+    paymentUrl?: string;
+    params?: Record<string, string | number>;
+  }> {
+    const offerings = await this.expertOfferingRepository.find({
+      where: { id: In(payload.offeringIds), positionId: payload.positionId },
+    });
+    if (offerings.length !== payload.offeringIds.length) {
+      throw new BadRequestException('One or more offerings do not belong to the selected position');
+    }
+
+    const resolvedAmount = offerings.reduce((sum, offering) => sum + Number(offering.defaultPrice), 0);
+    if (Math.abs(resolvedAmount - Number(payload.amount)) > 0.01) {
+      throw new BadRequestException('Order amount does not match selected offering prices');
+    }
+
+    const paymentMethod = payload.paymentMethod ?? CheckoutPaymentMethod.Robokassa;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const order = this.orderRepository.create({
+        userId,
+        amount: resolvedAmount,
+        comments: payload.comments ?? undefined,
+        status: OrderStatus.PendingPayment,
+        contractorChatAccess: false,
+      });
+      await queryRunner.manager.save(Order, order);
+
+      const item = this.orderItemRepository.create({
+        orderId: order.id,
+        expertPositionId: payload.positionId,
+        executorUserId: payload.executorUserId,
+        serviceId: null,
+        packageId: null,
+        hours: null,
+        amount: resolvedAmount,
+        status: OrderStatus.PendingPayment,
+      });
+      await queryRunner.manager.save(OrderItem, item);
+
+      const subItems = offerings.map((offering) => this.orderItemSubItemRepository.create({
+        orderItemId: item.id,
+        expertPositionOfferingId: offering.id,
+        serviceId: null,
+        status: OrderStatus.PendingPayment,
+      }));
+      await queryRunner.manager.save(OrderItemSubItem, subItems);
+
+      const orderIds = [order.id];
+      const primaryOrderId = order.id;
+
+      if (paymentMethod === CheckoutPaymentMethod.Balance) {
+        await this.balanceService.debitForOrderPayment(
+          userId,
+          resolvedAmount,
+          {
+            orderId: primaryOrderId,
+            description: `Оплата заказа №${primaryOrderId} с внутреннего баланса`,
+          },
+          queryRunner.manager,
+        );
+        await queryRunner.manager.update(Order, { id: primaryOrderId }, { status: OrderStatus.Planned });
+        await queryRunner.manager.update(OrderItem, { orderId: primaryOrderId }, { status: OrderStatus.Planned });
+        await queryRunner.manager.update(
+          OrderItemSubItem,
+          { orderItemId: item.id },
+          { status: OrderStatus.Planned },
+        );
+        await this.cartService.clearAndArchiveActiveCart(userId);
+        await queryRunner.commitTransaction();
+        return {
+          orderId: primaryOrderId,
+          orderIds,
+          status: OrderStatus.Planned,
+          paymentMethod: CheckoutPaymentMethod.Balance,
+        };
+      }
+
+      const { paymentUrl, params } = await this.paymentService.createWithManager(
+        {
+          orderId: primaryOrderId,
+          orderIds,
+          outSum: resolvedAmount,
+          description: `Оплата заказа №${primaryOrderId}`,
+        },
+        queryRunner.manager,
+      );
+
+      await queryRunner.commitTransaction();
+      return {
+        orderId: primaryOrderId,
+        orderIds,
+        status: OrderStatus.PendingPayment,
+        paymentMethod: CheckoutPaymentMethod.Robokassa,
+        paymentUrl,
+        params,
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   async findByUserId(
     userId: string,
     query: GetOrdersQueryDto,
@@ -396,16 +549,7 @@ export class OrdersService {
 
     const [data, total] = await this.orderRepository.findAndCount({
       where,
-      relations: [
-        'item',
-        'item.service',
-        'item.package',
-        'item.package.services',
-        'item.subItems',
-        'item.subItems.service',
-        'item.subItems.files',
-        'item.files',
-      ],
+      relations: [...ORDER_DETAIL_RELATIONS],
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -422,11 +566,17 @@ export class OrdersService {
     const baseQb = this.orderRepository
       .createQueryBuilder('o')
       .innerJoin('o.item', 'item')
-      .innerJoin('item.service', 'service')
-      .where('service.type = :contractorType', {
-        contractorType: ServiceType.Contractor,
-      })
-      .andWhere('service."userId" = :expertUserId', { expertUserId });
+      .leftJoin('item.service', 'service')
+      .where(
+        new Brackets((qb) => {
+          qb
+            .where('service.type = :contractorType AND service."userId" = :expertUserId', {
+              contractorType: ServiceType.Contractor,
+              expertUserId,
+            })
+            .orWhere('item."executorUserId" = :expertUserId', { expertUserId });
+        }),
+      );
 
     if (status) {
       baseQb.andWhere('o.status = :status', { status });
@@ -455,16 +605,7 @@ export class OrdersService {
 
     const data = await this.orderRepository.find({
       where: { id: In(ids) },
-      relations: [
-        'item',
-        'item.service',
-        'item.package',
-        'item.package.services',
-        'item.subItems',
-        'item.subItems.service',
-        'item.subItems.files',
-        'item.files',
-      ],
+      relations: [...ORDER_DETAIL_RELATIONS],
       order: { createdAt: 'DESC' },
     });
 
@@ -475,7 +616,7 @@ export class OrdersService {
     data: Array<{
       id: string;
       itemsCount: number;
-      typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
+      typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг' | 'Эксперт';
       clientName: string;
       clientLastName: string;
       date: Date;
@@ -520,6 +661,7 @@ export class OrdersService {
       .addSelect(
         `CASE
            WHEN item.id IS NULL THEN 'Услуга'
+           WHEN item."expertPositionId" IS NOT NULL THEN 'Эксперт'
            WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
            WHEN svc.type IN ('Услуга', 'Документ', 'Подрядчик') THEN svc.type
            ELSE 'Услуга'
@@ -538,7 +680,7 @@ export class OrdersService {
       .getRawMany<{
         id: string;
         itemsCount: string;
-        typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
+        typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг' | 'Эксперт';
         clientName: string;
         clientLastName: string;
         date: Date;
@@ -568,17 +710,7 @@ export class OrdersService {
   async findOneForAdmin(id: string): Promise<OrderDto> {
     const order = await this.orderRepository.findOne({
       where: { id },
-      relations: [
-        'user',
-        'item',
-        'item.service',
-        'item.package',
-        'item.package.services',
-        'item.subItems',
-        'item.subItems.service',
-        'item.subItems.files',
-        'item.files',
-      ],
+      relations: ['user', ...ORDER_DETAIL_RELATIONS],
     });
 
     if (!order) {
@@ -618,9 +750,9 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
-    if (order.item?.packageId) {
+    if (order.item?.packageId || order.item?.expertPositionId) {
       throw new BadRequestException(
-        'Статус пакета вычисляется по статусам услуг внутри — обновите статусы услуг',
+        'Статус составного заказа вычисляется по статусам услуг внутри — обновите статусы услуг',
       );
     }
 
@@ -642,8 +774,8 @@ export class OrdersService {
     if (!item) {
       throw new NotFoundException(`Order item with id ${itemId} not found`);
     }
-    if (item.packageId) {
-      throw new BadRequestException('Для пакета используйте смену статуса по каждой услуге пакета');
+    if (item.packageId || item.expertPositionId) {
+      throw new BadRequestException('Для составного заказа используйте смену статуса по каждой услуге');
     }
 
     item.status = status;
@@ -671,16 +803,16 @@ export class OrdersService {
 
       const item = await itemRepo.findOne({
         where: { id: itemId },
-        relations: ['order', 'subItems', 'subItems.service'],
+        relations: ['order', 'subItems', 'subItems.service', 'subItems.expertPositionOffering'],
       });
       if (!item) {
         throw new NotFoundException(`Order item with id ${itemId} not found`);
       }
-      if (!item.packageId) {
-        throw new BadRequestException('Эта позиция заказа не является пакетом');
+      if (!item.packageId && !item.expertPositionId) {
+        throw new BadRequestException('Эта позиция заказа не является пакетом или заказом эксперта');
       }
       if (!item.subItems.length) {
-        throw new BadRequestException('В пакете нет услуг');
+        throw new BadRequestException('В заказе нет вложенных услуг');
       }
 
       const subItem = item.subItems.find((entry) => entry.id === subItemId);
