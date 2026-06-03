@@ -10,8 +10,33 @@ import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { Order } from './entities/order.entity';
 import { OrderStatus } from './entities/order-status.enum';
 
-export const ORDER_PAID_CLIENT_MESSAGE =
-  'Спасибо за заказ! Наш менеджер свяжется с вами в течение 24 часов.';
+function formatAmount(amount: number): string {
+  return `${amount.toLocaleString('ru-RU')} ₽`;
+}
+
+export function buildClientChatMessage(
+  items: OrderPaidItem[],
+  totalAmount: number,
+): string {
+  const lines = items
+    .map((item) => `• ${item.name} — ${formatAmount(item.amount)}`)
+    .join('\n');
+  return [
+    'Спасибо за заказ! Наш менеджер свяжется с вами в течение 24 часов.',
+    '',
+    'Ваш заказ:',
+    lines,
+    '',
+    `Итого: ${formatAmount(totalAmount)}`,
+  ].join('\n');
+}
+
+export interface OrderPaidItem {
+  orderId: string;
+  name: string;
+  type: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет';
+  amount: number;
+}
 
 export interface OrderPaidSocketPayload {
   primaryOrderId: string;
@@ -19,6 +44,7 @@ export interface OrderPaidSocketPayload {
   userId: string;
   clientName: string;
   amount: number;
+  items: OrderPaidItem[];
   createdAt: string;
 }
 
@@ -38,11 +64,14 @@ export class OrderNotificationService {
   ) {}
 
   async notifyOrderPaid(orderIds: string[]): Promise<void> {
+    this.logger.log(
+      `notifyOrderPaid invoked for orders: ${orderIds.join(', ')}`,
+    );
     if (!orderIds.length) return;
 
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
-      relations: ['user'],
+      relations: ['user', 'item', 'item.service', 'item.package'],
     });
 
     if (!orders.length) {
@@ -73,16 +102,39 @@ export class OrderNotificationService {
       0,
     );
 
-    await this.sendClientChatMessage(client.id);
+    const items: OrderPaidItem[] = orders.map((order) => {
+      const orderItem = order.item;
+      const isPackage = Boolean(orderItem?.package);
+      const name = orderItem?.package?.name ?? orderItem?.service?.name ?? '—';
+      let type: OrderPaidItem['type'] = 'Услуга';
+      if (isPackage) {
+        type = 'Пакет';
+      } else if (orderItem?.service?.type) {
+        type = orderItem.service.type as OrderPaidItem['type'];
+      }
+      return {
+        orderId: order.id,
+        name,
+        type,
+        amount: Number(order.amount),
+      };
+    });
+
+    await this.sendClientChatMessage(client.id, items, totalAmount);
     await this.notifyAdmins(
       orders[0],
       orders.map((order) => order.id),
       client,
       totalAmount,
+      items,
     );
   }
 
-  private async sendClientChatMessage(clientId: string): Promise<void> {
+  private async sendClientChatMessage(
+    clientId: string,
+    items: OrderPaidItem[],
+    totalAmount: number,
+  ): Promise<void> {
     const admin = await this.userRepository.findOne({
       where: { role: UserRole.ADMIN },
       order: { createdAt: 'ASC' },
@@ -90,16 +142,23 @@ export class OrderNotificationService {
 
     if (!admin) {
       this.logger.warn(
-        'No admin user found — skipping client chat notification',
+        `No admin user in DB — cannot send order-paid chat to client ${clientId}`,
       );
       return;
     }
 
+    this.logger.log(
+      `Sending order-paid chat to client ${clientId} via admin ${admin.id}`,
+    );
+
     try {
-      await this.chatService.sendMessage(admin.id, {
+      const message = await this.chatService.sendMessage(admin.id, {
         recipientId: clientId,
-        text: ORDER_PAID_CLIENT_MESSAGE,
+        text: buildClientChatMessage(items, totalAmount),
       });
+      this.logger.log(
+        `Order-paid chat sent to client ${clientId}, message ${message.id}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to send order-paid chat message to client ${clientId}: ` +
@@ -114,6 +173,7 @@ export class OrderNotificationService {
     orderIds: string[],
     client: User,
     amount: number,
+    items: OrderPaidItem[],
   ): Promise<void> {
     const fullName = [client.name, client.lastName].filter(Boolean).join(' ');
     const clientName = fullName || client.email;
@@ -123,6 +183,7 @@ export class OrderNotificationService {
       userId: client.id,
       clientName,
       amount,
+      items,
       createdAt: order.createdAt.toISOString(),
     };
 
@@ -138,18 +199,19 @@ export class OrderNotificationService {
       .get<string>('CLIENT_URI', '')
       .split(',')[0]
       .trim();
-    const adminOrderUrl = clientUrl
-      ? `${clientUrl}/admin/orders/${order.id}`
-      : null;
+    const adminOrdersUrl = clientUrl ? `${clientUrl}/admin/orders` : null;
 
     await this.mailService.notifyAdminsAboutPaidOrder({
       orderId: order.id,
       clientName,
       amount,
-      adminOrderUrl,
+      items,
+      adminOrdersUrl,
     });
 
-    this.logger.log(`Order-paid notification dispatched for order ${order.id}`);
+    this.logger.log(
+      `Order-paid notification dispatched for order ${order.id} (${items.length} positions)`,
+    );
   }
 
   async markAdminSeen(userId: string): Promise<{

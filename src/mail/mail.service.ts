@@ -16,6 +16,10 @@ interface NewQuestionnaireNotificationData {
   userId: string;
 }
 
+function formatAmount(amount: number): string {
+  return `${amount.toLocaleString('ru-RU')} ₽`;
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -121,7 +125,8 @@ export class MailService {
     orderId: string;
     clientName: string;
     amount: number;
-    adminOrderUrl: string | null;
+    items: Array<{ orderId: string; name: string; type: string; amount: number }>;
+    adminOrdersUrl: string | null;
   }): Promise<void> {
     const admins = await this.userRepository.find({
       where: { role: UserRole.ADMIN },
@@ -134,33 +139,56 @@ export class MailService {
     }
 
     const adminEmails = admins.map((admin) => admin.email);
-    const subject = `Новый заказ #${data.orderId}`;
-    const linkBlock = data.adminOrderUrl
+    const subject = `Новый заказ (${data.items.length} позиций, ${formatAmount(data.amount)})`;
+    const linkBlock = data.adminOrdersUrl
       ? `<p>
-           <a href="${data.adminOrderUrl}"
+           <a href="${data.adminOrdersUrl}"
               style="display: inline-block; padding: 12px 24px; ` +
         `background-color: #E75E32; color: white; text-decoration: none; ` +
         `border-radius: 6px;">
-             Открыть заказ
+             Открыть страницу покупок
            </a>
          </p>`
       : '';
+    const itemRows = data.items
+      .map(
+        (item) => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; ` +
+            `white-space: nowrap;">${formatAmount(item.amount)}</td>
+          </tr>
+        `,
+      )
+      .join('');
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #E75E32;">Новый оплаченный заказ</h2>
         <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
           <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Номер заказа:</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${data.orderId}</td>
-          </tr>
-          <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Клиент:</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.clientName}</td>
           </tr>
           <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Сумма:</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.amount} ₽</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Позиций:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.items.length}</td>
           </tr>
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Итого:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${formatAmount(data.amount)}</td>
+          </tr>
+        </table>
+        <h3 style="color: #1A202C; margin: 20px 0 10px;">Состав заказа</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px;">
+          <thead>
+            <tr style="background: #F9FAFB;">
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Название</th>
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Тип</th>
+              <th style="padding: 8px; text-align: right; color: #666; font-weight: 600;">Цена</th>
+            </tr>
+          </thead>
+          <tbody>${itemRows}</tbody>
         </table>
         ${linkBlock}
         <p style="color: #999; font-size: 12px; margin-top: 30px;">
