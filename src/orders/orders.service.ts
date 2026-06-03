@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ServicePackage } from '../packages/entities/package.entity';
@@ -11,6 +11,7 @@ import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderItemSubItem } from './entities/order-item-sub-item.entity';
 import { OrderStatus } from './entities/order-status.enum';
+import { OrderNotificationService } from './order-notification.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { CheckoutPaymentMethod } from './dto/checkout-payment-method.enum';
 import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
@@ -65,6 +66,8 @@ export interface OrderDto {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
@@ -82,6 +85,7 @@ export class OrdersService {
     private readonly dataSource: DataSource,
     private readonly balanceService: BalanceService,
     private readonly cartService: CartService,
+    private readonly orderNotificationService: OrderNotificationService,
   ) { }
 
   private mapOrderStatusToRecommendationStatus(status: OrderStatus): RecommendationStatus {
@@ -348,6 +352,17 @@ export class OrdersService {
         }
         await this.cartService.clearAndArchiveActiveCart(userId);
         await queryRunner.commitTransaction();
+
+        try {
+          await this.orderNotificationService.notifyOrderPaid(orderIds);
+        } catch (notificationError) {
+          this.logger.error(
+            `notifyOrderPaid failed for orders ${orderIds.join(', ')}: ` +
+              `${(notificationError as Error).message}`,
+            (notificationError as Error).stack,
+          );
+        }
+
         return {
           orderId: primaryOrderId,
           orderIds,
