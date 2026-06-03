@@ -2,34 +2,12 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { ChatService } from '../chat/chat.service';
 import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { Order } from './entities/order.entity';
 import { OrderStatus } from './entities/order-status.enum';
-
-function formatAmount(amount: number): string {
-  return `${amount.toLocaleString('ru-RU')} ₽`;
-}
-
-export function buildClientChatMessage(
-  items: OrderPaidItem[],
-  totalAmount: number,
-): string {
-  const lines = items
-    .map((item) => `• ${item.name} — ${formatAmount(item.amount)}`)
-    .join('\n');
-  return [
-    'Спасибо за заказ! Наш менеджер свяжется с вами в течение 24 часов.',
-    '',
-    'Ваш заказ:',
-    lines,
-    '',
-    `Итого: ${formatAmount(totalAmount)}`,
-  ].join('\n');
-}
 
 export interface OrderPaidItem {
   orderId: string;
@@ -57,7 +35,6 @@ export class OrderNotificationService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    private readonly chatService: ChatService,
     private readonly mailService: MailService,
     private readonly websocketGateway: WebSocketGatewayService,
     private readonly configService: ConfigService,
@@ -120,7 +97,7 @@ export class OrderNotificationService {
       };
     });
 
-    await this.sendClientChatMessage(client.id, items, totalAmount);
+    await this.sendClientEmail(client, items, totalAmount);
     await this.notifyAdmins(
       orders[0],
       orders.map((order) => order.id),
@@ -130,42 +107,29 @@ export class OrderNotificationService {
     );
   }
 
-  private async sendClientChatMessage(
-    clientId: string,
+  private async sendClientEmail(
+    client: User,
     items: OrderPaidItem[],
     totalAmount: number,
   ): Promise<void> {
-    const admin = await this.userRepository.findOne({
-      where: { role: UserRole.ADMIN },
-      order: { createdAt: 'ASC' },
-    });
-
-    if (!admin) {
+    if (!client.email) {
       this.logger.warn(
-        `No admin user in DB — cannot send order-paid chat to client ${clientId}`,
+        `notifyOrderPaid: client ${client.id} has no email — skipping client email`,
       );
       return;
     }
 
-    this.logger.log(
-      `Sending order-paid chat to client ${clientId} via admin ${admin.id}`,
-    );
+    const fullName = [client.name, client.lastName].filter(Boolean).join(' ');
+    const clientName = fullName || client.email;
 
-    try {
-      const message = await this.chatService.sendMessage(admin.id, {
-        recipientId: clientId,
-        text: buildClientChatMessage(items, totalAmount),
-      });
-      this.logger.log(
-        `Order-paid chat sent to client ${clientId}, message ${message.id}`,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to send order-paid chat message to client ${clientId}: ` +
-          `${(error as Error).message}`,
-        (error as Error).stack,
-      );
-    }
+    this.logger.log(`Sending order-paid email to client ${client.email}`);
+
+    await this.mailService.sendOrderPaidClientEmail({
+      email: client.email,
+      clientName,
+      items,
+      amount: totalAmount,
+    });
   }
 
   private async notifyAdmins(
