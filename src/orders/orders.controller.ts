@@ -26,13 +26,17 @@ import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-acce
 import { UpdateOrderItemStatusDto } from './dto/update-order-item-status.dto';
 import { UpdateOrderItemSubItemStatusDto } from './dto/update-order-item-sub-item-status.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { OrderNotificationService } from './order-notification.service';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
 @Controller('orders')
 @UseGuards(SessionGuard)
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) { }
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly orderNotificationService: OrderNotificationService,
+  ) { }
 
   @Get()
   @ApiOperation({ summary: 'Get current user orders (paginated, optional status filter)' })
@@ -163,6 +167,41 @@ export class OrdersController {
     @Body() dto: UpdateOrderItemSubItemStatusDto,
   ) {
     return this.ordersService.updateSubItemStatus(itemId, subItemId, dto.status);
+  }
+
+  @Post('notifications/admin-seen')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark paid-order admin notifications as seen' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications marked as seen',
+    schema: {
+      example: { adminOrderNotificationsSeenAt: '2026-06-03T08:45:12.123Z' },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async markAdminOrderNotificationsSeen(@CurrentUser() user: CurrentUserData) {
+    return this.orderNotificationService.markAdminSeen(user.id);
+  }
+
+  @Get('notifications/admin-summary')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Get unseen paid-order count for admin badge',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Unseen orders summary',
+    schema: { example: { unseenCount: 3, hasUnseen: true } },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async getAdminOrderNotificationsSummary(@CurrentUser() user: CurrentUserData) {
+    return this.orderNotificationService.getAdminUnseen(user.id);
   }
 
   @Post('checkout')

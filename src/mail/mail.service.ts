@@ -16,6 +16,10 @@ interface NewQuestionnaireNotificationData {
   userId: string;
 }
 
+function formatAmount(amount: number): string {
+  return `${amount.toLocaleString('ru-RU')} ₽`;
+}
+
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
@@ -112,6 +116,190 @@ export class MailService {
     } catch (error) {
       this.logger.error(
         `Failed to send notification email: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  async notifyAdminsAboutPaidOrder(data: {
+    orderId: string;
+    clientName: string;
+    amount: number;
+    items: Array<{ orderId: string; name: string; type: string; amount: number }>;
+    adminOrdersUrl: string | null;
+  }): Promise<void> {
+    const admins = await this.userRepository.find({
+      where: { role: UserRole.ADMIN },
+      select: ['email'],
+    });
+
+    if (admins.length === 0) {
+      this.logger.warn('No admins found to notify about paid order');
+      return;
+    }
+
+    const adminEmails = admins.map((admin) => admin.email);
+    const subject = `Новый заказ (${data.items.length} позиций, ${formatAmount(data.amount)})`;
+    const linkBlock = data.adminOrdersUrl
+      ? `<p>
+           <a href="${data.adminOrdersUrl}"
+              style="display: inline-block; padding: 12px 24px; ` +
+        `background-color: #E75E32; color: white; text-decoration: none; ` +
+        `border-radius: 6px;">
+             Открыть страницу покупок
+           </a>
+         </p>`
+      : '';
+    const itemRows = data.items
+      .map(
+        (item) => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; ` +
+            `font-size: 11px; color: #6B7280;">${item.orderId}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; ` +
+            `white-space: nowrap;">${formatAmount(item.amount)}</td>
+          </tr>
+        `,
+      )
+      .join('');
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #E75E32;">Новый оплаченный заказ</h2>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Клиент:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.clientName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Позиций:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.items.length}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Итого:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${formatAmount(data.amount)}</td>
+          </tr>
+        </table>
+        <h3 style="color: #1A202C; margin: 20px 0 10px;">Состав заказа</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px;">
+          <thead>
+            <tr style="background: #F9FAFB;">
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Номер</th>
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Название</th>
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Тип</th>
+              <th style="padding: 8px; text-align: right; color: #666; font-weight: 600;">Цена</th>
+            </tr>
+          </thead>
+          <tbody>${itemRows}</tbody>
+        </table>
+        ${linkBlock}
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+          Это автоматическое уведомление от AltaSales
+        </p>
+      </div>
+    `;
+
+    try {
+      const { data: result, error } = await this.resend.emails.send({
+        from: this.defaultFrom,
+        to: adminEmails,
+        subject,
+        html,
+      });
+
+      if (error) {
+        this.logger.error(
+          `Failed to send paid-order email: ${error.message}`,
+          error,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `Paid-order email sent to ${adminEmails.length} admin(s) for order ${data.orderId} (id: ${result?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send paid-order email: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  async sendOrderPaidClientEmail(data: {
+    email: string;
+    clientName: string;
+    items: Array<{ orderId: string; name: string; type: string; amount: number }>;
+    amount: number;
+  }): Promise<void> {
+    const subject = `Заказ оплачен — с вами свяжется менеджер`;
+    const itemRows = data.items
+      .map(
+        (item) => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; ` +
+            `font-size: 11px; color: #6B7280;">${item.orderId}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; ` +
+            `white-space: nowrap;">${formatAmount(item.amount)}</td>
+          </tr>
+        `,
+      )
+      .join('');
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #E75E32;">Спасибо за заказ!</h2>
+        <p>Здравствуйте, ${data.clientName}!</p>
+        <p>Мы получили ваш заказ. Наш менеджер скоро свяжется с вами, чтобы согласовать детали.</p>
+        <h3 style="color: #1A202C; margin: 20px 0 10px;">Ваш заказ</h3>
+        <table style="width: 100%; border-collapse: collapse; margin: 0 0 20px;">
+          <thead>
+            <tr style="background: #F9FAFB;">
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Номер</th>
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Название</th>
+              <th style="padding: 8px; text-align: left; color: #666; font-weight: 600;">Тип</th>
+              <th style="padding: 8px; text-align: right; color: #666; font-weight: 600;">Цена</th>
+            </tr>
+          </thead>
+          <tbody>${itemRows}</tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3" style="padding: 12px 8px; font-weight: bold; color: #1A202C;">Итого</td>
+              <td style="padding: 12px 8px; text-align: right; font-weight: bold; color: #E75E32; ` +
+                `font-size: 16px;">${formatAmount(data.amount)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+          Это автоматическое уведомление от AltaSales
+        </p>
+      </div>
+    `;
+
+    try {
+      const { data: result, error } = await this.resend.emails.send({
+        from: this.defaultFrom,
+        to: [data.email],
+        subject,
+        html,
+      });
+
+      if (error) {
+        this.logger.error(
+          `Failed to send order-paid email to ${data.email}: ${error.message}`,
+          error,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `Order-paid email sent to client ${data.email} (id: ${result?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send order-paid email to ${data.email}: ${error.message}`,
         error.stack,
       );
     }
