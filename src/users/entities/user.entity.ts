@@ -65,6 +65,12 @@ export class User {
   @Column({ type: 'timestamptz', nullable: true })
   notificationsSeenAt: Date | null;
 
+  @ApiPropertyOptional({
+    description: 'When the admin last viewed paid-order notifications',
+  })
+  @Column({ type: 'timestamptz', nullable: true })
+  adminOrderNotificationsSeenAt: Date | null;
+
   @ApiProperty({
     example: '2026-03-19T10:00:00.000Z',
     description: 'Registration date',

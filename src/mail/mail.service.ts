@@ -117,6 +117,85 @@ export class MailService {
     }
   }
 
+  async notifyAdminsAboutPaidOrder(data: {
+    orderId: string;
+    clientName: string;
+    amount: number;
+    adminOrderUrl: string | null;
+  }): Promise<void> {
+    const admins = await this.userRepository.find({
+      where: { role: UserRole.ADMIN },
+      select: ['email'],
+    });
+
+    if (admins.length === 0) {
+      this.logger.warn('No admins found to notify about paid order');
+      return;
+    }
+
+    const adminEmails = admins.map((admin) => admin.email);
+    const subject = `Новый заказ #${data.orderId}`;
+    const linkBlock = data.adminOrderUrl
+      ? `<p>
+           <a href="${data.adminOrderUrl}"
+              style="display: inline-block; padding: 12px 24px; ` +
+        `background-color: #E75E32; color: white; text-decoration: none; ` +
+        `border-radius: 6px;">
+             Открыть заказ
+           </a>
+         </p>`
+      : '';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #E75E32;">Новый оплаченный заказ</h2>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Номер заказа:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">${data.orderId}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Клиент:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.clientName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Сумма:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${data.amount} ₽</td>
+          </tr>
+        </table>
+        ${linkBlock}
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+          Это автоматическое уведомление от AltaSales
+        </p>
+      </div>
+    `;
+
+    try {
+      const { data: result, error } = await this.resend.emails.send({
+        from: this.defaultFrom,
+        to: adminEmails,
+        subject,
+        html,
+      });
+
+      if (error) {
+        this.logger.error(
+          `Failed to send paid-order email: ${error.message}`,
+          error,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `Paid-order email sent to ${adminEmails.length} admin(s) for order ${data.orderId} (id: ${result?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send paid-order email: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   async sendRecommendationsReadyEmail(
     userEmail: string,
     userName: string,

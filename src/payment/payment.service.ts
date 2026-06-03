@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { OrderNotificationService } from '../orders/order-notification.service';
 import { Payment, PaymentStatus } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RobokassaService } from './robokassa.service';
@@ -16,6 +17,8 @@ import { RecommendationStatus } from '../recommendations/entities/recommendation
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
@@ -25,6 +28,7 @@ export class PaymentService {
     private readonly dataSource: DataSource,
     private readonly cartService: CartService,
     private readonly balanceService: BalanceService,
+    private readonly orderNotificationService: OrderNotificationService,
   ) { }
 
   async createWithManager(
@@ -134,6 +138,8 @@ export class PaymentService {
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
+    let notifyOrderIds: string[] = [];
+
     try {
       const paymentRepo = queryRunner.manager.getRepository(Payment);
       const orderRepo = queryRunner.manager.getRepository(Order);
@@ -159,6 +165,7 @@ export class PaymentService {
       await paymentRepo.save(payment);
 
       if (payment.orderIds?.length) {
+        notifyOrderIds = [...payment.orderIds];
         await orderRepo.update(
           { id: In(payment.orderIds) },
           { status: OrderStatus.Planned },
@@ -191,6 +198,7 @@ export class PaymentService {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
         }
       } else if (payment.orderId != null) {
+        notifyOrderIds = [payment.orderId];
         const order = await orderRepo.findOne({ where: { id: payment.orderId } });
         await orderRepo.update(
           { id: payment.orderId },
@@ -242,6 +250,18 @@ export class PaymentService {
       return { response: `error: order not found` };
     } finally {
       await queryRunner.release();
+    }
+
+    if (notifyOrderIds.length) {
+      try {
+        await this.orderNotificationService.notifyOrderPaid(notifyOrderIds);
+      } catch (notificationError) {
+        this.logger.error(
+          `notifyOrderPaid failed for orders ${notifyOrderIds.join(', ')}: ` +
+            `${(notificationError as Error).message}`,
+          (notificationError as Error).stack,
+        );
+      }
     }
 
     return { response: `OK${invId}` };
