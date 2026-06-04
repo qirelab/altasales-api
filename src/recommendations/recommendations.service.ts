@@ -13,6 +13,7 @@ import { Service } from '../services/entities/service.entity';
 import { activePackageWhere } from '../packages/package-visibility';
 import { filterActiveServices } from '../services/service-visibility';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
@@ -27,6 +28,7 @@ import {
   type RecommendationGenerationJobSummary,
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
+import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
 import {
   RecommendationScoringService,
   type GeneratedRecommendationItem,
@@ -88,7 +90,10 @@ export class RecommendationsService implements OnModuleInit {
     private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(Questionnaire)
+    private readonly questionnaireRepository: Repository<Questionnaire>,
     private readonly scoringService: RecommendationScoringService,
+    private readonly relevanceRanker: QuestionnaireRelevanceRankerService,
     private readonly generationJobService: RecommendationGenerationJobService,
     private readonly notificationService: RecommendationNotificationService,
   ) {}
@@ -340,10 +345,17 @@ export class RecommendationsService implements OnModuleInit {
     dto: Omit<GenerateRecommendationsDto, 'userId'>,
   ): Promise<RecommendationGenerationJobSummary> {
     await this.ensureUserExists(userId);
+    const request = {
+      ...dto,
+      clientProfile: await this.resolveClientProfile(
+        userId,
+        dto.clientProfile,
+      ),
+    };
 
     return this.generationJobService.startGenerationForUser(
       userId,
-      dto,
+      request,
       (job) => this.runGenerationJob(job),
     );
   }
@@ -361,12 +373,19 @@ export class RecommendationsService implements OnModuleInit {
     dto: GenerateRecommendationsDto,
   ): Promise<GeneratedRecommendationItem[]> {
     await this.ensureUserExists(dto.userId);
+    const effectiveDto: GenerateRecommendationsDto = {
+      ...dto,
+      clientProfile: await this.resolveClientProfile(
+        dto.userId,
+        dto.clientProfile,
+      ),
+    };
 
     const limit = dto.limit ?? 5;
     const services = await this.findRecommendableServices();
-    const context = this.scoringService.buildDiagnosticContext(dto);
+    const context = this.scoringService.buildDiagnosticContext(effectiveDto);
     let ranked = await this.scoringService.generateAiRecommendations(
-      dto,
+      effectiveDto,
       services,
       context,
     );
@@ -378,7 +397,13 @@ export class RecommendationsService implements OnModuleInit {
         .sort((a, b) => b.score - a.score);
     }
 
-    ranked = ranked.slice(0, limit);
+    ranked = this.relevanceRanker.rankRecommendations(
+      effectiveDto,
+      services,
+      ranked,
+      context,
+      limit,
+    );
 
     if (dto.persist === false) {
       return ranked;
@@ -455,13 +480,67 @@ export class RecommendationsService implements OnModuleInit {
       .getMany() as Promise<ServiceCandidate[]>;
   }
 
+  private async resolveClientProfile(
+    userId: string,
+    clientProfile?: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | undefined> {
+    const questionnaire = await this.questionnaireRepository.findOne({
+      where: { userId },
+    });
+    const savedProfile = questionnaire?.answers as
+      | Record<string, unknown>
+      | undefined;
+
+    if (savedProfile && this.hasClientProfile(clientProfile)) {
+      return this.mergeProfiles(savedProfile, clientProfile);
+    }
+
+    return savedProfile ?? clientProfile;
+  }
+
+  private hasClientProfile(
+    clientProfile?: Record<string, unknown>,
+  ): clientProfile is Record<string, unknown> {
+    return Boolean(
+      clientProfile &&
+        typeof clientProfile === 'object' &&
+        Object.keys(clientProfile).length > 0,
+      );
+  }
+
+  private mergeProfiles(
+    base: Record<string, unknown>,
+    override: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = { ...base };
+
+    Object.entries(override).forEach(([key, overrideValue]) => {
+      if (overrideValue === undefined) return;
+
+      const baseValue = result[key];
+      if (this.isPlainObject(baseValue) && this.isPlainObject(overrideValue)) {
+        result[key] = this.mergeProfiles(baseValue, overrideValue);
+        return;
+      }
+
+      result[key] = overrideValue;
+    });
+
+    return result;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
   private async upsertGeneratedRecommendation(
     userId: string,
     item: GeneratedRecommendationItem,
   ): Promise<Recommendation> {
-    // AI generation currently ranks services only; packages need their own candidate/upsert path.
+    const where = { userId, serviceId: item.serviceId };
+
     const existing = await this.recommendationRepository.findOne({
-      where: { userId, serviceId: item.serviceId },
+      where,
     });
 
     if (existing) {
@@ -492,7 +571,7 @@ export class RecommendationsService implements OnModuleInit {
         throw error;
       }
       const retryExisting = await this.recommendationRepository.findOne({
-        where: { userId, serviceId: item.serviceId },
+        where,
       });
       if (!retryExisting) throw error;
       retryExisting.priority = item.priority;
