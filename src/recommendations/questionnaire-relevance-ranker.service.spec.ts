@@ -35,6 +35,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('turnkey-hiring', 'Подбор под ключ'),
     service('telephony', 'Интеграция телефонии'),
     service('messenger', 'Интеграция мессенджера'),
+    service('automation', 'Настройка роботов для автоматизации'),
     service(
       'calls-report',
       'Отчёт с оценкой прослушанных разговоров с клиентами',
@@ -45,6 +46,23 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('sales-head', 'Руководитель отдела продаж'),
     service('financial-director', 'Финансовый директор'),
   ];
+
+  const components = (overrides: Partial<Record<string, boolean>> = {}) => ({
+    crm: false,
+    telephony: false,
+    messenger: false,
+    chatbot: false,
+    voiceRobot: false,
+    contactDatabase: false,
+    salesManager: false,
+    trainingSystem: false,
+    analytics: false,
+    scripts: false,
+    callAnalysis: false,
+    businessTrainer: false,
+    salesHead: false,
+    ...overrides,
+  });
 
   const scoringService = {
     scoreService: (candidate: ServiceCandidate): GeneratedRecommendationItem => ({
@@ -118,6 +136,68 @@ describe('QuestionnaireRelevanceRankerService', () => {
       expect.arrayContaining(['crm-bronze', 'telephony', 'messenger']),
     );
     expect(result[0].serviceId).toBe('crm-bronze');
+  });
+
+  it('uses canonical questionnaire component answers when boosting services', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Навести порядок в работе 2 менеджеров',
+          },
+          targetRevenue: 4000000,
+          leadGenerationTypes: ['inbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            scripts: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['crm-bronze', 'telephony', 'messenger']),
+    );
+    expect(result[0].serviceId).toBe('crm-bronze');
+  });
+
+  it('boosts automation when canonical questionnaire asks for a voice robot', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Автоматизировать повторяющиеся действия отдела',
+          },
+          targetRevenue: 4000000,
+          leadGenerationTypes: ['inbound'],
+          components: components({
+            voiceRobot: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['automation']),
+    );
   });
 
   it('keeps visible priority distribution independent from raw relevance score', () => {
@@ -228,6 +308,50 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
+  it('uses canonical questionnaire answers for a new product with inbound leads', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'new',
+          leadGenerationTypes: ['inbound'],
+          desiredResult: {
+            period: '6m',
+            description: 'Построить отдел продаж с нуля',
+          },
+          targetRevenue: 5000000,
+          components: components({
+            telephony: true,
+            messenger: true,
+            salesManager: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [
+        {
+          serviceId: 'crm-audit',
+          serviceName: 'Аудит CRM',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+      ],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'from-zero',
+      'crm-start',
+      'turnkey-hiring',
+      'telephony',
+      'messenger',
+    ]);
+  });
+
   it('keeps a varied top list instead of filling it with one service group', () => {
     const result = ranker.rankRecommendations(
       {
@@ -259,5 +383,76 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
     expect(serviceIds.filter((id) => id.startsWith('crm')).length).toBeLessThanOrEqual(2);
+  });
+
+  it('treats canonical high-revenue questionnaire answers as mature department', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '6m',
+            description: 'Масштабировать продажи и управлять отделом по данным',
+          },
+          targetRevenue: 15000000,
+          leadGenerationTypes: ['inbound', 'outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            analytics: true,
+            callAnalysis: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      6,
+    );
+
+    const serviceIds = result.map((item) => item.serviceId);
+
+    expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
+    expect(serviceIds).not.toEqual(
+      expect.arrayContaining(['from-zero', 'crm-start', 'crm-bronze']),
+    );
+  });
+
+  it('infers mature department from canonical desired result manager count', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Масштабировать отдел продаж до 8 менеджеров',
+          },
+          targetRevenue: 4000000,
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            analytics: true,
+            scripts: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    const serviceIds = result.map((item) => item.serviceId);
+
+    expect(serviceIds).toEqual(expect.arrayContaining(['dashboard']));
+    expect(serviceIds).not.toEqual(
+      expect.arrayContaining(['from-zero', 'crm-start', 'crm-bronze']),
+    );
   });
 });

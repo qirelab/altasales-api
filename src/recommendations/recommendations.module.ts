@@ -6,6 +6,7 @@ import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
 import { Order } from '../orders/entities/order.entity';
 import { ServicePackage } from '../packages/entities/package.entity';
+import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { Service } from '../services/entities/service.entity';
 import { User } from '../users/entities/user.entity';
 import { WebSocketModule } from '../websocket/websocket.module';
@@ -24,6 +25,7 @@ import { RecommendationsService } from './recommendations.service';
       Recommendation,
       RecommendationGenerationJob,
       User,
+      Questionnaire,
       Service,
       ServicePackage,
       Order,
