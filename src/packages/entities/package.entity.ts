@@ -45,6 +45,10 @@ export class ServicePackage {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   price: number;
 
+  @ApiPropertyOptional({ example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg' })
+  @Column({ type: 'varchar', nullable: true })
+  image: string | null;
+
   @ApiPropertyOptional({ description: 'Category ID for package' })
   @Column({ type: 'uuid', nullable: true })
   categoryId: string | null;
