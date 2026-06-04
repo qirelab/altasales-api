@@ -53,7 +53,7 @@ export class CatalogStorageService {
       throw new BadRequestException('Допустимые форматы: JPEG, PNG, WebP');
     }
     if (file.size > CATALOG_IMAGE_MAX_BYTES) {
-      throw new BadRequestException('Максимальный размер изображения — 2 МБ');
+      throw new BadRequestException('Максимальный размер изображения — 5 МБ');
     }
     if (!file.buffer?.length) {
       throw new BadRequestException('Файл пустой');
