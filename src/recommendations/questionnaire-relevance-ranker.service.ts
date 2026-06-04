@@ -37,6 +37,15 @@ type DefaultServiceRule = {
   reason: string;
 };
 
+type NormalizedQuestionnaireProfile = {
+  rawText: string;
+  productStageText: string;
+  desiredText: string;
+  leadTypeText: string;
+  managersCount: number;
+  targetRevenue: number;
+};
+
 const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
   {
     terms: ['отдел продаж с нуля'],
@@ -101,11 +110,10 @@ export class QuestionnaireRelevanceRankerService {
     limit = 5,
   ): GeneratedRecommendationItem[] {
     const profile = dto.clientProfile ?? {};
-    const stage = this.detectStage(profile);
-    const rules = this.buildRules(profile, stage);
-    const desiredText = this.normalize(
-      JSON.stringify(profile.desiredSalesDepartment ?? []),
-    );
+    const normalizedProfile = this.normalizeProfile(profile);
+    const stage = this.detectStage(normalizedProfile);
+    const rules = this.buildRules(normalizedProfile, stage);
+    const desiredText = normalizedProfile.desiredText;
     const rankedById = new Map(
       ranked.map((item, index) => [item.serviceId, { item, index }]),
     );
@@ -171,17 +179,13 @@ export class QuestionnaireRelevanceRankerService {
     return this.normalizePriorities(diverse);
   }
 
-  private detectStage(profile: Record<string, unknown>): QuestionnaireStage {
-    const text = this.normalize(JSON.stringify(profile ?? {}));
-    const desired = this.normalize(
-      JSON.stringify(profile.desiredSalesDepartment ?? []),
-    );
-    const managersCount = Number(profile.calculatedManagersCount || 0);
-    const desiredRevenue = Number(profile.desiredRevenue || 0);
-
+  private detectStage(
+    profile: NormalizedQuestionnaireProfile,
+  ): QuestionnaireStage {
     if (
-      this.includesAny(text, [
-        'новый',
+      profile.productStageText === 'new' ||
+      this.includesAny(profile.productStageText, ['новый']) ||
+      this.includesAny(profile.rawText, [
         'построить отдел продаж',
         'с нуля',
       ])
@@ -190,9 +194,9 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     if (
-      managersCount >= 5 ||
-      desiredRevenue >= 10000000 ||
-      this.includesAny(desired, ['роп', 'бизнес тренер'])
+      profile.managersCount >= 5 ||
+      profile.targetRevenue >= 10000000 ||
+      this.includesAny(profile.desiredText, ['роп', 'бизнес тренер'])
     ) {
       return 'advanced_department';
     }
@@ -201,14 +205,12 @@ export class QuestionnaireRelevanceRankerService {
   }
 
   private buildRules(
-    profile: Record<string, unknown>,
+    profile: NormalizedQuestionnaireProfile,
     stage: QuestionnaireStage,
   ): RelevanceRule[] {
     const rules: RelevanceRule[] = [];
-    const desired = this.normalize(
-      JSON.stringify(profile.desiredSalesDepartment ?? []),
-    );
-    const leadType = this.normalize(String(profile.leadGenerationType ?? ''));
+    const desired = profile.desiredText;
+    const leadType = profile.leadTypeText;
     const add = (terms: string[], points: number, reason: string): void => {
       rules.push({ terms, points, reason });
     };
@@ -268,8 +270,12 @@ export class QuestionnaireRelevanceRankerService {
         'мессенджер выбран в анкете',
       );
     }
-    if (desired.includes('чат бот') || desired.includes('чат-бот')) {
-      add(['робот'], 9, 'чат-бот выбран в анкете');
+    if (
+      desired.includes('чат бот') ||
+      desired.includes('чат-бот') ||
+      desired.includes('робот')
+    ) {
+      add(['робот'], 9, 'роботизация выбрана в анкете');
     }
     if (desired.includes('база контактов')) {
       add(['баз контактов'], 9, 'база контактов выбрана в анкете');
@@ -304,11 +310,11 @@ export class QuestionnaireRelevanceRankerService {
       add(['ии роп'], 10, 'нужно управлять отделом по данным');
     }
 
-    if (leadType.includes('исход')) {
+    if (leadType.includes('исход') || leadType.includes('outbound')) {
       add(['скрипт продаж'], 8, 'исходящая лидогенерация требует скриптов');
       add(['портрет соискателя'], 5, 'для исходящей лидогенерации нужен портрет');
     }
-    if (leadType.includes('вход')) {
+    if (leadType.includes('вход') || leadType.includes('inbound')) {
       add(
         ['интеграция телефонии'],
         stage === 'new_department' ? 10 : 6,
@@ -322,6 +328,96 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return rules;
+  }
+
+  private normalizeProfile(
+    profile: Record<string, unknown>,
+  ): NormalizedQuestionnaireProfile {
+    const componentTerms = this.getComponentTerms(profile.components);
+    const desiredSalesDepartment = this.toArray(profile.desiredSalesDepartment);
+    const desiredTerms = [...desiredSalesDepartment, ...componentTerms];
+    const canonicalLeadGenerationTypes = this.toArray(
+      profile.leadGenerationTypes,
+    );
+    const leadGenerationTypes =
+      canonicalLeadGenerationTypes.length > 0
+        ? canonicalLeadGenerationTypes
+        : this.toArray(profile.leadGenerationType);
+
+    const rawParts = [
+      profile.productStage,
+      profile.targetResult,
+      profile.desiredResult,
+      profile.components,
+      profile.desiredSalesDepartment,
+    ];
+
+    return {
+      rawText: this.normalize(JSON.stringify(rawParts)),
+      productStageText: this.normalize(String(profile.productStage ?? '')),
+      desiredText: this.normalize(JSON.stringify(desiredTerms)),
+      leadTypeText: this.normalize(JSON.stringify(leadGenerationTypes)),
+      managersCount: Math.max(
+        this.toNumber(profile.calculatedManagersCount),
+        this.inferManagersCount(profile),
+      ),
+      targetRevenue:
+        this.toNumber(profile.targetRevenue) ||
+        this.toNumber(profile.desiredRevenue),
+    };
+  }
+
+  private inferManagersCount(profile: Record<string, unknown>): number {
+    const text = this.normalize(
+      JSON.stringify([profile.targetResult, profile.desiredResult]),
+    );
+    const matches = Array.from(text.matchAll(/(\d+)\s+(?:менеджер|моп)/g));
+
+    return matches.reduce((max, match) => {
+      const count = this.toNumber(match[1]);
+      return count > max ? count : max;
+    }, 0);
+  }
+
+  private getComponentTerms(value: unknown): string[] {
+    if (!this.isPlainObject(value)) return [];
+
+    const components = value as Record<string, unknown>;
+    const terms: string[] = [];
+    const addIfEnabled = (key: string, labels: string[]): void => {
+      if (components[key] === true) terms.push(...labels);
+    };
+
+    addIfEnabled('crm', ['CRM']);
+    addIfEnabled('telephony', ['Телефония']);
+    addIfEnabled('messenger', ['Мессенджер']);
+    addIfEnabled('chatbot', ['Чат-бот']);
+    addIfEnabled('voiceRobot', ['Робот']);
+    addIfEnabled('contactDatabase', ['База контактов']);
+    addIfEnabled('salesManager', ['Менеджер по продажам']);
+    addIfEnabled('trainingSystem', ['Система обучения']);
+    addIfEnabled('analytics', ['Аналитика']);
+    addIfEnabled('scripts', ['Скрипты']);
+    addIfEnabled('callAnalysis', ['Анализ звонков']);
+    addIfEnabled('businessTrainer', ['Бизнес тренер']);
+    addIfEnabled('salesHead', ['РОП']);
+
+    return terms;
+  }
+
+  private toArray(value: unknown): unknown[] {
+    if (Array.isArray(value)) return value;
+    if (value === undefined || value === null || value === '') return [];
+    return [value];
+  }
+
+  private toNumber(value: unknown): number {
+    const numberValue = Number(value || 0);
+    return Number.isFinite(numberValue) ? numberValue : 0;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private getAntiRecommendationReason(

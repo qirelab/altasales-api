@@ -13,6 +13,7 @@ import { Service } from '../services/entities/service.entity';
 import { activePackageWhere } from '../packages/package-visibility';
 import { filterActiveServices } from '../services/service-visibility';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateAdminRecommendationDto } from './dto/create-admin-recommendation.dto';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
@@ -89,6 +90,8 @@ export class RecommendationsService implements OnModuleInit {
     private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(Questionnaire)
+    private readonly questionnaireRepository: Repository<Questionnaire>,
     private readonly scoringService: RecommendationScoringService,
     private readonly relevanceRanker: QuestionnaireRelevanceRankerService,
     private readonly generationJobService: RecommendationGenerationJobService,
@@ -342,10 +345,17 @@ export class RecommendationsService implements OnModuleInit {
     dto: Omit<GenerateRecommendationsDto, 'userId'>,
   ): Promise<RecommendationGenerationJobSummary> {
     await this.ensureUserExists(userId);
+    const request = {
+      ...dto,
+      clientProfile: await this.resolveClientProfile(
+        userId,
+        dto.clientProfile,
+      ),
+    };
 
     return this.generationJobService.startGenerationForUser(
       userId,
-      dto,
+      request,
       (job) => this.runGenerationJob(job),
     );
   }
@@ -363,12 +373,19 @@ export class RecommendationsService implements OnModuleInit {
     dto: GenerateRecommendationsDto,
   ): Promise<GeneratedRecommendationItem[]> {
     await this.ensureUserExists(dto.userId);
+    const effectiveDto: GenerateRecommendationsDto = {
+      ...dto,
+      clientProfile: await this.resolveClientProfile(
+        dto.userId,
+        dto.clientProfile,
+      ),
+    };
 
     const limit = dto.limit ?? 5;
     const services = await this.findRecommendableServices();
-    const context = this.scoringService.buildDiagnosticContext(dto);
+    const context = this.scoringService.buildDiagnosticContext(effectiveDto);
     let ranked = await this.scoringService.generateAiRecommendations(
-      dto,
+      effectiveDto,
       services,
       context,
     );
@@ -381,7 +398,7 @@ export class RecommendationsService implements OnModuleInit {
     }
 
     ranked = this.relevanceRanker.rankRecommendations(
-      dto,
+      effectiveDto,
       services,
       ranked,
       context,
@@ -461,6 +478,59 @@ export class RecommendationsService implements OnModuleInit {
       .orderBy('service.createdAt', 'DESC')
       .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
       .getMany() as Promise<ServiceCandidate[]>;
+  }
+
+  private async resolveClientProfile(
+    userId: string,
+    clientProfile?: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | undefined> {
+    const questionnaire = await this.questionnaireRepository.findOne({
+      where: { userId },
+    });
+    const savedProfile = questionnaire?.answers as
+      | Record<string, unknown>
+      | undefined;
+
+    if (savedProfile && this.hasClientProfile(clientProfile)) {
+      return this.mergeProfiles(savedProfile, clientProfile);
+    }
+
+    return savedProfile ?? clientProfile;
+  }
+
+  private hasClientProfile(
+    clientProfile?: Record<string, unknown>,
+  ): clientProfile is Record<string, unknown> {
+    return Boolean(
+      clientProfile &&
+        typeof clientProfile === 'object' &&
+        Object.keys(clientProfile).length > 0,
+      );
+  }
+
+  private mergeProfiles(
+    base: Record<string, unknown>,
+    override: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = { ...base };
+
+    Object.entries(override).forEach(([key, overrideValue]) => {
+      if (overrideValue === undefined) return;
+
+      const baseValue = result[key];
+      if (this.isPlainObject(baseValue) && this.isPlainObject(overrideValue)) {
+        result[key] = this.mergeProfiles(baseValue, overrideValue);
+        return;
+      }
+
+      result[key] = overrideValue;
+    });
+
+    return result;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private async upsertGeneratedRecommendation(
