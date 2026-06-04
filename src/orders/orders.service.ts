@@ -142,6 +142,16 @@ export class OrdersService {
     return item.package?.name ?? item.service?.name ?? '';
   }
 
+  private assertOrderNotPendingPaymentForManualStatusChange(
+    order: Pick<Order, 'status'>,
+  ): void {
+    if (order.status === OrderStatus.PendingPayment) {
+      throw new BadRequestException(
+        'Статус «Ожидает оплаты» нельзя изменить вручную — он меняется автоматически после оплаты',
+      );
+    }
+  }
+
   private transformOrderFiles(order: Order): OrderDto {
     return {
       id: order.id,
@@ -638,6 +648,7 @@ export class OrdersService {
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
+    this.assertOrderNotPendingPaymentForManualStatusChange(order);
     if (order.item?.packageId) {
       throw new BadRequestException(
         'Статус пакета вычисляется по статусам услуг внутри — обновите статусы услуг',
@@ -662,6 +673,7 @@ export class OrdersService {
     if (!item) {
       throw new NotFoundException(`Order item with id ${itemId} not found`);
     }
+    this.assertOrderNotPendingPaymentForManualStatusChange(item.order);
     if (item.packageId) {
       throw new BadRequestException('Для пакета используйте смену статуса по каждой услуге пакета');
     }
@@ -696,6 +708,7 @@ export class OrdersService {
       if (!item) {
         throw new NotFoundException(`Order item with id ${itemId} not found`);
       }
+      this.assertOrderNotPendingPaymentForManualStatusChange(item.order);
       if (!item.packageId) {
         throw new BadRequestException('Эта позиция заказа не является пакетом');
       }
