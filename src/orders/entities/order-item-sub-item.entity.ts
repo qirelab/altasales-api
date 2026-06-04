@@ -69,6 +69,13 @@ export class OrderItemSubItem {
   @JoinColumn({ name: 'expertPositionOfferingId' })
   expertPositionOffering: ExpertPositionOffering | null;
 
+  @ApiPropertyOptional({
+    example: 15000,
+    description: 'Snapshot of unit price at checkout (expert offerings)',
+  })
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  unitPrice: number | null;
+
   @ApiProperty({ enum: OrderStatus, description: 'Sub-item status' })
   @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.Planned })
   status: OrderStatus;

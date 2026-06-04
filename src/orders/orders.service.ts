@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ExpertsService } from '../experts/experts.service';
 import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
@@ -31,15 +32,6 @@ export interface OrderFileDto {
   source: FileSource;
 }
 
-export interface ExpertPositionCheckoutPayload {
-  positionId: string;
-  executorUserId: string;
-  offeringIds: string[];
-  amount: number;
-  comments?: string;
-  paymentMethod?: CheckoutPaymentMethod;
-}
-
 export interface OrderItemDto {
   id: string;
   orderId: string;
@@ -60,6 +52,7 @@ export interface OrderItemDto {
     service: Service | null;
     expertPositionOfferingId: string | null;
     expertPositionOffering: OrderItemSubItem['expertPositionOffering'] | null;
+    unitPrice: number | null;
     status: OrderStatus;
     files: OrderFileDto[];
   }>;
@@ -110,6 +103,7 @@ export class OrdersService {
     private readonly recommendationRepository: Repository<Recommendation>,
     @InjectRepository(ExpertPositionOffering)
     private readonly expertOfferingRepository: Repository<ExpertPositionOffering>,
+    private readonly expertsService: ExpertsService,
     private readonly paymentService: PaymentService,
     private readonly dataSource: DataSource,
     private readonly balanceService: BalanceService,
@@ -192,6 +186,7 @@ export class OrdersService {
             service: subItem.service,
             expertPositionOfferingId: subItem.expertPositionOfferingId,
             expertPositionOffering: subItem.expertPositionOffering,
+            unitPrice: subItem.unitPrice != null ? Number(subItem.unitPrice) : null,
             status: subItem.status,
             files: (subItem.files ?? []).map((file): OrderFileDto => ({
               id: file.id,
@@ -272,13 +267,74 @@ export class OrdersService {
       const createdOrders: Order[] = [];
       let totalAmount = 0;
       for (const checkoutItem of dto.items) {
-        const hasService = Boolean(checkoutItem.serviceId);
-        const hasPackage = Boolean(checkoutItem.packageId);
-        if (hasService === hasPackage) {
-          throw new BadRequestException('Exactly one of serviceId or packageId is required for each item');
+        const productRefs = [
+          checkoutItem.serviceId,
+          checkoutItem.packageId,
+          checkoutItem.expertPositionId,
+        ].filter(Boolean);
+        if (productRefs.length !== 1) {
+          throw new BadRequestException(
+            'Exactly one of serviceId, packageId, or expertPositionId is required for each item',
+          );
         }
 
         let resolvedAmount = Number(checkoutItem.amount);
+
+        if (checkoutItem.expertPositionId) {
+          const expert = await this.expertsService.resolveCheckoutLines({
+            positionId: checkoutItem.expertPositionId,
+            executorUserId: checkoutItem.executorUserId!,
+            offeringIds: checkoutItem.offeringIds!,
+          });
+          resolvedAmount = expert.amount;
+          if (Math.abs(resolvedAmount - Number(checkoutItem.amount)) > 0.01) {
+            throw new BadRequestException('Order amount does not match selected offering prices');
+          }
+
+          const order = this.orderRepository.create({
+            userId,
+            amount: resolvedAmount,
+            comments: dto.comments ?? undefined,
+            status: OrderStatus.PendingPayment,
+            contractorChatAccess: false,
+          });
+          await queryRunner.manager.save(Order, order);
+
+          const item = this.orderItemRepository.create({
+            orderId: order.id,
+            expertPositionId: expert.positionId,
+            executorUserId: expert.executorUserId,
+            serviceId: null,
+            packageId: null,
+            hours: null,
+            amount: resolvedAmount,
+            status: OrderStatus.PendingPayment,
+          });
+          await queryRunner.manager.save(OrderItem, item);
+
+          const offeringIds = expert.offeringLines.map((line) => line.offeringId);
+          const offerings = await this.expertOfferingRepository.find({
+            where: { id: In(offeringIds), positionId: expert.positionId },
+          });
+          const priceByOfferingId = new Map(
+            expert.offeringLines.map((line) => [line.offeringId, line.unitPrice]),
+          );
+          const subItems = offerings.map((offering) => this.orderItemSubItemRepository.create({
+            orderItemId: item.id,
+            expertPositionOfferingId: offering.id,
+            serviceId: null,
+            unitPrice: priceByOfferingId.get(offering.id)!,
+            status: OrderStatus.PendingPayment,
+          }));
+          if (subItems.length > 0) {
+            await queryRunner.manager.save(OrderItemSubItem, subItems);
+          }
+
+          totalAmount += resolvedAmount;
+          createdOrders.push(order);
+          continue;
+        }
+
         if (checkoutItem.serviceId) {
           const service = await this.serviceRepository.findOne({
             where: { id: checkoutItem.serviceId, deletedAt: IsNull() },
@@ -403,121 +459,6 @@ export class OrdersService {
             orderIds.length === 1
               ? `Оплата заказа №${primaryOrderId}`
               : `Оплата заказов (${orderIds.length} шт.)`,
-        },
-        queryRunner.manager,
-      );
-
-      await queryRunner.commitTransaction();
-      return {
-        orderId: primaryOrderId,
-        orderIds,
-        status: OrderStatus.PendingPayment,
-        paymentMethod: CheckoutPaymentMethod.Robokassa,
-        paymentUrl,
-        params,
-      };
-    } catch (err) {
-      await queryRunner.rollbackTransaction();
-      throw err;
-    } finally {
-      await queryRunner.release();
-    }
-  }
-
-  async checkoutExpertPosition(
-    payload: ExpertPositionCheckoutPayload,
-    userId: string,
-  ): Promise<{
-    orderId: string;
-    orderIds: string[];
-    status: OrderStatus;
-    paymentMethod: CheckoutPaymentMethod;
-    paymentUrl?: string;
-    params?: Record<string, string | number>;
-  }> {
-    const offerings = await this.expertOfferingRepository.find({
-      where: { id: In(payload.offeringIds), positionId: payload.positionId },
-    });
-    if (offerings.length !== payload.offeringIds.length) {
-      throw new BadRequestException('One or more offerings do not belong to the selected position');
-    }
-
-    const resolvedAmount = offerings.reduce((sum, offering) => sum + Number(offering.defaultPrice), 0);
-    if (Math.abs(resolvedAmount - Number(payload.amount)) > 0.01) {
-      throw new BadRequestException('Order amount does not match selected offering prices');
-    }
-
-    const paymentMethod = payload.paymentMethod ?? CheckoutPaymentMethod.Robokassa;
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      const order = this.orderRepository.create({
-        userId,
-        amount: resolvedAmount,
-        comments: payload.comments ?? undefined,
-        status: OrderStatus.PendingPayment,
-        contractorChatAccess: false,
-      });
-      await queryRunner.manager.save(Order, order);
-
-      const item = this.orderItemRepository.create({
-        orderId: order.id,
-        expertPositionId: payload.positionId,
-        executorUserId: payload.executorUserId,
-        serviceId: null,
-        packageId: null,
-        hours: null,
-        amount: resolvedAmount,
-        status: OrderStatus.PendingPayment,
-      });
-      await queryRunner.manager.save(OrderItem, item);
-
-      const subItems = offerings.map((offering) => this.orderItemSubItemRepository.create({
-        orderItemId: item.id,
-        expertPositionOfferingId: offering.id,
-        serviceId: null,
-        status: OrderStatus.PendingPayment,
-      }));
-      await queryRunner.manager.save(OrderItemSubItem, subItems);
-
-      const orderIds = [order.id];
-      const primaryOrderId = order.id;
-
-      if (paymentMethod === CheckoutPaymentMethod.Balance) {
-        await this.balanceService.debitForOrderPayment(
-          userId,
-          resolvedAmount,
-          {
-            orderId: primaryOrderId,
-            description: `Оплата заказа №${primaryOrderId} с внутреннего баланса`,
-          },
-          queryRunner.manager,
-        );
-        await queryRunner.manager.update(Order, { id: primaryOrderId }, { status: OrderStatus.Planned });
-        await queryRunner.manager.update(OrderItem, { orderId: primaryOrderId }, { status: OrderStatus.Planned });
-        await queryRunner.manager.update(
-          OrderItemSubItem,
-          { orderItemId: item.id },
-          { status: OrderStatus.Planned },
-        );
-        await this.cartService.clearAndArchiveActiveCart(userId);
-        await queryRunner.commitTransaction();
-        return {
-          orderId: primaryOrderId,
-          orderIds,
-          status: OrderStatus.Planned,
-          paymentMethod: CheckoutPaymentMethod.Balance,
-        };
-      }
-
-      const { paymentUrl, params } = await this.paymentService.createWithManager(
-        {
-          orderId: primaryOrderId,
-          orderIds,
-          outSum: resolvedAmount,
-          description: `Оплата заказа №${primaryOrderId}`,
         },
         queryRunner.manager,
       );

@@ -16,12 +16,10 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
       CREATE TABLE IF NOT EXISTS "expert_position_offering" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "positionId" uuid NOT NULL,
-        "code" varchar(64) NOT NULL,
         "name" varchar(255) NOT NULL,
         "description" text,
-        "defaultPrice" decimal(12,2) NOT NULL,
         CONSTRAINT "PK_expert_position_offering_id" PRIMARY KEY ("id"),
-        CONSTRAINT "UQ_expert_position_offering_position_code" UNIQUE ("positionId", "code"),
+        CONSTRAINT "UQ_expert_position_offering_position_name" UNIQUE ("positionId", "name"),
         CONSTRAINT "FK_expert_position_offering_position"
           FOREIGN KEY ("positionId") REFERENCES "expert_position"("id") ON DELETE CASCADE
       )
@@ -39,6 +37,22 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
           FOREIGN KEY ("positionId") REFERENCES "expert_position"("id") ON DELETE CASCADE,
         CONSTRAINT "FK_expert_position_member_user"
           FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE
+      )
+    `);
+
+    await queryRunner.query(`
+      CREATE TABLE IF NOT EXISTS "expert_position_member_offering" (
+        "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
+        "memberId" uuid NOT NULL,
+        "offeringId" uuid NOT NULL,
+        "price" decimal(12,2) NOT NULL,
+        CONSTRAINT "PK_expert_position_member_offering_id" PRIMARY KEY ("id"),
+        CONSTRAINT "UQ_expert_position_member_offering_member_offering"
+          UNIQUE ("memberId", "offeringId"),
+        CONSTRAINT "FK_expert_position_member_offering_member"
+          FOREIGN KEY ("memberId") REFERENCES "expert_position_member"("id") ON DELETE CASCADE,
+        CONSTRAINT "FK_expert_position_member_offering_offering"
+          FOREIGN KEY ("offeringId") REFERENCES "expert_position_offering"("id") ON DELETE CASCADE
       )
     `);
 
@@ -107,7 +121,8 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
 
     await queryRunner.query(`
       ALTER TABLE "order_item_sub_item"
-      ADD COLUMN IF NOT EXISTS "expertPositionOfferingId" uuid
+      ADD COLUMN IF NOT EXISTS "expertPositionOfferingId" uuid,
+      ADD COLUMN IF NOT EXISTS "unitPrice" decimal(12,2)
     `);
 
     await queryRunner.query(`
@@ -195,20 +210,20 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
         )
         RETURNING "id" INTO it_id;
 
-        INSERT INTO "expert_position_offering" ("positionId", "code", "name", "description", "defaultPrice")
+        INSERT INTO "expert_position_offering" ("positionId", "name", "description")
         VALUES
-          (marketer_id, 'consultation', 'Консультация', 'Разовая консультация маркетолога', 15000),
-          (marketer_id, 'audit', 'Аудит', 'Аудит маркетинговых процессов и каналов', 45000),
-          (marketer_id, 'support', 'Сопровождение', 'Сопровождение маркетинговых активностей', 120000),
-          (lawyer_id, 'consultation', 'Консультация', 'Разовая юридическая консультация', 20000),
-          (lawyer_id, 'audit', 'Аудит', 'Аудит договорной базы и рисков', 60000),
-          (lawyer_id, 'support', 'Сопровождение', 'Юридическое сопровождение сделок', 150000),
-          (accountant_id, 'consultation', 'Консультация', 'Разовая консультация бухгалтера', 12000),
-          (accountant_id, 'audit', 'Аудит', 'Аудит учёта и отчётности', 35000),
-          (accountant_id, 'support', 'Сопровождение', 'Ведение и сопровождение учёта', 90000),
-          (it_id, 'consultation', 'Консультация', 'Разовая IT-консультация', 18000),
-          (it_id, 'audit', 'Аудит', 'Аудит инфраструктуры и процессов', 50000),
-          (it_id, 'support', 'Сопровождение', 'Техническое сопровождение проекта', 130000);
+          (marketer_id, 'Консультация', 'Разовая консультация маркетолога'),
+          (marketer_id, 'Аудит', 'Аудит маркетинговых процессов и каналов'),
+          (marketer_id, 'Сопровождение', 'Сопровождение маркетинговых активностей'),
+          (lawyer_id, 'Консультация', 'Разовая юридическая консультация'),
+          (lawyer_id, 'Аудит', 'Аудит договорной базы и рисков'),
+          (lawyer_id, 'Сопровождение', 'Юридическое сопровождение сделок'),
+          (accountant_id, 'Консультация', 'Разовая консультация бухгалтера'),
+          (accountant_id, 'Аудит', 'Аудит учёта и отчётности'),
+          (accountant_id, 'Сопровождение', 'Ведение и сопровождение учёта'),
+          (it_id, 'Консультация', 'Разовая IT-консультация'),
+          (it_id, 'Аудит', 'Аудит инфраструктуры и процессов'),
+          (it_id, 'Сопровождение', 'Техническое сопровождение проекта');
 
         INSERT INTO "expert_position_member" ("positionId", "userId")
         SELECT pos."id", ranked."userId"
@@ -228,6 +243,39 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
           FROM "expert_position"
         ) pos ON pos.pos_index = ranked.pos_index
         ON CONFLICT ("positionId", "userId") DO NOTHING;
+
+        INSERT INTO "expert_position_member_offering" ("memberId", "offeringId", "price")
+        SELECT m."id", o."id",
+          CASE p."name"
+            WHEN 'Маркетолог' THEN
+              CASE o."name"
+                WHEN 'Консультация' THEN 15000
+                WHEN 'Аудит' THEN 45000
+                WHEN 'Сопровождение' THEN 120000
+              END
+            WHEN 'Юрист' THEN
+              CASE o."name"
+                WHEN 'Консультация' THEN 20000
+                WHEN 'Аудит' THEN 60000
+                WHEN 'Сопровождение' THEN 150000
+              END
+            WHEN 'Бухгалтер' THEN
+              CASE o."name"
+                WHEN 'Консультация' THEN 12000
+                WHEN 'Аудит' THEN 35000
+                WHEN 'Сопровождение' THEN 90000
+              END
+            WHEN 'IT-специалист' THEN
+              CASE o."name"
+                WHEN 'Консультация' THEN 18000
+                WHEN 'Аудит' THEN 50000
+                WHEN 'Сопровождение' THEN 130000
+              END
+          END
+        FROM "expert_position_member" m
+        INNER JOIN "expert_position" p ON p."id" = m."positionId"
+        INNER JOIN "expert_position_offering" o ON o."positionId" = m."positionId"
+        ON CONFLICT ("memberId", "offeringId") DO NOTHING;
       END $$;
     `);
   }
@@ -246,7 +294,9 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
       ALTER TABLE "order_item_sub_item" DROP CONSTRAINT IF EXISTS "FK_order_item_sub_item_expertPositionOfferingId"
     `);
     await queryRunner.query(`
-      ALTER TABLE "order_item_sub_item" DROP COLUMN IF EXISTS "expertPositionOfferingId"
+      ALTER TABLE "order_item_sub_item"
+      DROP COLUMN IF EXISTS "expertPositionOfferingId",
+      DROP COLUMN IF EXISTS "unitPrice"
     `);
     await queryRunner.query(`
       DELETE FROM "order_item_sub_item" WHERE "serviceId" IS NULL
@@ -293,6 +343,7 @@ export class ExpertPositionsModel1780200000000 implements MigrationInterface {
       END $$;
     `);
 
+    await queryRunner.query(`DROP TABLE IF EXISTS "expert_position_member_offering"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "expert_position_member"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "expert_position_offering"`);
     await queryRunner.query(`DROP TABLE IF EXISTS "expert_position"`);

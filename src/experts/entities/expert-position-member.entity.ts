@@ -4,12 +4,14 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   Unique,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { ExpertPosition } from './expert-position.entity';
+import { ExpertPositionMemberOffering } from './expert-position-member-offering.entity';
 
 @Entity('expert_position_member')
 @Unique(['positionId', 'userId'])
@@ -31,6 +33,9 @@ export class ExpertPositionMember {
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;
+
+  @OneToMany(() => ExpertPositionMemberOffering, (entry) => entry.member, { cascade: true })
+  memberOfferings: ExpertPositionMemberOffering[];
 
   @CreateDateColumn()
   createdAt: Date;
