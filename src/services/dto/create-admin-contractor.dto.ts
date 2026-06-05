@@ -9,7 +9,7 @@ export class CreateAdminContractorDto {
 
   @ApiPropertyOptional({ example: 'https://example.com/contractor.jpg', description: 'Contractor image URL' })
   @IsOptional()
-  @IsUrl()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
 
   @ApiProperty({ example: 2500, description: 'Contractor hourly rate' })

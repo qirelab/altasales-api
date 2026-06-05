@@ -4,8 +4,9 @@ import { dirname, extname, join } from 'path';
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  CATALOG_IMAGE_FORMATS_LABEL,
   CATALOG_IMAGE_MAX_BYTES,
-  CATALOG_IMAGE_MIME_TYPES,
+  isCatalogImageAllowed,
   type CatalogStorageFolder,
 } from './catalog-storage.constants';
 
@@ -49,8 +50,8 @@ export class CatalogStorageService {
     if (!file) {
       throw new BadRequestException('Файл не предоставлен');
     }
-    if (!CATALOG_IMAGE_MIME_TYPES.has(file.mimetype)) {
-      throw new BadRequestException('Допустимые форматы: JPEG, PNG, WebP');
+    if (!isCatalogImageAllowed(file)) {
+      throw new BadRequestException(`Допустимые форматы: ${CATALOG_IMAGE_FORMATS_LABEL}`);
     }
     if (file.size > CATALOG_IMAGE_MAX_BYTES) {
       throw new BadRequestException('Максимальный размер изображения — 5 МБ');
@@ -62,7 +63,14 @@ export class CatalogStorageService {
 
   private resolveExtension(file: Express.Multer.File): string {
     const fromName = extname(file.originalname).toLowerCase();
-    if (fromName === '.jpg' || fromName === '.jpeg' || fromName === '.png' || fromName === '.webp') {
+    if (
+      fromName === '.jpg'
+      || fromName === '.jpeg'
+      || fromName === '.png'
+      || fromName === '.webp'
+      || fromName === '.heic'
+      || fromName === '.heif'
+    ) {
       return fromName === '.jpg' ? '.jpeg' : fromName;
     }
 
@@ -70,6 +78,8 @@ export class CatalogStorageService {
       'image/jpeg': '.jpeg',
       'image/png': '.png',
       'image/webp': '.webp',
+      'image/heic': '.heic',
+      'image/heif': '.heif',
     };
     return byMime[file.mimetype] ?? '.jpeg';
   }
