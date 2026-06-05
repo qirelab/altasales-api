@@ -12,6 +12,7 @@ import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { UpdateQuestionnaireAnswersDto } from './dto/update-questionnaire-answers.dto';
 import { Questionnaire, type QuestionnaireAnswers } from './entities/questionnaire.entity';
 import { UsersService } from '../users/users.service';
+import { UserRole } from '../users/entities/user-role.enum';
 import { MailService } from '../mail/mail.service';
 
 @Injectable()
@@ -46,16 +47,19 @@ export class QuestionnairesService {
     this.scheduleRecommendationGeneration(saved, userId);
 
     try {
-      const alreadyCredited = await this.balanceService.hasRegistrationGift(userId);
-      if (!alreadyCredited) {
-        await this.balanceService.creditRegistrationGift(userId);
+      const user = await this.usersService.findOne(userId);
+      if (user.role === UserRole.USER) {
+        const alreadyCredited = await this.balanceService.hasRegistrationGift(userId);
+        if (!alreadyCredited) {
+          await this.balanceService.creditRegistrationGift(userId);
 
-        const balance = await this.balanceService.getBalance(userId);
-        this.websocketGateway.emitToUser(userId, 'balance:gift_credited', {
-          amount: REGISTRATION_GIFT_RUB,
-          balance,
-        });
-        this.logger.log(`Questionnaire gift credited for user ${userId}`);
+          const balance = await this.balanceService.getBalance(userId);
+          this.websocketGateway.emitToUser(userId, 'balance:gift_credited', {
+            amount: REGISTRATION_GIFT_RUB,
+            balance,
+          });
+          this.logger.log(`Questionnaire gift credited for user ${userId}`);
+        }
       }
     } catch (error) {
       this.logger.error(
