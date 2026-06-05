@@ -352,6 +352,43 @@ describe('QuestionnaireRelevanceRankerService', () => {
     ]);
   });
 
+  it('does not cap questionnaire recommendations at five when no limit is provided', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'new',
+          leadGenerationTypes: ['inbound'],
+          desiredResult: {
+            period: '6m',
+            description: 'Построить отдел продаж с нуля',
+          },
+          targetRevenue: 5000000,
+          components: components({
+            telephony: true,
+            messenger: true,
+            salesManager: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+    );
+
+    expect(result.length).toBeGreaterThan(5);
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining([
+        'from-zero',
+        'crm-start',
+        'turnkey-hiring',
+        'telephony',
+        'messenger',
+      ]),
+    );
+  });
+
   it('keeps a varied top list instead of filling it with one service group', () => {
     const result = ranker.rankRecommendations(
       {

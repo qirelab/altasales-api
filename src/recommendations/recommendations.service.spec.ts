@@ -188,7 +188,7 @@ describe('RecommendationsService', () => {
       [],
       [],
       'context',
-      5,
+      undefined,
     );
   });
 });
