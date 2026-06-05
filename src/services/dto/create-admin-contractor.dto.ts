@@ -7,6 +7,14 @@ export class CreateAdminContractorDto {
   @IsNotEmpty()
   name: string;
 
+  @ApiProperty({
+    example: '550e8400-e29b-41d4-a716-446655440000',
+    description: 'Category ID (same as for services)',
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  categoryId: string;
+
   @ApiPropertyOptional({ example: 'https://example.com/contractor.jpg', description: 'Contractor image URL' })
   @IsOptional()
   @IsUrl()
