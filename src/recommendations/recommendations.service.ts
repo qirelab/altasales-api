@@ -381,7 +381,7 @@ export class RecommendationsService implements OnModuleInit {
       ),
     };
 
-    const limit = dto.limit ?? 5;
+    const limit = dto.limit;
     const services = await this.findRecommendableServices();
     const context = this.scoringService.buildDiagnosticContext(effectiveDto);
     let ranked = await this.scoringService.generateAiRecommendations(

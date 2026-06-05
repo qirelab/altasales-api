@@ -37,7 +37,6 @@ export class GenerateRecommendationsDto {
 
   @ApiPropertyOptional({
     description: 'Maximum number of recommendations to return',
-    default: 5,
     minimum: 1,
     maximum: 20,
   })

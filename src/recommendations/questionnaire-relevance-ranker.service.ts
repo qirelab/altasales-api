@@ -107,8 +107,9 @@ export class QuestionnaireRelevanceRankerService {
     services: ServiceCandidate[],
     ranked: GeneratedRecommendationItem[],
     context: string,
-    limit = 5,
+    limit?: number,
   ): GeneratedRecommendationItem[] {
+    const maxItems = limit ?? Number.POSITIVE_INFINITY;
     const profile = dto.clientProfile ?? {};
     const normalizedProfile = this.normalizeProfile(profile);
     const stage = this.detectStage(normalizedProfile);
@@ -117,23 +118,29 @@ export class QuestionnaireRelevanceRankerService {
     const rankedById = new Map(
       ranked.map((item, index) => [item.serviceId, { item, index }]),
     );
+    let defaultItems: GeneratedRecommendationItem[] = [];
 
     if (stage === 'new_department') {
-      const defaultItems = this.buildNewDepartmentDefaultRecommendations(
+      defaultItems = this.buildNewDepartmentDefaultRecommendations(
         services,
         rankedById,
         context,
-        limit,
+        maxItems,
       );
 
-      if (defaultItems.length >= limit) {
+      if (defaultItems.length >= maxItems) {
         return this.normalizePriorities(defaultItems);
       }
     }
 
-    const rankedCandidates: GeneratedRecommendationItem[] = [];
+    const defaultServiceIds = new Set(
+      defaultItems.map((item) => item.serviceId),
+    );
+    const rankedCandidates: GeneratedRecommendationItem[] = [...defaultItems];
 
     for (const service of services) {
+      if (defaultServiceIds.has(service.id)) continue;
+
       const serviceText = this.normalizeCandidateText(service);
       if (this.getAntiRecommendationReason(serviceText, stage, desiredText)) {
         continue;
@@ -173,7 +180,7 @@ export class QuestionnaireRelevanceRankerService {
 
     const diverse = this.applyDiversity(
       rankedCandidates.sort((a, b) => b.score - a.score),
-      limit,
+      maxItems,
     );
 
     return this.normalizePriorities(diverse);
