@@ -1,8 +1,13 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import * as fsPromises from 'fs/promises';
 import { UserRole } from '../users/entities/user-role.enum';
 import { TranscriptionJob } from './entities/transcription-job.entity';
 import { TranscriptionJobStatus } from './enums/transcription-job-status.enum';
 import { TranscriptionJobsService } from './transcription-jobs.service';
+
+jest.mock('fs/promises', () => ({
+  rm: jest.fn(),
+}));
 
 const USER = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -25,6 +30,17 @@ const ADMIN = {
 const JOB_ID = '00000000-0000-4000-8000-000000000010';
 
 describe('TranscriptionJobsService', () => {
+  const rmMock = fsPromises.rm as jest.MockedFunction<typeof fsPromises.rm>;
+
+  beforeEach(() => {
+    rmMock.mockReset();
+    rmMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('creates a queued job for the current user and starts async processing', async () => {
     const { service, repository, audioProcessor } = createService();
     const file = audioFile('call.mp3', 'audio/mpeg');
@@ -87,6 +103,7 @@ describe('TranscriptionJobsService', () => {
       expect.objectContaining({ id: JOB_ID, userId: USER.id }),
       file,
     );
+    expect(rmMock).not.toHaveBeenCalled();
   });
 
   it('allows en-US language values', async () => {
@@ -136,6 +153,61 @@ describe('TranscriptionJobsService', () => {
       expect(videoProcessor.runAsync).not.toHaveBeenCalled();
     },
   );
+
+  it('cleans uploaded temp video when language validation fails before processing starts', async () => {
+    const { service, repository, videoProcessor } = createService();
+    const file = videoFileFromPath('demo.mp4', 'video/mp4', '/tmp/upload/demo.mp4');
+
+    await expect(
+      service.createFromVideoUpload(USER, file, { language: 'ru' }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(videoProcessor.runAsync).not.toHaveBeenCalled();
+    expect(rmMock).toHaveBeenCalledWith('/tmp/upload/demo.mp4', { force: true });
+  });
+
+  it('cleans uploaded temp video when job persistence fails before processing starts', async () => {
+    const { service, repository, videoProcessor } = createService();
+    const persistenceError = new Error('database unavailable');
+    repository.save.mockRejectedValueOnce(persistenceError);
+    const file = videoFileFromPath('demo.mp4', 'video/mp4', '/tmp/upload/demo.mp4');
+
+    await expect(
+      service.createFromVideoUpload(USER, file, { language: 'ru-RU' }),
+    ).rejects.toBe(persistenceError);
+
+    expect(videoProcessor.runAsync).not.toHaveBeenCalled();
+    expect(rmMock).toHaveBeenCalledWith('/tmp/upload/demo.mp4', { force: true });
+  });
+
+  it('does not mask pre-processing video errors when temp cleanup fails', async () => {
+    const { service } = createService();
+    rmMock.mockRejectedValueOnce(new Error('cleanup failed with /tmp/upload/demo.mp4'));
+
+    await expect(
+      service.createFromVideoUpload(
+        USER,
+        videoFileFromPath('demo.mp4', 'video/mp4', '/tmp/upload/demo.mp4'),
+        { language: 'ru' },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('does not clean audio uploads on validation failure', async () => {
+    const { service } = createService();
+
+    await expect(
+      service.createFromUpload(
+        USER,
+        audioFileFromPath('call.mp3', 'audio/mpeg', '/tmp/upload/call.mp3'),
+        { language: 'ru' },
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(rmMock).not.toHaveBeenCalled();
+  });
 
   it('allows owners and admins to read job metadata', async () => {
     const job = jobEntity({ userId: USER.id });
@@ -259,5 +331,31 @@ function videoFile(
     mimetype,
     size: buffer.length,
     buffer,
+  } as Express.Multer.File;
+}
+
+function audioFileFromPath(
+  originalname: string,
+  mimetype: string,
+  path: string,
+): Express.Multer.File {
+  return {
+    originalname,
+    mimetype,
+    size: 1024,
+    path,
+  } as Express.Multer.File;
+}
+
+function videoFileFromPath(
+  originalname: string,
+  mimetype: string,
+  path: string,
+): Express.Multer.File {
+  return {
+    originalname,
+    mimetype,
+    size: 1024,
+    path,
   } as Express.Multer.File;
 }

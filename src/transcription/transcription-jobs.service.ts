@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as fsPromises from 'fs/promises';
 import { Repository } from 'typeorm';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../users/entities/user-role.enum';
@@ -40,14 +41,24 @@ export class TranscriptionJobsService {
     });
   }
 
-  createFromVideoUpload(
+  async createFromVideoUpload(
     user: CurrentUserData,
     file: Express.Multer.File,
     input: { language?: string },
   ): Promise<TranscriptionCreateJobResponseDto> {
-    return this.createJob(user, file, input, (job) => {
-      this.videoTranscriptionService.runAsync(job, file);
-    });
+    let processingStarted = false;
+
+    try {
+      return await this.createJob(user, file, input, (job) => {
+        this.videoTranscriptionService.runAsync(job, file);
+        processingStarted = true;
+      });
+    } catch (error) {
+      if (!processingStarted) {
+        await this.cleanupUploadedVideo(file);
+      }
+      throw error;
+    }
   }
 
   async getJobForUser(
@@ -154,5 +165,17 @@ export class TranscriptionJobsService {
     }
 
     return resolved;
+  }
+
+  private async cleanupUploadedVideo(file: Express.Multer.File): Promise<void> {
+    if (!file.path) {
+      return;
+    }
+
+    try {
+      await fsPromises.rm(file.path, { force: true });
+    } catch {
+      // Cleanup failures must not mask validation or persistence errors.
+    }
   }
 }

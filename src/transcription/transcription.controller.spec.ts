@@ -7,9 +7,11 @@ import {
 import { SessionGuard } from '../auth/guards/session.guard';
 import {
   getMaxVideoSizeBytes,
+  audioUploadOptions,
   isSupportedTranscriptionAudioFile,
   isSupportedTranscriptionVideoFile,
   TranscriptionController,
+  videoUploadOptions,
 } from './transcription.controller';
 
 describe('Transcription upload validation', () => {
@@ -87,5 +89,15 @@ describe('Transcription upload validation', () => {
     };
 
     expect(getMaxVideoSizeBytes()).toBe(321 * 1024 * 1024);
+  });
+
+  it('keeps audio uploads memory-based but stores video uploads on disk', () => {
+    expect(audioUploadOptions.storage).toBeUndefined();
+    expect(videoUploadOptions.storage).toEqual(
+      expect.objectContaining({
+        _handleFile: expect.any(Function),
+        _removeFile: expect.any(Function),
+      }),
+    );
   });
 });

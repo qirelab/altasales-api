@@ -1,6 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { lookup } from 'dns/promises';
+import {
+  request as httpRequest,
+  IncomingMessage,
+  RequestOptions as HttpRequestOptions,
+} from 'http';
+import {
+  request as httpsRequest,
+  RequestOptions as HttpsRequestOptions,
+} from 'https';
 import { isIP } from 'net';
+import { Readable } from 'stream';
 import { KnowledgeExtractedTextBlock } from './knowledge-extraction.service';
 import { KnowledgeHtmlExtractionService } from './knowledge-html-extraction.service';
 
@@ -65,9 +75,9 @@ export class KnowledgeUrlSourceService {
     );
 
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-      await this.validateResolvedHost(currentUrl);
+      const resolvedAddress = await this.validateResolvedHost(currentUrl);
 
-      const response = await this.safeFetch(currentUrl);
+      const response = await this.safeFetch(currentUrl, resolvedAddress);
       const responseUrl = response.url || currentUrl.href;
 
       if (!this.isRedirect(response.status)) {
@@ -128,7 +138,7 @@ export class KnowledgeUrlSourceService {
     }
   }
 
-  private async validateResolvedHost(url: URL): Promise<void> {
+  private async validateResolvedHost(url: URL): Promise<string> {
     const addresses = await this.resolveHost(url.hostname).catch(() => {
       throw new BadRequestException('Knowledge URL host could not be resolved');
     });
@@ -136,9 +146,11 @@ export class KnowledgeUrlSourceService {
     if (!addresses.length || addresses.some((address) => !this.isPublicIp(address))) {
       throw new BadRequestException('Knowledge URL host is not allowed');
     }
+
+    return addresses[0];
   }
 
-  private async safeFetch(url: URL): Promise<Response> {
+  private async safeFetch(url: URL, resolvedAddress: string): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -149,11 +161,12 @@ export class KnowledgeUrlSourceService {
     );
 
     try {
-      return await this.fetchUrl(url.href, {
+      return await this.fetchUrl(url, resolvedAddress, {
         method: 'GET',
         redirect: 'manual',
         signal: controller.signal,
         headers: {
+          Host: url.host,
           Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
         },
       });
@@ -314,10 +327,81 @@ export class KnowledgeUrlSourceService {
   }
 
   private async fetchUrl(
-    input: Parameters<typeof fetch>[0],
+    url: URL,
+    resolvedAddress: string,
     init: Parameters<typeof fetch>[1],
   ): Promise<Response> {
-    return fetch(input, init);
+    return new Promise((resolve, reject) => {
+      const requestOptions: HttpRequestOptions = {
+        protocol: url.protocol,
+        hostname: resolvedAddress,
+        family: isIP(resolvedAddress) || undefined,
+        port: url.port || undefined,
+        path: `${url.pathname}${url.search}`,
+        method: init?.method ?? 'GET',
+        headers: init?.headers as Record<string, string>,
+        signal: init?.signal ?? undefined,
+      };
+      const onResponse = (message: IncomingMessage) => {
+        const remoteAddress = message.socket.remoteAddress;
+        if (!remoteAddress || !this.isPublicIp(remoteAddress)) {
+          message.destroy();
+          reject(new BadRequestException('Knowledge URL host is not allowed'));
+          return;
+        }
+
+        resolve(this.toFetchResponse(message));
+      };
+      const request = url.protocol === 'https:'
+        ? httpsRequest(
+          this.requestOptionsForProtocol(url, requestOptions) as HttpsRequestOptions,
+          onResponse,
+        )
+        : httpRequest(requestOptions, onResponse);
+
+      request.on('error', reject);
+      request.end();
+    });
+  }
+
+  private requestOptionsForProtocol(
+    url: URL,
+    requestOptions: HttpRequestOptions,
+  ): HttpRequestOptions | HttpsRequestOptions {
+    if (url.protocol !== 'https:') {
+      return requestOptions;
+    }
+
+    return {
+      ...requestOptions,
+      servername: this.tlsServerName(url),
+    };
+  }
+
+  private toFetchResponse(message: IncomingMessage): Response {
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(message.headers)) {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          headers.append(name, item);
+        }
+      } else if (value !== undefined) {
+        headers.set(name, String(value));
+      }
+    }
+
+    return new Response(Readable.toWeb(message) as ReadableStream, {
+      status: message.statusCode ?? 0,
+      statusText: message.statusMessage,
+      headers,
+    });
+  }
+
+  private tlsServerName(url: URL): string | undefined {
+    if (url.protocol !== 'https:') {
+      return undefined;
+    }
+    return url.hostname.replace(/^\[|\]$/g, '');
   }
 
   private extractEmbeddedIpv4(bytes: number[]): string | undefined {

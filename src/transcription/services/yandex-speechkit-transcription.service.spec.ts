@@ -17,6 +17,7 @@ describe('YandexSpeechKitTranscriptionService', () => {
       TRANSCRIPTION_ENABLED: 'true',
       TRANSCRIPTION_OPERATION_TIMEOUT_MS: '1000',
       TRANSCRIPTION_POLL_INTERVAL_MS: '1',
+      TRANSCRIPTION_PROVIDER_REQUEST_TIMEOUT_MS: '1000',
       YANDEX_SPEECHKIT_API_KEY: 'speechkit-key',
       YANDEX_SPEECHKIT_FOLDER_ID: 'folder-id',
     };
@@ -130,6 +131,40 @@ describe('YandexSpeechKitTranscriptionService', () => {
     expect(loggerErrorSpy).not.toHaveBeenCalled();
   });
 
+  it('makes every provider HTTP request abortable', async () => {
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: true }))
+      .mockResolvedValueOnce(
+        textResponse(
+          JSON.stringify({
+            final: {
+              alternatives: [
+                {
+                  text: 'Abortable calls',
+                  startTimeMs: '0',
+                  endTimeMs: '500',
+                },
+              ],
+            },
+          }),
+        ),
+      );
+    const { service } = createService(fetcher);
+
+    await service.run(jobEntity(), audioFile('call.mp3', 'audio/mpeg'));
+
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetcher.mock.calls) {
+      expect(init).toEqual(
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        }),
+      );
+    }
+  });
+
   it('normalizes direct top-level finalRefinement responses from current API', async () => {
     const fetcher = jest
       .fn()
@@ -236,6 +271,118 @@ describe('YandexSpeechKitTranscriptionService', () => {
     expect(
       repository.save.mock.invocationCallOrder.at(-1),
     ).toBeLessThan(storage.deleteObject.mock.invocationCallOrder[0]);
+  });
+
+  it('maps per-request provider aborts to a safe timeout without leaking raw details', async () => {
+    jest.useFakeTimers();
+    process.env.TRANSCRIPTION_PROVIDER_REQUEST_TIMEOUT_MS = '5';
+    const fetcher = jest.fn((_url, init: RequestInit) => (
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(Object.assign(
+            new Error('raw provider body https://stt.api.cloud.yandex.net secret'),
+            { name: 'AbortError' },
+          ));
+        });
+      })
+    ));
+    const { service, repository } = createService(fetcher);
+
+    const runPromise = service.run(jobEntity(), audioFile('call.wav', 'audio/wav'));
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(5);
+    await runPromise;
+    jest.useRealTimers();
+
+    expect(repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: TranscriptionJobStatus.FAILED,
+        errorCode: 'TRANSCRIPTION_PROVIDER_TIMEOUT',
+        safeErrorMessage: 'Transcription failed',
+      }),
+    );
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        message: expect.stringContaining('raw provider body'),
+        url: expect.stringContaining('stt.api.cloud.yandex.net'),
+      }),
+    );
+  });
+
+  it('maps timeout during provider JSON body reads to a safe timeout', async () => {
+    jest.useFakeTimers();
+    process.env.TRANSCRIPTION_PROVIDER_REQUEST_TIMEOUT_MS = '5';
+    const fetcher = jest.fn((_url, init: RequestInit) => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: jest.fn(() => new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(Object.assign(
+            new Error('raw stalled json body https://stt.api.cloud.yandex.net secret'),
+            { name: 'AbortError' },
+          ));
+        });
+      })),
+    } as unknown as Response));
+    const { service, repository } = createService(fetcher);
+
+    const runPromise = service.run(jobEntity(), audioFile('call.wav', 'audio/wav'));
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(5);
+    await runPromise;
+    jest.useRealTimers();
+
+    expect(repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: TranscriptionJobStatus.FAILED,
+        errorCode: 'TRANSCRIPTION_PROVIDER_TIMEOUT',
+        safeErrorMessage: 'Transcription failed',
+      }),
+    );
+    expect(loggerErrorSpy).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        message: expect.stringContaining('raw stalled json body'),
+        url: expect.stringContaining('stt.api.cloud.yandex.net'),
+      }),
+    );
+  });
+
+  it('maps timeout during provider text body reads to a safe timeout', async () => {
+    jest.useFakeTimers();
+    process.env.TRANSCRIPTION_PROVIDER_REQUEST_TIMEOUT_MS = '5';
+    const fetcher = jest
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: false }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'operation-1', done: true }))
+      .mockImplementationOnce((_url, init: RequestInit) => Promise.resolve({
+        ok: true,
+        status: 200,
+        text: jest.fn(() => new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(Object.assign(
+              new Error('raw stalled transcript body secret'),
+              { name: 'AbortError' },
+            ));
+          });
+        })),
+      } as unknown as Response));
+    const { service, repository } = createService(fetcher);
+
+    const runPromise = service.run(jobEntity(), audioFile('call.wav', 'audio/wav'));
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(5);
+    await runPromise;
+    jest.useRealTimers();
+
+    expect(repository.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: TranscriptionJobStatus.FAILED,
+        errorCode: 'TRANSCRIPTION_PROVIDER_TIMEOUT',
+        safeErrorMessage: 'Transcription failed',
+      }),
+    );
   });
 
   it('maps empty recognition results to safe invalid response failure', async () => {

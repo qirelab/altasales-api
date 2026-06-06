@@ -47,8 +47,29 @@ describe('KnowledgeUrlSourceService', () => {
     expect(result.blocks[0].text).toContain('Useful fetched page content');
     expect(resolveHost).toHaveBeenCalledWith('example.com');
     expect(fetcher).toHaveBeenCalledWith(
-      'https://example.com/page',
+      new URL('https://example.com/page'),
+      '93.184.216.34',
       expect.objectContaining({ redirect: 'manual' }),
+    );
+  });
+
+  it('pins the outbound request to the DNS result that passed SSRF validation', async () => {
+    resolveHost.mockResolvedValueOnce(['93.184.216.34']);
+
+    await service.acquire('https://example.com/rebinding-check');
+
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL('https://example.com/rebinding-check'),
+      '93.184.216.34',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Host: 'example.com',
+        }),
+      }),
+    );
+    expect(fetcher).not.toHaveBeenCalledWith(
+      'https://example.com/rebinding-check',
+      expect.anything(),
     );
   });
 

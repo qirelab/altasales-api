@@ -13,7 +13,11 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import { ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { randomUUID } from 'crypto';
+import { mkdirSync } from 'fs';
+import { tmpdir } from 'os';
 import { extname } from 'path';
+import { diskStorage } from 'multer';
 import {
   CurrentUser,
   type CurrentUserData,
@@ -48,6 +52,10 @@ function getMaxAudioSizeBytes(): number {
   return sizeMb * 1024 * 1024;
 }
 
+function getVideoTempBaseDir(): string {
+  return process.env.TRANSCRIPTION_VIDEO_TEMP_DIR?.trim() || tmpdir();
+}
+
 export function getMaxVideoSizeBytes(): number {
   const parsed = Number(process.env.TRANSCRIPTION_MAX_VIDEO_SIZE_MB);
   const sizeMb = Number.isFinite(parsed) && parsed > 0
@@ -66,7 +74,7 @@ export function isSupportedTranscriptionVideoFile(file: UploadFileMetadata): boo
   return SUPPORTED_VIDEO_TYPES.get(file.mimetype)?.has(extension) ?? false;
 }
 
-const audioUploadOptions = {
+export const audioUploadOptions = {
   limits: { fileSize: getMaxAudioSizeBytes() },
   fileFilter: (_req, file, cb) => {
     if (isSupportedTranscriptionAudioFile(file)) {
@@ -78,7 +86,22 @@ const audioUploadOptions = {
   },
 } satisfies MulterOptions;
 
-const videoUploadOptions = {
+export const videoUploadOptions = {
+  storage: diskStorage({
+    destination: (_req, _file, cb) => {
+      try {
+        const baseDir = getVideoTempBaseDir();
+        mkdirSync(baseDir, { recursive: true });
+        cb(null, baseDir);
+      } catch (error) {
+        cb(error as Error, '');
+      }
+    },
+    filename: (_req, file, cb) => {
+      const extension = extname(file.originalname).toLowerCase();
+      cb(null, `${randomUUID()}${extension}`);
+    },
+  }),
   limits: { fileSize: getMaxVideoSizeBytes() },
   fileFilter: (_req, file, cb) => {
     if (isSupportedTranscriptionVideoFile(file)) {

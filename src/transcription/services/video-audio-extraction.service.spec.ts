@@ -77,6 +77,35 @@ describe('VideoAudioExtractionService', () => {
     expect(await fsPromises.readdir(tempParent)).toEqual([]);
   });
 
+  it('uses the uploaded video temp file path without buffering the original video', async () => {
+    const uploadDir = await fsPromises.mkdtemp(join(tempParent, 'upload-'));
+    const uploadPath = join(uploadDir, 'safe-random-name.mp4');
+    await fsPromises.writeFile(uploadPath, 'video on disk');
+    execFileMock.mockImplementationOnce(async (_command, args, _options, callback) => {
+      await fsPromises.writeFile(args[args.length - 1], 'ogg audio');
+      callback(null, '', '');
+    });
+    const service = new VideoAudioExtractionService();
+
+    const result = await service.extractAudio(
+      videoFileFromPath('demo.mp4', 'video/mp4', uploadPath),
+    );
+
+    expect(execFileMock).toHaveBeenCalledWith(
+      '/usr/local/bin/ffmpeg',
+      expect.arrayContaining(['-i', uploadPath]),
+      expect.anything(),
+      expect.any(Function),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        originalname: 'extracted-audio.ogg',
+        mimetype: 'audio/ogg',
+        buffer: Buffer.from('ogg audio'),
+      }),
+    );
+  });
+
   it('maps a missing ffmpeg binary to a safe error', async () => {
     execFileMock.mockImplementationOnce((_command, _args, _options, callback) => {
       const error = new Error('spawn ffmpeg ENOENT') as NodeJS.ErrnoException;
@@ -156,5 +185,18 @@ function videoFile(
     mimetype,
     size: buffer.length,
     buffer,
+  } as Express.Multer.File;
+}
+
+function videoFileFromPath(
+  originalname: string,
+  mimetype: string,
+  path: string,
+): Express.Multer.File {
+  return {
+    originalname,
+    mimetype,
+    size: 1024,
+    path,
   } as Express.Multer.File;
 }

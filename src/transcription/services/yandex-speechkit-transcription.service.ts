@@ -23,11 +23,18 @@ type OperationResponse = {
   error?: unknown;
 };
 
+type ProviderResponse<TBody = unknown> = {
+  ok: boolean;
+  status: number;
+  body?: TBody;
+};
+
 type RecognitionConfig = {
   apiKey: string;
   folderId: string;
   timeoutMs: number;
   pollIntervalMs: number;
+  requestTimeoutMs: number;
 };
 
 const RECOGNIZE_URL =
@@ -37,6 +44,7 @@ const GET_RECOGNITION_URL =
   'https://stt.api.cloud.yandex.net:443/stt/v3/getRecognition';
 const DEFAULT_TIMEOUT_MS = 900_000;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 @Injectable()
 export class YandexSpeechKitTranscriptionService {
@@ -123,7 +131,7 @@ export class YandexSpeechKitTranscriptionService {
     uploaded: UploadedAudioObject,
     config: RecognitionConfig,
   ): Promise<string> {
-    const response = await this.fetcher(RECOGNIZE_URL, {
+    const response = await this.fetchProviderJson<OperationResponse>(RECOGNIZE_URL, {
       method: 'POST',
       headers: this.headers(config),
       body: JSON.stringify({
@@ -141,11 +149,11 @@ export class YandexSpeechKitTranscriptionService {
           },
         },
       }),
-    });
+    }, config);
 
     await this.assertOk(response);
-    const body = (await response.json()) as OperationResponse;
-    if (typeof body.id !== 'string' || !body.id) {
+    const body = response.body;
+    if (!body || typeof body.id !== 'string' || !body.id) {
       throw new TranscriptionProviderError('TRANSCRIPTION_RESPONSE_INVALID');
     }
     return body.id;
@@ -158,12 +166,12 @@ export class YandexSpeechKitTranscriptionService {
     const deadline = Date.now() + config.timeoutMs;
 
     while (Date.now() < deadline) {
-      const response = await this.fetcher(`${OPERATION_URL}/${operationId}`, {
+      const response = await this.fetchProviderJson<OperationResponse>(`${OPERATION_URL}/${operationId}`, {
         method: 'GET',
         headers: this.headers(config),
-      });
+      }, config);
       await this.assertOk(response);
-      const body = (await response.json()) as OperationResponse;
+      const body = response.body ?? {};
 
       if (body.error) {
         throw new TranscriptionProviderError('TRANSCRIPTION_OPERATION_FAILED');
@@ -182,15 +190,16 @@ export class YandexSpeechKitTranscriptionService {
     operationId: string,
     config: RecognitionConfig,
   ): Promise<{ text: string; segments: TranscriptSegment[] }> {
-    const response = await this.fetcher(
+    const response = await this.fetchProviderText(
       `${GET_RECOGNITION_URL}?operationId=${encodeURIComponent(operationId)}`,
       {
         method: 'GET',
         headers: this.headers(config),
       },
+      config,
     );
     await this.assertOk(response);
-    return this.normalizeRecognitionText(await response.text());
+    return this.normalizeRecognitionText(response.body ?? '');
   }
 
   private normalizeRecognitionText(
@@ -271,7 +280,7 @@ export class YandexSpeechKitTranscriptionService {
     };
   }
 
-  private async assertOk(response: Response): Promise<void> {
+  private async assertOk(response: Pick<Response, 'ok' | 'status'>): Promise<void> {
     if (response.ok) {
       return;
     }
@@ -306,7 +315,104 @@ export class YandexSpeechKitTranscriptionService {
         process.env.TRANSCRIPTION_POLL_INTERVAL_MS,
         DEFAULT_POLL_INTERVAL_MS,
       ),
+      requestTimeoutMs: this.getPositiveInteger(
+        process.env.TRANSCRIPTION_PROVIDER_REQUEST_TIMEOUT_MS,
+        DEFAULT_REQUEST_TIMEOUT_MS,
+      ),
     };
+  }
+
+  private fetchProviderJson<TBody>(
+    url: string,
+    init: RequestInit,
+    config: RecognitionConfig,
+  ): Promise<ProviderResponse<TBody>> {
+    return this.fetchProvider(url, init, config, (response) =>
+      response.json() as Promise<TBody>,
+    );
+  }
+
+  private fetchProviderText(
+    url: string,
+    init: RequestInit,
+    config: RecognitionConfig,
+  ): Promise<ProviderResponse<string>> {
+    return this.fetchProvider(url, init, config, (response) => response.text());
+  }
+
+  private async fetchProvider<TBody>(
+    url: string,
+    init: RequestInit,
+    config: RecognitionConfig,
+    readBody: (response: Response) => Promise<TBody>,
+  ): Promise<ProviderResponse<TBody>> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, config.requestTimeoutMs);
+
+    try {
+      const response = await this.fetcher(url, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        return {
+          ok: response.ok,
+          status: response.status,
+        };
+      }
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: await this.readProviderBody(response, readBody, controller.signal),
+      };
+    } catch (error) {
+      if (
+        controller.signal.aborted
+        || (error as { name?: unknown })?.name === 'AbortError'
+      ) {
+        throw new TranscriptionProviderError('TRANSCRIPTION_PROVIDER_TIMEOUT');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async readProviderBody<TBody>(
+    response: Response,
+    readBody: (response: Response) => Promise<TBody>,
+    signal: AbortSignal,
+  ): Promise<TBody> {
+    if (signal.aborted) {
+      throw this.abortError();
+    }
+
+    let abortHandler: (() => void) | undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      abortHandler = () => reject(this.abortError());
+      signal.addEventListener('abort', abortHandler, { once: true });
+    });
+
+    try {
+      return await Promise.race([
+        readBody(response),
+        abortPromise,
+      ]);
+    } finally {
+      if (abortHandler) {
+        signal.removeEventListener('abort', abortHandler);
+      }
+    }
+  }
+
+  private abortError(): Error {
+    return Object.assign(new Error('Provider request timed out'), {
+      name: 'AbortError',
+    });
   }
 
   private headers(config: RecognitionConfig): Record<string, string> {

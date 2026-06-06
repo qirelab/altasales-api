@@ -1,16 +1,25 @@
 import { Logger } from '@nestjs/common';
+import * as fsPromises from 'fs/promises';
 import { TranscriptionJob } from '../entities/transcription-job.entity';
 import { TranscriptionJobStatus } from '../enums/transcription-job-status.enum';
 import { TranscriptionProviderError } from './transcription-provider-error';
 import { VideoTranscriptionProcessingService } from './video-transcription-processing.service';
 
+jest.mock('fs/promises', () => ({
+  rm: jest.fn(),
+}));
+
 const JOB_ID = '00000000-0000-4000-8000-000000000010';
 
 describe('VideoTranscriptionProcessingService', () => {
   let loggerErrorSpy: jest.SpyInstance;
+  let loggerWarnSpy: jest.SpyInstance;
+  const rmMock = fsPromises.rm as jest.MockedFunction<typeof fsPromises.rm>;
 
   beforeEach(() => {
     loggerErrorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    loggerWarnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    rmMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -33,6 +42,41 @@ describe('VideoTranscriptionProcessingService', () => {
       }),
     );
     expect(loggerErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('cleans the uploaded temp video file after processing finishes', async () => {
+    const { service, speechKit } = createService();
+    const job = jobEntity({ mimeType: 'video/mp4' });
+    const video = videoFileFromPath('demo.mp4', 'video/mp4', '/tmp/upload/demo.mp4');
+
+    await service.run(job, video);
+
+    expect(speechKit.run).toHaveBeenCalled();
+    expect(rmMock).toHaveBeenCalledWith('/tmp/upload/demo.mp4', {
+      force: true,
+    });
+    expect(loggerWarnSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not mask successful transcription when uploaded video cleanup fails', async () => {
+    const { service, speechKit } = createService();
+    rmMock.mockRejectedValueOnce(
+      new Error('raw temp path cleanup failed'),
+    );
+    const job = jobEntity({ mimeType: 'video/mp4' });
+
+    await service.run(
+      job,
+      videoFileFromPath('demo.mp4', 'video/mp4', '/tmp/upload/demo.mp4'),
+    );
+
+    expect(speechKit.run).toHaveBeenCalled();
+    expect(loggerWarnSpy).toHaveBeenCalledWith({
+      eventName: 'TRANSCRIPTION_VIDEO_UPLOAD_CLEANUP_FAILED',
+      jobId: JOB_ID,
+      provider: 'yandex_speechkit',
+      errorCode: 'TRANSCRIPTION_VIDEO_UPLOAD_CLEANUP_FAILED',
+    });
   });
 
   it('marks the job failed safely and skips SpeechKit when extraction fails', async () => {
@@ -138,6 +182,19 @@ function videoFile(
     mimetype,
     size: buffer.length,
     buffer,
+  } as Express.Multer.File;
+}
+
+function videoFileFromPath(
+  originalname: string,
+  mimetype: string,
+  path: string,
+): Express.Multer.File {
+  return {
+    originalname,
+    mimetype,
+    size: 1024,
+    path,
   } as Express.Multer.File;
 }
 

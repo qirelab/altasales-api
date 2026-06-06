@@ -24,9 +24,11 @@ export class VideoAudioExtractionService {
     );
 
     try {
-      const inputPath = join(tempDir, `input${this.videoExtension(video)}`);
+      const inputPath = video.path || join(tempDir, `input${this.videoExtension(video)}`);
       const outputPath = join(tempDir, 'extracted-audio.ogg');
-      await fsPromises.writeFile(inputPath, video.buffer);
+      if (!video.path) {
+        await fsPromises.writeFile(inputPath, video.buffer);
+      }
       await this.executeFfmpeg(inputPath, outputPath);
       const buffer = await fsPromises.readFile(outputPath);
 
