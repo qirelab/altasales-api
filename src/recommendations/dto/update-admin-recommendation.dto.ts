@@ -1,5 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
+import { RecommendationPriority } from '../entities/recommendation-priority.enum';
 import { RecommendationStatus } from '../entities/recommendation-status.enum';
 
 export class UpdateAdminRecommendationDto {
@@ -35,4 +42,37 @@ export class UpdateAdminRecommendationDto {
   @IsOptional()
   @IsEnum(RecommendationStatus)
   status?: RecommendationStatus;
+
+  @ApiPropertyOptional({
+    enum: RecommendationPriority,
+    description: 'Urgency level',
+  })
+  @IsOptional()
+  @IsEnum(RecommendationPriority)
+  priority?: RecommendationPriority;
+
+  @ApiPropertyOptional({
+    description: 'Short reason why this recommendation matters',
+  })
+  @IsOptional()
+  @IsString()
+  rationale?: string;
+
+  @ApiPropertyOptional({
+    description: 'Prerequisite recommendation IDs',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  dependencyIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Diagnostic signals used for the recommendation',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  diagnosticSignals?: string[];
 }

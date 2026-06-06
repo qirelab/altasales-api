@@ -1,12 +1,16 @@
+import { join } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const catalogUploadDir = process.env.CATALOG_UPLOAD_DIR ?? join(process.cwd(), 'uploads');
+  app.useStaticAssets(catalogUploadDir, { prefix: '/uploads/' });
   const trustedOrigins = new Set([
     'https://staging.altasales.qirelab.com',
     'https://altasales.qirelab.com',

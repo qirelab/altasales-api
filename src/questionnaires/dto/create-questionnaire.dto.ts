@@ -75,12 +75,12 @@ export class CreateQuestionnaireDto implements QuestionnaireAnswers {
   @IsIn(PREFERRED_MESSENGERS, { message: 'Выберите мессенджер для связи' })
   preferredMessenger: PreferredMessenger;
 
-  @ApiProperty({ example: '@username', description: 'Имя пользователя в выбранном мессенджере' })
+  @ApiProperty({ example: '@username', description: 'Контакт в выбранном мессенджере: @username или номер телефона' })
   @IsString()
-  @IsNotEmpty({ message: 'Укажите имя пользователя в мессенджере' })
+  @IsNotEmpty({ message: 'Укажите контакт в мессенджере' })
   @MaxLength(64)
-  @Matches(/^@[a-zA-Z0-9_]{5,32}$/, {
-    message: 'Введите @username (от 5 до 32 символов после @)',
+  @Matches(/^(@[a-zA-Z0-9_]{5,32}|\+?[\d\s\-()]{7,30})$/, {
+    message: 'Введите @username или номер телефона',
   })
   messengerUsername: string;
 

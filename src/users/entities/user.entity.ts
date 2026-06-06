@@ -1,4 +1,9 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { UserRole } from './user-role.enum';
 
@@ -31,29 +36,47 @@ export class User {
   @Column({ unique: true, nullable: true })
   firebaseUid: string;
 
-  @ApiProperty({ example: 1500.5, description: 'Общий баланс (основные + подарочные начисления)' })
+  @ApiProperty({
+    example: 1500.5,
+    description: 'Total user balance',
+  })
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   balance: number;
 
-  @ApiProperty({ enum: UserRole, example: UserRole.USER, description: 'User role' })
+  @ApiProperty({
+    enum: UserRole,
+    example: UserRole.USER,
+    description: 'User role',
+  })
   @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
   role: UserRole;
 
-  @ApiProperty({ example: '2026-03-19T10:00:00.000Z', description: 'Registration date' })
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @ApiProperty({ example: '40', description: 'ROP project ID for file storage', nullable: true })
+  @ApiProperty({
+    example: '40',
+    description: 'ROP project ID for file storage',
+    nullable: true,
+  })
   @Column({ type: 'varchar', nullable: true })
   ropProjectId: string | null;
 
   @ApiPropertyOptional({
-    example: '2026-05-21T10:30:00.000Z',
-    description: 'Timestamp when recommendation notifications were marked as seen',
-    nullable: true,
+    description: 'When the user last viewed recommendation notifications',
   })
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   notificationsSeenAt: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'When the admin last viewed paid-order notifications',
+  })
+  @Column({ type: 'timestamptz', nullable: true })
+  adminOrderNotificationsSeenAt: Date | null;
+
+  @ApiProperty({
+    example: '2026-03-19T10:00:00.000Z',
+    description: 'Registration date',
+  })
+  @CreateDateColumn()
+  createdAt: Date;
 
   @ApiProperty({
     example: false,
