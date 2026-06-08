@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BalanceTransactionsModule } from '../balance-transactions/balance-transactions.module';
 import { CartModule } from '../cart/cart.module';
 import { ExpertsModule } from '../experts/experts.module';
+import { OrderNotificationsModule } from './order-notifications.module';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
 import { Order } from './entities/order.entity';
@@ -31,6 +32,7 @@ import { OrdersController } from './orders.controller';
     BalanceTransactionsModule,
     CartModule,
     ExpertsModule,
+    OrderNotificationsModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

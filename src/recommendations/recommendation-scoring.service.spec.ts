@@ -77,6 +77,35 @@ describe('RecommendationScoringService', () => {
     expect(Logger.prototype.warn).toHaveBeenCalled();
   });
 
+  it('accepts serviceId from AI recommendation output', async () => {
+    const candidate = {
+      id: 'service-id',
+      name: 'CRM Silver',
+      description: 'Advanced CRM launch service',
+      type: ServiceType.Service,
+      skills: ['CRM', 'analytics'],
+      category: { name: 'Пакет услуг' },
+    } as any;
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"service-id","priority":"medium","rationale":"Best service fit","diagnosticSignals":["crm_quality"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['CRM data quality'],
+      },
+      [candidate],
+      'crm data quality',
+    );
+
+    expect(result[0]).toMatchObject({
+      serviceId: 'service-id',
+      rationale: 'Best service fit',
+    });
+  });
+
   it('does not declare user diagnostics as no_pii for proxy calls', async () => {
     llmProxy.chat.mockResolvedValueOnce({ content: '{"recommendations":[]}' });
 

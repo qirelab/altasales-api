@@ -79,7 +79,7 @@ export class RecommendationScoringService {
     if (!context) return [];
 
     try {
-      const catalogSlice = services.slice(0, MAX_CATALOG_FOR_LLM);
+      const catalogSlice = this.selectCatalogForLlm(services, context);
 
       const response = await this.llmProxy.chat({
         agentId: AgentId.Recommendations,
@@ -203,7 +203,7 @@ export class RecommendationScoringService {
     return text
       .normalize('NFKC')
       .toLowerCase()
-      .replace(/ё/g, 'е')
+      .replace(/\u0451/g, '\u0435')
       .replace(/[^\p{L}\p{N}_]+/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -213,6 +213,30 @@ export class RecommendationScoringService {
     return Array.from(
       new Set(signals.map((s) => s.trim()).filter((s) => s.length > 0)),
     );
+  }
+
+  private selectCatalogForLlm(
+    services: ServiceCandidate[],
+    context: string,
+  ): ServiceCandidate[] {
+    const scored = services.map((service, index) => ({
+      service,
+      index,
+      score: this.scoreService(service, context).score,
+    }));
+    const hasPositiveScore = scored.some((item) => item.score > 0);
+
+    if (!hasPositiveScore) {
+      return services.slice(0, MAX_CATALOG_FOR_LLM);
+    }
+
+    return scored
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.index - b.index;
+      })
+      .slice(0, MAX_CATALOG_FOR_LLM)
+      .map((item) => item.service);
   }
 
   private includesTerm(normalizedText: string, term: string): boolean {
@@ -230,7 +254,6 @@ export class RecommendationScoringService {
     }
 
     const [singleTerm] = termTokens;
-    // Prefix matching is limited to longer stems to avoid noisy short-token hits.
     return textTokens.some(
       (token) =>
         token === singleTerm ||

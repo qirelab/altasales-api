@@ -12,7 +12,9 @@ import {
   HttpStatus,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiOkResponse } from '@nestjs/swagger';
+import { PaginatedAdminOrdersResponseDto } from './dto/paginated-admin-orders-response.dto';
+import { PaginatedOrdersResponseDto } from './dto/paginated-orders-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -26,17 +28,21 @@ import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-acce
 import { UpdateOrderItemStatusDto } from './dto/update-order-item-status.dto';
 import { UpdateOrderItemSubItemStatusDto } from './dto/update-order-item-sub-item-status.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { OrderNotificationService } from './order-notification.service';
 import { OrdersService } from './orders.service';
 
 @ApiTags('orders')
 @Controller('orders')
 @UseGuards(SessionGuard)
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) { }
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly orderNotificationService: OrderNotificationService,
+  ) { }
 
   @Get()
   @ApiOperation({ summary: 'Get current user orders (paginated, optional status filter)' })
-  @ApiResponse({ status: 200, description: 'Paginated list of user orders with items' })
+  @ApiOkResponse({ type: PaginatedOrdersResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getMyOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
     return this.ordersService.findByUserId(user.id, query);
@@ -46,7 +52,7 @@ export class OrdersController {
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.EXPERT)
   @ApiOperation({ summary: 'Get orders assigned to current expert' })
-  @ApiResponse({ status: 200, description: 'Paginated list of expert-assigned orders with items' })
+  @ApiOkResponse({ type: PaginatedOrdersResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async getExpertOrders(@CurrentUser() user: CurrentUserData, @Query() query: GetOrdersQueryDto) {
@@ -59,11 +65,7 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Get all orders for admin (paginated, with search)',
   })
-  @ApiResponse({
-    status: 200,
-    description:
-      'Paginated list with order id, items count, client name, date, amount and status',
-  })
+  @ApiOkResponse({ type: PaginatedAdminOrdersResponseDto })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   async getAdminOrders(@Query() query: GetAdminOrdersQueryDto) {
@@ -163,6 +165,41 @@ export class OrdersController {
     @Body() dto: UpdateOrderItemSubItemStatusDto,
   ) {
     return this.ordersService.updateSubItemStatus(itemId, subItemId, dto.status);
+  }
+
+  @Post('notifications/admin-seen')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark paid-order admin notifications as seen' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications marked as seen',
+    schema: {
+      example: { adminOrderNotificationsSeenAt: '2026-06-03T08:45:12.123Z' },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async markAdminOrderNotificationsSeen(@CurrentUser() user: CurrentUserData) {
+    return this.orderNotificationService.markAdminSeen(user.id);
+  }
+
+  @Get('notifications/admin-summary')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'Get unseen paid-order count for admin badge',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Unseen orders summary',
+    schema: { example: { unseenCount: 3, hasUnseen: true } },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async getAdminOrderNotificationsSummary(@CurrentUser() user: CurrentUserData) {
+    return this.orderNotificationService.getAdminUnseen(user.id);
   }
 
   @Post('checkout')

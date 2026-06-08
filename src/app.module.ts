@@ -17,8 +17,8 @@ import { MailModule } from './mail/mail.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { PackagesModule } from './packages/packages.module';
 import { CategoriesModule } from './categories/categories.module';
+import { CatalogStorageModule } from './catalog-storage/catalog-storage.module';
 import { ExpertsModule } from './experts/experts.module';
-
 
 @Module({
   imports: [
@@ -40,6 +40,7 @@ import { ExpertsModule } from './experts/experts.module';
     KnowledgeModule,
     PackagesModule,
     CategoriesModule,
+    CatalogStorageModule,
     ExpertsModule,
   ],
 })

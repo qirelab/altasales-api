@@ -47,16 +47,36 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
     dto: Omit<GenerateRecommendationsDto, 'userId'>,
     processor: GenerationJobProcessor,
   ): Promise<RecommendationGenerationJobSummary> {
+    const request = {
+      clientProfile: dto.clientProfile ?? {},
+      diagnostics: dto.diagnostics ?? [],
+      limit: dto.limit,
+      persist: dto.persist ?? true,
+    };
+    const pendingJob = await this.generationJobRepository.findOne({
+      where: {
+        userId,
+        status: RecommendationGenerationStatus.Pending,
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (pendingJob) {
+      pendingJob.request = request;
+      pendingJob.result = null;
+      pendingJob.error = null;
+      pendingJob.startedAt = null;
+      pendingJob.completedAt = null;
+      const job = await this.generationJobRepository.save(pendingJob);
+      this.schedulePendingGenerationJobs(processor);
+      return this.toSummary(job);
+    }
+
     const job = await this.generationJobRepository.save(
       this.generationJobRepository.create({
         userId,
         status: RecommendationGenerationStatus.Pending,
-        request: {
-          clientProfile: dto.clientProfile ?? {},
-          diagnostics: dto.diagnostics ?? [],
-          limit: dto.limit,
-          persist: dto.persist ?? true,
-        },
+        request,
         result: null,
         error: null,
         startedAt: null,

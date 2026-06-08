@@ -33,7 +33,9 @@ export class QuestionnairesService {
 
     if (existing) {
       existing.answers = this.dtoToAnswers(dto);
-      return this.repo.save(existing);
+      const saved = await this.repo.save(existing);
+      this.scheduleRecommendationGeneration(saved, userId);
+      return saved;
     }
 
     const questionnaire = this.repo.create({
@@ -41,6 +43,7 @@ export class QuestionnairesService {
       answers: this.dtoToAnswers(dto),
     });
     const saved = await this.repo.save(questionnaire);
+    this.scheduleRecommendationGeneration(saved, userId);
 
     try {
       const alreadyCredited = await this.balanceService.hasRegistrationGift(userId);
@@ -65,6 +68,22 @@ export class QuestionnairesService {
     });
 
     return saved;
+  }
+
+  private scheduleRecommendationGeneration(
+    questionnaire: Questionnaire,
+    userId: string,
+  ): void {
+    void this.recommendationsService
+      .startGenerationForUser(userId, {
+        clientProfile: questionnaire.answers as unknown as Record<string, unknown>,
+        persist: true,
+      })
+      .catch((error) => {
+        this.logger.error(
+          `Failed to start recommendation generation for questionnaire ${questionnaire.id}: ${error.message}`,
+        );
+      });
   }
 
   private dtoToAnswers(dto: CreateQuestionnaireDto): QuestionnaireAnswers {
