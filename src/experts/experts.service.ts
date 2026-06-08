@@ -21,10 +21,16 @@ function sortOfferingsByName<T extends { name: string }>(items: T[]): T[] {
   );
 }
 
-export interface ExpertPositionListItem {
+export interface ExpertPositionBase {
   id: string;
   name: string;
   description: string;
+}
+
+export interface ExpertPositionListItem extends ExpertPositionBase {
+  executorsCount: number;
+  offeringsCount: number;
+  minPrice: number | null;
 }
 
 export interface ExpertExecutorOfferingPrice {
@@ -40,7 +46,7 @@ export interface ExpertExecutorDto {
   offerings: ExpertExecutorOfferingPrice[];
 }
 
-export interface ExpertPositionDetailDto extends ExpertPositionListItem {
+export interface ExpertPositionDetailDto extends ExpertPositionBase {
   offerings: Array<{
     id: string;
     name: string;
@@ -76,11 +82,35 @@ export class ExpertsService {
   async findAllPositions(): Promise<ExpertPositionListItem[]> {
     const positions = await this.positionRepository.find({
       order: { createdAt: 'ASC' },
+      relations: ['offerings', 'members'],
     });
+
+    const positionIds = positions.map((p) => p.id);
+    const memberOfferings = positionIds.length > 0
+      ? await this.memberOfferingRepository
+        .createQueryBuilder('mo')
+        .innerJoin('mo.member', 'member')
+        .select(['mo.price AS price', 'member.positionId AS "positionId"'])
+        .where('member.positionId IN (:...positionIds)', { positionIds })
+        .getRawMany<{ price: string; positionId: string }>()
+      : [];
+
+    const minPriceByPosition = new Map<string, number>();
+    for (const row of memberOfferings) {
+      const price = Number(row.price);
+      const current = minPriceByPosition.get(row.positionId);
+      if (current === undefined || price < current) {
+        minPriceByPosition.set(row.positionId, price);
+      }
+    }
+
     return positions.map((position) => ({
       id: position.id,
       name: position.name,
       description: position.description,
+      executorsCount: position.members?.length ?? 0,
+      offeringsCount: position.offerings?.length ?? 0,
+      minPrice: minPriceByPosition.get(position.id) ?? null,
     }));
   }
 
