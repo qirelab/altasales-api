@@ -327,11 +327,13 @@ export class ServicesService {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
     }
 
+    await this.ensureCategoryExists(dto.categoryId);
+
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
       name: dto.name,
       description: dto.description,
-      categoryId: null,
+      categoryId: dto.categoryId,
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
@@ -360,6 +362,7 @@ export class ServicesService {
       this.serviceRepository
         .createQueryBuilder('service')
         .leftJoinAndSelect('service.user', 'u')
+        .leftJoinAndSelect('service.category', 'category')
         .where('service.type = :type', { type: ServiceType.Contractor }),
     );
 
@@ -374,6 +377,7 @@ export class ServicesService {
             })
             .orWhere('u.email ILIKE :search', { search: `%${search}%` })
             .orWhere('u."phoneNumber" ILIKE :search', { search: `%${search}%` })
+            .orWhere('category.name ILIKE :search', { search: `%${search}%` })
             .orWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([search]) });
         }),
       );
@@ -672,6 +676,10 @@ export class ServicesService {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
+    if (dto.categoryId !== undefined) {
+      await this.ensureCategoryExists(dto.categoryId);
+      contractor.categoryId = dto.categoryId;
+    }
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
     if (dto.ratePerHour !== undefined) {
       contractor.contractorRatePerHour = dto.ratePerHour;
@@ -736,7 +744,7 @@ export class ServicesService {
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
     const contractor = await this.serviceRepository.findOne({
       where: { id, type: ServiceType.Contractor, ...activeServiceWhere() },
-      relations: ['user'],
+      relations: ['user', 'category'],
     });
     if (!contractor) {
       throw new NotFoundException(`Подрядчик с ID ${id} не найден`);
