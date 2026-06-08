@@ -98,6 +98,7 @@ export class ExpertsService {
     const minPriceByPosition = new Map<string, number>();
     for (const row of memberOfferings) {
       const price = Number(row.price);
+      if (!Number.isFinite(price) || price <= 0) continue;
       const current = minPriceByPosition.get(row.positionId);
       if (current === undefined || price < current) {
         minPriceByPosition.set(row.positionId, price);
