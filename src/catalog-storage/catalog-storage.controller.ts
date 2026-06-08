@@ -18,9 +18,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CatalogStorageService } from './catalog-storage.service';
 import {
+  CATALOG_IMAGE_FORMATS_LABEL,
   CATALOG_IMAGE_MAX_BYTES,
-  CATALOG_IMAGE_MIME_TYPES,
   CATALOG_STORAGE_FOLDERS,
+  isCatalogImageAllowed,
   type CatalogStorageFolder,
 } from './catalog-storage.constants';
 import { UploadCatalogImageResponseDto } from './dto/upload-catalog-image-response.dto';
@@ -59,8 +60,8 @@ export class CatalogStorageController {
       storage: memoryStorage(),
       limits: { fileSize: CATALOG_IMAGE_MAX_BYTES },
       fileFilter: (_req, file, callback) => {
-        if (!CATALOG_IMAGE_MIME_TYPES.has(file.mimetype)) {
-          callback(new BadRequestException('Допустимые форматы: JPEG, PNG, WebP'), false);
+        if (!isCatalogImageAllowed(file)) {
+          callback(new BadRequestException(`Допустимые форматы: ${CATALOG_IMAGE_FORMATS_LABEL}`), false);
           return;
         }
         callback(null, true);

@@ -33,7 +33,7 @@ export class CreateServiceDto {
 
   @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL', required: false })
   @IsOptional()
-  @IsUrl()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
 
   @ApiProperty({ example: ['AmoCRM', 'Bitrix24', 'API'], description: 'Array of skills', type: [String], required: false })
