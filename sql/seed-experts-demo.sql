@@ -44,7 +44,7 @@ WHERE "email" LIKE 'demo-expert-%@altasales.dev';
 -- ---------------------------------------------------------------------
 INSERT INTO "user" (
   "id", "name", "lastName", "email", "phoneNumber", "firebaseUid",
-  "balance", "role", "ropProjectId", "hasSeenGiftIntro", "createdAt"
+  "balance", "role", "ropProjectId", "experienceYears", "hasSeenGiftIntro", "createdAt"
 )
 SELECT
   ('aaaaaaaa-aaaa-4aaa-8aaa-' || LPAD(n::text, 12, '0'))::uuid,
@@ -56,6 +56,7 @@ SELECT
   0,
   'expert',
   NULL,
+  3 + (n % 13),  -- 3..15 лет опыта, детерминированно по индексу
   true,
   now()
 FROM generate_series(1, 40) AS n

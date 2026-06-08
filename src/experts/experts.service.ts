@@ -43,6 +43,7 @@ export interface ExpertExecutorDto {
   id: string;
   name: string;
   lastName: string;
+  experienceYears: number | null;
   offerings: ExpertExecutorOfferingPrice[];
 }
 
@@ -140,6 +141,7 @@ export class ExpertsService {
             id: member.user!.id,
             name: member.user!.name,
             lastName: member.user!.lastName,
+            experienceYears: member.user!.experienceYears ?? null,
             offerings: prices,
           };
         }),
