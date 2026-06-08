@@ -206,9 +206,9 @@ export class OrdersController {
   @ApiOperation({
     summary: 'Checkout с выбором способа оплаты',
     description:
-      'Создает заказ и обрабатывает оплату выбранным способом: Robokassa ' +
-      '(возвращает paymentUrl/params) или внутренний баланс (до 50% с подарочного, ' +
-      'остальное с основного; при нехватке средств — 400).',
+      'Создает заказ(ы) и обрабатывает оплату: Robokassa (paymentUrl/params) или баланс. ' +
+      'В items[] — услуга (serviceId), пакет (packageId) или экспертная позиция ' +
+      '(expertPositionId, executorUserId, offeringIds).',
   })
   @ApiResponse({ status: 201, description: 'Order created and payment flow started/completed' })
   @ApiResponse({ status: 400, description: 'Validation or business error' })
