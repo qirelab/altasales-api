@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
-import { ExpertsService } from '../experts/experts.service';
+import { DataSource, Repository } from 'typeorm';
+import { ExpertPositionDetailDto, ExpertsService } from '../experts/experts.service';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { activePackageWhere, isPackageActive } from '../packages/package-visibility';
 import { Service } from '../services/entities/service.entity';
@@ -27,6 +29,8 @@ const EXPERT_RELATIONS = [
 
 @Injectable()
 export class CartService {
+  private readonly logger = new Logger(CartService.name);
+
   constructor(
     @InjectRepository(Cart)
     private readonly cartRepository: Repository<Cart>,
@@ -57,13 +61,16 @@ export class CartService {
 
     const expertItemsRaw = items.filter((item) => Boolean(item.expertPositionId));
     const positionIds = [...new Set(expertItemsRaw.map((item) => item.expertPositionId!))];
-    const positionMap = new Map<string, Awaited<ReturnType<ExpertsService['findPositionById']>>>();
+    const positionMap = new Map<string, ExpertPositionDetailDto | null>();
     for (const positionId of positionIds) {
       try {
         const position = await this.expertsService.findPositionById(positionId);
         positionMap.set(positionId, position);
-      } catch {
-        positionMap.set(positionId, null as never);
+      } catch (error) {
+        this.logger.warn(
+          `Failed to resolve expert position ${positionId} for cart ${cart.id}: ${(error as Error)?.message}`,
+        );
+        positionMap.set(positionId, null);
       }
     }
 
@@ -98,7 +105,12 @@ export class CartService {
           const position = positionMap.get(item.expertPositionId);
           if (!position) return null;
           const expertItem = mapCartExpertItem(item, position);
-          if (!expertItem) return null;
+          if (!expertItem) {
+            this.logger.warn(
+              `Skipped expert cart_item ${item.id} (cart ${cart.id}) — stale executor or missing offering prices`,
+            );
+            return null;
+          }
           return {
             id: item.id,
             serviceId: null,
@@ -167,6 +179,7 @@ export class CartService {
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
       if (error instanceof NotFoundException) throw new BadRequestException(error.message);
+      if (error instanceof ConflictException) throw new BadRequestException(error.message);
       throw error;
     }
 

@@ -120,6 +120,11 @@ export class AddExpertCartSupport1781000000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    // Удаляем expert-cart_item-ы до восстановления старого XOR-check:
+    // строки с serviceId IS NULL AND packageId IS NULL не пройдут старый check,
+    // плюс они потеряли бы смысл после DROP COLUMN expertPositionId.
+    await queryRunner.query(`DELETE FROM "cart_item" WHERE "expertPositionId" IS NOT NULL`);
+
     await queryRunner.query(`DROP INDEX IF EXISTS "UQ_cart_item_offering_item_offering"`);
     await queryRunner.query(`
       ALTER TABLE "cart_item_offering"
