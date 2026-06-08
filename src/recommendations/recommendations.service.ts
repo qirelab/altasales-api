@@ -404,6 +404,10 @@ export class RecommendationsService implements OnModuleInit {
       context,
       limit,
     );
+    ranked = this.filterOverlappingRecommendations(
+      ranked,
+      await this.findExistingRecommendationCoverage(dto.userId),
+    );
 
     if (dto.persist === false) {
       return ranked;
@@ -468,16 +472,75 @@ export class RecommendationsService implements OnModuleInit {
   }
 
   private async findRecommendableServices(): Promise<ServiceCandidate[]> {
-    return this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.category', 'category')
-      .where('service.type IN (:...serviceTypes)', {
-        serviceTypes: [ServiceType.Service, ServiceType.Document],
+    const [services, packages] = await Promise.all([
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.category', 'category')
+        .where('service.type IN (:...serviceTypes)', {
+          serviceTypes: [ServiceType.Service, ServiceType.Document],
+        })
+        .andWhere('service."deletedAt" IS NULL')
+        .orderBy('service.createdAt', 'DESC')
+        .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
+        .getMany(),
+      this.packageRepository.find({
+        where: activePackageWhere(),
+        relations: ['category', 'services', 'services.category'],
+        order: { createdAt: 'DESC' },
+      }),
+    ]);
+    const packageCandidates = packages
+      .map((servicePackage) => {
+        const activeServices = filterActiveServices(servicePackage.services);
+        if (activeServices.length === 0) return null;
+
+        return {
+          id: servicePackage.id,
+          serviceId: null,
+          packageId: servicePackage.id,
+          name: servicePackage.name,
+          description: [
+            servicePackage.description,
+            ...activeServices.map((service) => service.name),
+          ].join(' '),
+          type: 'Пакет услуг',
+          price: servicePackage.price,
+          image: null,
+          skills: [
+            ...(servicePackage.tags ?? []),
+            ...activeServices.flatMap((service) => [
+              service.name,
+              ...(service.skills ?? []),
+            ]),
+          ],
+          categoryId: servicePackage.categoryId,
+          category: servicePackage.category,
+          contractorRatePerHour: null,
+          contractorExperienceYears: null,
+          userId: null,
+          user: null,
+          packages: [],
+          createdAt: servicePackage.createdAt,
+          deletedAt: servicePackage.deletedAt,
+          coveredServiceIds: activeServices.map((service) => service.id),
+        } as unknown as ServiceCandidate;
       })
-      .andWhere('service."deletedAt" IS NULL')
-      .orderBy('service.createdAt', 'DESC')
-      .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
-      .getMany() as Promise<ServiceCandidate[]>;
+      .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
+    const shouldSkipLegacyPackageServices = packageCandidates.length > 0;
+    const serviceCandidates = services
+      .filter(
+        (service) =>
+          !shouldSkipLegacyPackageServices ||
+          service.category?.name !== 'Пакет услуг',
+      )
+      .map((service) => ({
+        ...service,
+        serviceId: service.id,
+        packageId: null,
+        coveredServiceIds: [service.id],
+      })) as ServiceCandidate[];
+
+    return [...packageCandidates, ...serviceCandidates];
   }
 
   private async resolveClientProfile(
@@ -533,11 +596,164 @@ export class RecommendationsService implements OnModuleInit {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
+  private async findExistingRecommendationCoverage(
+    userId: string,
+  ): Promise<Map<string, Set<string>>> {
+    const recommendations = await this.recommendationRepository.find({
+      where: { userId },
+      relations: ['package', 'package.services'],
+    });
+    const coverageByTargetId = new Map<string, Set<string>>();
+
+    recommendations.forEach((recommendation) => {
+      const targetId = this.getRecommendationTargetId(recommendation);
+      if (!targetId) return;
+      coverageByTargetId.set(
+        targetId,
+        new Set(this.getRecommendationCoveredServiceIds(recommendation)),
+      );
+    });
+
+    return coverageByTargetId;
+  }
+
+  private filterOverlappingRecommendations(
+    items: GeneratedRecommendationItem[],
+    existingCoverageByTargetId: Map<string, Set<string>>,
+  ): GeneratedRecommendationItem[] {
+    const selected: GeneratedRecommendationItem[] = [];
+    const selectedTargetIds = new Set<string>();
+    const selectedCoveredServiceIds = new Set<string>();
+
+    for (const item of items) {
+      const targetId = this.getGeneratedRecommendationTargetId(item);
+      if (!targetId || selectedTargetIds.has(targetId)) continue;
+
+      const coveredServiceIds = this.getGeneratedRecommendationCoveredServiceIds(item);
+      const existingCoveredServiceIds = this.getExistingCoveredServiceIdsExceptTarget(
+        existingCoverageByTargetId,
+        targetId,
+      );
+      const overlapsExisting = coveredServiceIds.some((serviceId) =>
+        existingCoveredServiceIds.has(serviceId),
+      );
+      const overlapsSelected = coveredServiceIds.some((serviceId) =>
+        selectedCoveredServiceIds.has(serviceId),
+      );
+
+      if (overlapsExisting) continue;
+
+      if (overlapsSelected) {
+        const overlappingSelected = selected.filter((selectedItem) =>
+          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).some(
+            (serviceId) => coveredServiceIds.includes(serviceId),
+          ),
+        );
+
+        if (!this.shouldReplaceOverlappingRecommendations(item, overlappingSelected)) {
+          continue;
+        }
+
+        overlappingSelected.forEach((selectedItem) => {
+          const selectedTargetId = this.getGeneratedRecommendationTargetId(selectedItem);
+          if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
+          const selectedIndex = selected.indexOf(selectedItem);
+          if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
+        });
+        selectedCoveredServiceIds.clear();
+        selected.forEach((selectedItem) => {
+          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).forEach(
+            (serviceId) => selectedCoveredServiceIds.add(serviceId),
+          );
+        });
+      }
+
+      selected.push(item);
+      selectedTargetIds.add(targetId);
+      coveredServiceIds.forEach((serviceId) =>
+        selectedCoveredServiceIds.add(serviceId),
+      );
+    }
+
+    return selected;
+  }
+
+  private shouldReplaceOverlappingRecommendations(
+    item: GeneratedRecommendationItem,
+    overlappingSelected: GeneratedRecommendationItem[],
+  ): boolean {
+    if (!item.packageId || overlappingSelected.length === 0) {
+      return false;
+    }
+
+    const itemCoverageSize =
+      this.getGeneratedRecommendationCoveredServiceIds(item).length;
+    const maxSelectedCoverageSize = Math.max(
+      ...overlappingSelected.map(
+        (selectedItem) =>
+          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).length,
+      ),
+    );
+
+    return itemCoverageSize > maxSelectedCoverageSize;
+  }
+
+  private getExistingCoveredServiceIdsExceptTarget(
+    coverageByTargetId: Map<string, Set<string>>,
+    targetId: string,
+  ): Set<string> {
+    const result = new Set<string>();
+
+    coverageByTargetId.forEach((serviceIds, existingTargetId) => {
+      if (existingTargetId === targetId) return;
+      serviceIds.forEach((serviceId) => result.add(serviceId));
+    });
+
+    return result;
+  }
+
+  private getGeneratedRecommendationTargetId(
+    item: GeneratedRecommendationItem,
+  ): string | null {
+    return item.packageId ?? item.serviceId ?? null;
+  }
+
+  private getGeneratedRecommendationCoveredServiceIds(
+    item: GeneratedRecommendationItem,
+  ): string[] {
+    if (item.coveredServiceIds?.length) {
+      return item.coveredServiceIds;
+    }
+    return item.serviceId ? [item.serviceId] : [];
+  }
+
+  private getRecommendationTargetId(recommendation: Recommendation): string | null {
+    return recommendation.packageId ?? recommendation.serviceId ?? null;
+  }
+
+  private getRecommendationCoveredServiceIds(
+    recommendation: Recommendation,
+  ): string[] {
+    if (recommendation.packageId) {
+      return filterActiveServices(recommendation.package?.services).map(
+        (service) => service.id,
+      );
+    }
+    return recommendation.serviceId ? [recommendation.serviceId] : [];
+  }
+
   private async upsertGeneratedRecommendation(
     userId: string,
     item: GeneratedRecommendationItem,
   ): Promise<Recommendation> {
-    const where = { userId, serviceId: item.serviceId };
+    const serviceId = item.serviceId ?? null;
+    const packageId = item.packageId ?? null;
+    if (!serviceId && !packageId) {
+      throw new BadRequestException('Generated recommendation target is missing');
+    }
+    const where = serviceId
+      ? { userId, serviceId }
+      : { userId, packageId: packageId as string };
 
     const existing = await this.recommendationRepository.findOne({
       where,
@@ -553,8 +769,8 @@ export class RecommendationsService implements OnModuleInit {
 
     const recommendation = this.recommendationRepository.create({
       userId,
-      serviceId: item.serviceId,
-      packageId: null,
+      serviceId,
+      packageId,
       status: RecommendationStatus.Recommended,
       priority: item.priority,
       rationale: item.rationale,
@@ -600,11 +816,13 @@ export class RecommendationsService implements OnModuleInit {
 
     return recommendations.map((item) => ({
       serviceId: item.serviceId,
+      packageId: item.packageId ?? null,
       serviceName: item.serviceName,
       priority: item.priority,
       rationale: item.rationale,
       diagnosticSignals: item.diagnosticSignals,
       score: item.score,
+      coveredServiceIds: item.coveredServiceIds ?? [],
       recommendationId: item.recommendation?.id,
     }));
   }

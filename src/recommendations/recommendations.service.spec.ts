@@ -24,6 +24,7 @@ describe('RecommendationsService', () => {
 
   const createService = () => {
     const recommendationRepository = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
       create: jest.fn((value) => value),
       save: jest.fn((value) => Promise.resolve(value)),
@@ -35,6 +36,7 @@ describe('RecommendationsService', () => {
       createQueryBuilder: jest.fn(createQueryBuilder),
     };
     const packageRepository = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
     };
     const orderRepository = {
@@ -94,6 +96,8 @@ describe('RecommendationsService', () => {
     return {
       service,
       questionnaireRepository,
+      recommendationRepository,
+      packageRepository,
       scoringService,
       relevanceRanker,
       generationJobService,
@@ -189,6 +193,149 @@ describe('RecommendationsService', () => {
       [],
       'context',
       undefined,
+    );
+  });
+
+  it('removes a service recommendation when a selected package already covers it', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'urgent',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-id'],
+      },
+      {
+        serviceId: 'service-id',
+        packageId: null,
+        serviceName: 'CRM setup',
+        priority: 'medium',
+        rationale: 'service fit',
+        diagnosticSignals: [],
+        score: 8,
+        coveredServiceIds: ['service-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'package-id',
+    ]);
+  });
+
+  it('keeps the same existing package but skips separate services already covered by it', async () => {
+    const { service, recommendationRepository, relevanceRanker } = createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        package: {
+          services: [{ id: 'service-id', deletedAt: null }],
+        },
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'service-id',
+        packageId: null,
+        serviceName: 'CRM setup',
+        priority: 'urgent',
+        rationale: 'service fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 8,
+        coveredServiceIds: ['service-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'package-id',
+    ]);
+  });
+
+  it('keeps the more complete package when generated packages overlap', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'small-package-id',
+        serviceName: 'Small CRM package',
+        priority: 'urgent',
+        rationale: 'small package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-a'],
+      },
+      {
+        serviceId: null,
+        packageId: 'full-package-id',
+        serviceName: 'Full CRM package',
+        priority: 'medium',
+        rationale: 'full package fit',
+        diagnosticSignals: [],
+        score: 8,
+        coveredServiceIds: ['service-a', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'full-package-id',
+    ]);
+  });
+
+  it('persists generated packages with packageId instead of serviceId', async () => {
+    const { service, recommendationRepository, relevanceRanker } = createService();
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'urgent',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-id'],
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(recommendationRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceId: null,
+        packageId: 'package-id',
+      }),
     );
   });
 });

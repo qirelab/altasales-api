@@ -16,7 +16,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       price: 0,
       skills: [],
       category: null,
-    }) as ServiceCandidate;
+    }) as unknown as ServiceCandidate;
 
   const services = [
     service('from-zero', 'Отдел продаж с нуля'),
@@ -419,7 +419,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     const serviceIds = result.map((item) => item.serviceId);
 
     expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
-    expect(serviceIds.filter((id) => id.startsWith('crm')).length).toBeLessThanOrEqual(2);
+    expect(serviceIds.filter((id) => id?.startsWith('crm')).length).toBeLessThanOrEqual(2);
   });
 
   it('treats canonical high-revenue questionnaire answers as mature department', () => {

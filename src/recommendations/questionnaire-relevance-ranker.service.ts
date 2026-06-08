@@ -116,7 +116,7 @@ export class QuestionnaireRelevanceRankerService {
     const rules = this.buildRules(normalizedProfile, stage);
     const desiredText = normalizedProfile.desiredText;
     const rankedById = new Map(
-      ranked.map((item, index) => [item.serviceId, { item, index }]),
+      ranked.map((item, index) => [this.getItemTargetId(item), { item, index }]),
     );
     let defaultItems: GeneratedRecommendationItem[] = [];
 
@@ -133,20 +133,21 @@ export class QuestionnaireRelevanceRankerService {
       }
     }
 
-    const defaultServiceIds = new Set(
-      defaultItems.map((item) => item.serviceId),
+    const defaultTargetIds = new Set(
+      defaultItems.map((item) => this.getItemTargetId(item)),
     );
     const rankedCandidates: GeneratedRecommendationItem[] = [...defaultItems];
 
     for (const service of services) {
-      if (defaultServiceIds.has(service.id)) continue;
+      const targetId = this.getCandidateTargetId(service);
+      if (defaultTargetIds.has(targetId)) continue;
 
       const serviceText = this.normalizeCandidateText(service);
       if (this.getAntiRecommendationReason(serviceText, stage, desiredText)) {
         continue;
       }
 
-      const fromRanked = rankedById.get(service.id);
+      const fromRanked = rankedById.get(targetId);
       const fallback = this.scoringService.scoreService(service, context);
       const matchedRules = rules.filter((rule) =>
         rule.terms.every((term) => serviceText.includes(this.normalize(term))),
@@ -540,7 +541,8 @@ export class QuestionnaireRelevanceRankerService {
       if (selected.length >= limit) break;
       if (
         !selected.some(
-          (selectedItem) => selectedItem.serviceId === item.serviceId,
+          (selectedItem) =>
+            this.getItemTargetId(selectedItem) === this.getItemTargetId(item),
         )
       ) {
         selected.push(item);
@@ -557,25 +559,27 @@ export class QuestionnaireRelevanceRankerService {
     limit: number,
   ): GeneratedRecommendationItem[] {
     const selected: GeneratedRecommendationItem[] = [];
-    const usedServiceIds = new Set<string>();
+    const usedTargetIds = new Set<string>();
 
     for (const rule of NEW_DEPARTMENT_DEFAULT_RULES) {
       const service = services.find((candidate) => {
-        if (usedServiceIds.has(candidate.id)) return false;
+        if (usedTargetIds.has(this.getCandidateTargetId(candidate))) return false;
         const serviceText = this.normalizeCandidateText(candidate);
         return rule.terms.every((term) => serviceText.includes(this.normalize(term)));
       });
 
       if (!service) continue;
 
-      usedServiceIds.add(service.id);
+      const targetId = this.getCandidateTargetId(service);
+      usedTargetIds.add(targetId);
       const base =
-        rankedById.get(service.id)?.item ??
+        rankedById.get(targetId)?.item ??
         this.scoringService.scoreService(service, context);
 
       selected.push({
         ...base,
-        serviceId: service.id,
+        serviceId: base.serviceId,
+        packageId: base.packageId,
         serviceName: service.name,
         rationale: this.buildRationale(service.name, [rule.reason]),
         diagnosticSignals: this.scoringService.normalizeSignals([
@@ -584,6 +588,7 @@ export class QuestionnaireRelevanceRankerService {
           rule.reason,
         ]),
         score: Math.max(Number(base.score || 0), rule.score),
+        coveredServiceIds: base.coveredServiceIds,
       });
 
       if (selected.length >= limit) break;
@@ -634,6 +639,14 @@ export class QuestionnaireRelevanceRankerService {
     if (this.includesAny(text, ['робот', 'автоматизац'])) return 'automation';
     if (text.includes('баз контактов')) return 'data';
     return 'other';
+  }
+
+  private getCandidateTargetId(service: ServiceCandidate): string {
+    return service.packageId ?? service.serviceId ?? service.id;
+  }
+
+  private getItemTargetId(item: GeneratedRecommendationItem): string {
+    return item.packageId ?? item.serviceId ?? '';
   }
 
   private normalizeCandidateText(service: ServiceCandidate): string {

@@ -102,8 +102,76 @@ describe('RecommendationScoringService', () => {
 
     expect(result[0]).toMatchObject({
       serviceId: 'service-id',
-      rationale: 'Best service fit',
     });
+    expect(result[0].rationale).toMatch(/[а-яё]/i);
+  });
+
+  it('resolves AI recommendation output to packageId for package candidates', async () => {
+    const candidate = {
+      id: 'package-id',
+      serviceId: null,
+      packageId: 'package-id',
+      name: 'CRM Package',
+      description: 'CRM package with setup and telephony',
+      type: 'Пакет услуг',
+      skills: ['CRM', 'telephony'],
+      category: { name: 'Пакет услуг' },
+      coveredServiceIds: ['service-id'],
+    } as any;
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"package-id","priority":"urgent","rationale":"Best package fit","diagnosticSignals":["crm_quality"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['CRM data quality'],
+      },
+      [candidate],
+      'crm data quality',
+    );
+
+    expect(result[0]).toMatchObject({
+      serviceId: null,
+      packageId: 'package-id',
+      coveredServiceIds: ['service-id'],
+    });
+    expect(result[0].rationale).toMatch(/[а-яё]/i);
+  });
+
+  it('filters AI recommendations that do not match diagnostics locally', async () => {
+    const relevantCandidate = {
+      id: 'crm-service-id',
+      name: 'CRM Quality',
+      description: 'CRM data cleanup and status audit',
+      type: ServiceType.Service,
+      skills: ['CRM'],
+      category: null,
+    } as any;
+    const unrelatedCandidate = {
+      id: 'unrelated-service-id',
+      name: 'Legal document',
+      description: 'Contract template and legal review',
+      type: ServiceType.Document,
+      skills: ['legal'],
+      category: null,
+    } as any;
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"crm-service-id","priority":"medium","rationale":"Подходит для CRM","diagnosticSignals":["crm_quality"]},{"serviceId":"unrelated-service-id","priority":"medium","rationale":"Looks good","diagnosticSignals":["crm_quality"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['CRM data quality'],
+      },
+      [relevantCandidate, unrelatedCandidate],
+      'crm data quality',
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(['crm-service-id']);
   });
 
   it('does not declare user diagnostics as no_pii for proxy calls', async () => {

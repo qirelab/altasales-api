@@ -44,7 +44,7 @@ describe('RecommendationGenerationJobService', () => {
       'user-id',
       {
         clientProfile: { companyName: 'ACME' },
-        diagnostics: [{ id: 'diag' }],
+        diagnostics: ['diag'],
         limit: 3,
         persist: true,
       },
@@ -56,7 +56,7 @@ describe('RecommendationGenerationJobService', () => {
       ...pendingJob,
       request: {
         clientProfile: { companyName: 'ACME' },
-        diagnostics: [{ id: 'diag' }],
+        diagnostics: ['diag'],
         limit: 3,
         persist: true,
       },
