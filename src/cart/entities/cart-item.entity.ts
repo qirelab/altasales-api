@@ -32,8 +32,9 @@ import { CartItemOffering } from './cart-item-offering.entity';
 })
 @Check(
   'CHK_cart_item_product_type',
-  // eslint-disable-next-line max-len
-  `((("serviceId" IS NOT NULL)::int) + (("packageId" IS NOT NULL)::int) + (("expertPositionId" IS NOT NULL)::int)) = 1`,
+  `(("serviceId" IS NOT NULL)::int
+    + ("packageId" IS NOT NULL)::int
+    + ("expertPositionId" IS NOT NULL)::int) = 1`,
 )
 export class CartItem {
   @PrimaryGeneratedColumn('uuid')
