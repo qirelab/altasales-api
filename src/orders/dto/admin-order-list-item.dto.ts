@@ -8,8 +8,11 @@ export class AdminOrderListItemDto {
   @ApiProperty({ example: 1 })
   itemsCount: number;
 
-  @ApiProperty({ example: 'Услуга', enum: ['Услуга', 'Документ', 'Подрядчик', 'Пакет услуг'] })
-  typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг';
+  @ApiProperty({
+    example: 'Услуга',
+    enum: ['Услуга', 'Документ', 'Подрядчик', 'Пакет услуг', 'Эксперт'],
+  })
+  typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг' | 'Эксперт';
 
   @ApiProperty({ example: 'Внедрение CRM', description: 'Purchased service or package name' })
   name: string;
