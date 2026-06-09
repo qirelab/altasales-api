@@ -412,7 +412,7 @@ export class ChatService {
       return false;
     }
 
-    const matchedContractor = await this.orderRepository
+    const matchedLegacyContractor = await this.orderRepository
       .createQueryBuilder('o')
       .innerJoin('o.item', 'item')
       .innerJoin('item.service', 'service')
@@ -426,7 +426,19 @@ export class ChatService {
       .select('service.id', 'id')
       .getRawOne<{ id: string }>();
 
-    return Boolean(matchedContractor);
+    if (matchedLegacyContractor) {
+      return true;
+    }
+
+    const matchedPositionExecutor = await this.orderRepository
+      .createQueryBuilder('o')
+      .innerJoin('o.item', 'item')
+      .where('o.id = :orderId', { orderId })
+      .andWhere('item."executorUserId" = :expertParticipantId', { expertParticipantId })
+      .select('item.id', 'id')
+      .getRawOne<{ id: string }>();
+
+    return Boolean(matchedPositionExecutor);
   }
 
   private async requireUserById(userId: string, message: string): Promise<User> {

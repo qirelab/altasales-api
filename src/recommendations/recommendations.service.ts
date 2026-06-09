@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, IsNull, Not, Repository } from 'typeorm';
+import { OrderItem } from '../orders/entities/order-item.entity';
+import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
@@ -46,7 +48,26 @@ export type PackageInnerServiceItem = {
   name: string;
   type: ServiceType;
   price: number;
+  status: RecommendationStatus | null;
 };
+
+function mapOrderStatusToRecommendationStatus(
+  status: OrderStatus,
+): RecommendationStatus | null {
+  switch (status) {
+    case OrderStatus.PendingPayment:
+    case OrderStatus.Planned:
+      return RecommendationStatus.Planned;
+    case OrderStatus.InProgress:
+      return RecommendationStatus.InProgress;
+    case OrderStatus.Completed:
+      return RecommendationStatus.Completed;
+    case OrderStatus.Cancelled:
+      return RecommendationStatus.Recommended;
+    default:
+      return null;
+  }
+}
 
 export type UserRecommendationListItem = {
   id: string;
@@ -96,6 +117,8 @@ export class RecommendationsService implements OnModuleInit {
     private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(Questionnaire)
     private readonly questionnaireRepository: Repository<Questionnaire>,
     private readonly scoringService: RecommendationScoringService,
@@ -133,7 +156,7 @@ export class RecommendationsService implements OnModuleInit {
   async findAssignedToUserList(
     userId: string,
   ): Promise<UserRecommendationListItem[]> {
-    const rows = await this.recommendationRepository
+    const rawRows = await this.recommendationRepository
       .createQueryBuilder('recommendation')
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
@@ -142,6 +165,7 @@ export class RecommendationsService implements OnModuleInit {
       .select('recommendation.id', 'id')
       .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('recommendation."packageId"', 'packageId')
+      .addSelect('recommendation."orderId"', 'orderId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
       .addSelect(
@@ -159,16 +183,16 @@ export class RecommendationsService implements OnModuleInit {
       .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
-      .getRawMany<UserRecommendationListItem>();
+      .getRawMany<UserRecommendationListItem & { orderId: string | null }>();
 
-    const packageIds = rows
-      .filter((row) => row.packageId)
-      .map((row) => row.packageId as string);
+    const rows: UserRecommendationListItem[] = rawRows.map(
+      ({ orderId: _omit, ...rest }) => rest,
+    );
 
-    if (packageIds.length === 0) {
-      return rows;
-    }
+    const packageRows = rawRows.filter((row) => row.packageId);
+    if (packageRows.length === 0) return rows;
 
+    const packageIds = packageRows.map((row) => row.packageId as string);
     const packagesWithServices = await this.packageRepository.find({
       where: packageIds.map((id) => ({ id })),
       relations: ['services'],
@@ -185,18 +209,65 @@ export class RecommendationsService implements OnModuleInit {
           name: service.name,
           type: service.type,
           price: Number(service.price),
+          status: null,
         })),
       );
     });
 
-    return rows.map((row) =>
-      row.packageId
-        ? {
-            ...row,
-            services: innerServicesByPackageId.get(row.packageId) ?? [],
-          }
-        : row,
+    const subStatusByRecId = await this.loadPackageSubItemStatuses(packageRows);
+
+    return rows.map((row) => {
+      if (!row.packageId) return row;
+      const innerServices = innerServicesByPackageId.get(row.packageId) ?? [];
+      const subStatusMap = subStatusByRecId.get(row.id);
+      const services = innerServices.map((service) => ({
+        ...service,
+        status: subStatusMap?.get(service.id) ?? null,
+      }));
+      return { ...row, services };
+    });
+  }
+
+  private async loadPackageSubItemStatuses(
+    packageRows: Array<{
+      id: string;
+      packageId: string | null;
+      orderId: string | null;
+    }>,
+  ): Promise<Map<string, Map<string, RecommendationStatus>>> {
+    const orderIds = packageRows.flatMap((row) =>
+      row.orderId ? [row.orderId] : [],
     );
+    const result = new Map<string, Map<string, RecommendationStatus>>();
+    if (orderIds.length === 0) return result;
+
+    const orderItems = await this.orderItemRepository.find({
+      where: [...new Set(orderIds)].map((orderId) => ({ orderId })),
+      relations: ['subItems'],
+    });
+
+    const subItemMapByKey = new Map<
+      string,
+      Map<string, RecommendationStatus>
+    >();
+    orderItems.forEach((item) => {
+      if (!item.packageId) return;
+      const key = `${item.orderId}:${item.packageId}`;
+      const inner = new Map<string, RecommendationStatus>();
+      item.subItems.forEach((sub) => {
+        if (!sub.serviceId) return;
+        const mapped = mapOrderStatusToRecommendationStatus(sub.status);
+        if (mapped) inner.set(sub.serviceId, mapped);
+      });
+      subItemMapByKey.set(key, inner);
+    });
+
+    packageRows.forEach((row) => {
+      if (!row.orderId || !row.packageId) return;
+      const map = subItemMapByKey.get(`${row.orderId}:${row.packageId}`);
+      if (map) result.set(row.id, map);
+    });
+    return result;
   }
 
   async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {

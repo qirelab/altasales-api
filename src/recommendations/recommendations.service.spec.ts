@@ -44,6 +44,9 @@ describe('RecommendationsService', () => {
     const orderRepository = {
       findOne: jest.fn(),
     };
+    const orderItemRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
     const questionnaireRepository = {
       findOne: jest.fn().mockResolvedValue({
         userId,
@@ -88,6 +91,7 @@ describe('RecommendationsService', () => {
       serviceRepository as any,
       packageRepository as any,
       orderRepository as any,
+      orderItemRepository as any,
       questionnaireRepository as any,
       scoringService as any,
       relevanceRanker as any,

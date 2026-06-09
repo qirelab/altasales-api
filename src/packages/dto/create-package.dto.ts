@@ -30,6 +30,14 @@ export class CreatePackageDto {
   price: number;
 
   @ApiPropertyOptional({
+    example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg',
+    description: 'Package image URL',
+  })
+  @IsOptional()
+  @IsString()
+  image?: string | null;
+
+  @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',
     description: 'Category ID for package',
   })
