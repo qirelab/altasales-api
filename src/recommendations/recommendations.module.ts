@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AiModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
 import { MailModule } from '../mail/mail.module';
+import { OrderItem } from '../orders/entities/order-item.entity';
 import { Order } from '../orders/entities/order.entity';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
@@ -29,6 +30,7 @@ import { RecommendationsService } from './recommendations.service';
       Service,
       ServicePackage,
       Order,
+      OrderItem,
     ]),
     AiModule,
     AuthModule,
