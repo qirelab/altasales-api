@@ -10,7 +10,10 @@ import {
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { CreateQuestionnaireDto } from './dto/create-questionnaire.dto';
 import { UpdateQuestionnaireAnswersDto } from './dto/update-questionnaire-answers.dto';
-import { Questionnaire, type QuestionnaireAnswers } from './entities/questionnaire.entity';
+import {
+  Questionnaire,
+  type QuestionnaireAnswers,
+} from './entities/questionnaire.entity';
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/entities/user-role.enum';
 import { MailService } from '../mail/mail.service';
@@ -27,9 +30,12 @@ export class QuestionnairesService {
     private readonly mailService: MailService,
     private readonly balanceService: BalanceService,
     private readonly websocketGateway: WebSocketGatewayService,
-  ) { }
+  ) {}
 
-  async create(dto: CreateQuestionnaireDto, userId: string): Promise<Questionnaire> {
+  async create(
+    dto: CreateQuestionnaireDto,
+    userId: string,
+  ): Promise<Questionnaire> {
     const existing = await this.findByUserId(userId);
 
     if (existing) {
@@ -49,7 +55,8 @@ export class QuestionnairesService {
     try {
       const user = await this.usersService.findOne(userId);
       if (user.role === UserRole.USER) {
-        const alreadyCredited = await this.balanceService.hasRegistrationGift(userId);
+        const alreadyCredited =
+          await this.balanceService.hasRegistrationGift(userId);
         if (!alreadyCredited) {
           await this.balanceService.creditRegistrationGift(userId);
 
@@ -80,7 +87,10 @@ export class QuestionnairesService {
   ): void {
     void this.recommendationsService
       .startGenerationForUser(userId, {
-        clientProfile: questionnaire.answers as unknown as Record<string, unknown>,
+        clientProfile: questionnaire.answers as unknown as Record<
+          string,
+          unknown
+        >,
         persist: true,
       })
       .catch((error) => {
@@ -149,9 +159,7 @@ export class QuestionnairesService {
     return this.repo.findOne({ where: { userId } });
   }
 
-  async findByUserIdForAdmin(
-    userId: string,
-  ): Promise<{
+  async findByUserIdForAdmin(userId: string): Promise<{
     questionnaire: Questionnaire | null;
     recommendations: UserRecommendationListItem[];
   }> {
@@ -180,6 +188,8 @@ export class QuestionnairesService {
       dto as unknown as Record<string, unknown>,
     ) as unknown as Questionnaire['answers'];
 
-    return this.repo.save(questionnaire);
+    const saved = await this.repo.save(questionnaire);
+    this.scheduleRecommendationGeneration(saved, saved.userId);
+    return saved;
   }
 }

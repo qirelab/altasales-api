@@ -6,7 +6,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, IsNull, Repository } from 'typeorm';
+import { Brackets, IsNull, Not, Repository } from 'typeorm';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
@@ -98,6 +98,12 @@ export type AdminRecommendationListItem = {
   dependencyIds: string[];
 };
 
+interface ExistingRecommendationCoverage {
+  targetId: string;
+  coveredServiceIds: Set<string>;
+  blocksOverlaps: boolean;
+}
+
 @Injectable()
 export class RecommendationsService implements OnModuleInit {
   constructor(
@@ -142,10 +148,7 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
-      .orderBy(
-        `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
-        'ASC',
-      )
+      .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
@@ -165,7 +168,10 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."orderId"', 'orderId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
-      .addSelect("COALESCE(serviceCategory.name, packageCategory.name, '')", 'category')
+      .addSelect(
+        "COALESCE(serviceCategory.name, packageCategory.name, '')",
+        'category',
+      )
       .addSelect('COALESCE(service.price, package.price)', 'price')
       .addSelect('recommendation.status', 'status')
       .addSelect('recommendation.priority', 'priority')
@@ -175,14 +181,13 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
-      .orderBy(
-        `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
-        'ASC',
-      )
+      .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
       .getRawMany<UserRecommendationListItem & { orderId: string | null }>();
 
-    const rows: UserRecommendationListItem[] = rawRows.map(({ orderId: _omit, ...rest }) => rest);
+    const rows: UserRecommendationListItem[] = rawRows.map(
+      ({ orderId: _omit, ...rest }) => rest,
+    );
 
     const packageRows = rawRows.filter((row) => row.packageId);
     if (packageRows.length === 0) return rows;
@@ -192,7 +197,10 @@ export class RecommendationsService implements OnModuleInit {
       where: packageIds.map((id) => ({ id })),
       relations: ['services'],
     });
-    const innerServicesByPackageId = new Map<string, PackageInnerServiceItem[]>();
+    const innerServicesByPackageId = new Map<
+      string,
+      PackageInnerServiceItem[]
+    >();
     packagesWithServices.forEach((pkg) => {
       innerServicesByPackageId.set(
         pkg.id,
@@ -221,9 +229,15 @@ export class RecommendationsService implements OnModuleInit {
   }
 
   private async loadPackageSubItemStatuses(
-    packageRows: Array<{ id: string; packageId: string | null; orderId: string | null }>,
+    packageRows: Array<{
+      id: string;
+      packageId: string | null;
+      orderId: string | null;
+    }>,
   ): Promise<Map<string, Map<string, RecommendationStatus>>> {
-    const orderIds = packageRows.flatMap((row) => (row.orderId ? [row.orderId] : []));
+    const orderIds = packageRows.flatMap((row) =>
+      row.orderId ? [row.orderId] : [],
+    );
     const result = new Map<string, Map<string, RecommendationStatus>>();
     if (orderIds.length === 0) return result;
 
@@ -232,7 +246,10 @@ export class RecommendationsService implements OnModuleInit {
       relations: ['subItems'],
     });
 
-    const subItemMapByKey = new Map<string, Map<string, RecommendationStatus>>();
+    const subItemMapByKey = new Map<
+      string,
+      Map<string, RecommendationStatus>
+    >();
     orderItems.forEach((item) => {
       if (!item.packageId) return;
       const key = `${item.orderId}:${item.packageId}`;
@@ -263,20 +280,26 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
-      .orderBy(
-        `CASE recommendation.priority WHEN 'urgent' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END`,
-        'ASC',
-      )
+      .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
       .getMany();
   }
 
   // ── Admin CRUD (merged from develop) ──────────────────────────────
 
-  async createForAdmin(dto: CreateAdminRecommendationDto): Promise<Recommendation> {
+  async createForAdmin(
+    dto: CreateAdminRecommendationDto,
+  ): Promise<Recommendation> {
     const user = await this.getUserOrThrow(dto.userId);
-    const target = await this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
-    await this.ensureRecommendationIsUnique(dto.userId, target.serviceId, target.packageId);
+    const target = await this.resolveAndValidateRecommendationTarget(
+      dto.serviceId,
+      dto.packageId,
+    );
+    await this.ensureRecommendationIsUnique(
+      dto.userId,
+      target.serviceId,
+      target.packageId,
+    );
     await ensureDependencyGraphIsValid(
       this.recommendationRepository,
       dto.dependencyIds ?? [],
@@ -294,7 +317,9 @@ export class RecommendationsService implements OnModuleInit {
       priority: dto.priority ?? RecommendationPriority.Medium,
       rationale: dto.rationale ?? null,
       dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
-      diagnosticSignals: this.scoringService.normalizeSignals(dto.diagnosticSignals ?? []),
+      diagnosticSignals: this.scoringService.normalizeSignals(
+        dto.diagnosticSignals ?? [],
+      ),
       generatedAt: null,
       orderId: null,
     });
@@ -302,7 +327,10 @@ export class RecommendationsService implements OnModuleInit {
     const saved = await this.recommendationRepository.save(recommendation);
 
     if (shouldNotify) {
-      await this.notificationService.notifyUserAboutRecommendations(user, saved);
+      await this.notificationService.notifyUserAboutRecommendations(
+        user,
+        saved,
+      );
     }
 
     return this.findRecommendationWithRelationsOrThrow(saved.id);
@@ -321,11 +349,13 @@ export class RecommendationsService implements OnModuleInit {
   ): Promise<Recommendation> {
     const recommendation = await this.getRecommendationOrThrow(id);
 
-    const shouldUpdateTarget = dto.serviceId !== undefined || dto.packageId !== undefined;
+    const shouldUpdateTarget =
+      dto.serviceId !== undefined || dto.packageId !== undefined;
     if (shouldUpdateTarget) {
       const target = await this.resolveUpdateRecommendationTarget(dto);
-      const changedTarget = target.serviceId !== recommendation.serviceId
-        || target.packageId !== recommendation.packageId;
+      const changedTarget =
+        target.serviceId !== recommendation.serviceId ||
+        target.packageId !== recommendation.packageId;
 
       if (changedTarget) {
         await this.ensureRecommendationIsUnique(
@@ -359,8 +389,9 @@ export class RecommendationsService implements OnModuleInit {
     }
 
     if (dto.diagnosticSignals) {
-      recommendation.diagnosticSignals =
-        this.scoringService.normalizeSignals(dto.diagnosticSignals);
+      recommendation.diagnosticSignals = this.scoringService.normalizeSignals(
+        dto.diagnosticSignals,
+      );
     }
 
     const saved = await this.recommendationRepository.save(recommendation);
@@ -410,10 +441,7 @@ export class RecommendationsService implements OnModuleInit {
     await this.ensureUserExists(userId);
     const request = {
       ...dto,
-      clientProfile: await this.resolveClientProfile(
-        userId,
-        dto.clientProfile,
-      ),
+      clientProfile: await this.resolveClientProfile(userId, dto.clientProfile),
     };
 
     return this.generationJobService.startGenerationForUser(
@@ -467,6 +495,10 @@ export class RecommendationsService implements OnModuleInit {
       context,
       limit,
     );
+    ranked = this.filterOverlappingRecommendations(
+      ranked,
+      await this.findExistingRecommendationCoverage(dto.userId),
+    );
 
     if (dto.persist === false) {
       return ranked;
@@ -481,6 +513,8 @@ export class RecommendationsService implements OnModuleInit {
       );
       persisted.push({ ...item, recommendation });
     }
+
+    await this.pruneStaleGeneratedRecommendations(dto.userId, ranked);
 
     return persisted;
   }
@@ -519,10 +553,18 @@ export class RecommendationsService implements OnModuleInit {
     return recommendation;
   }
 
-  private async findRecommendationWithRelationsOrThrow(id: string): Promise<Recommendation> {
+  private async findRecommendationWithRelationsOrThrow(
+    id: string,
+  ): Promise<Recommendation> {
     const recommendation = await this.recommendationRepository.findOne({
       where: { id },
-      relations: ['service', 'service.category', 'package', 'package.category', 'order'],
+      relations: [
+        'service',
+        'service.category',
+        'package',
+        'package.category',
+        'order',
+      ],
     });
     if (!recommendation) {
       throw new NotFoundException(`Recommendation with id ${id} not found`);
@@ -531,16 +573,75 @@ export class RecommendationsService implements OnModuleInit {
   }
 
   private async findRecommendableServices(): Promise<ServiceCandidate[]> {
-    return this.serviceRepository
-      .createQueryBuilder('service')
-      .leftJoinAndSelect('service.category', 'category')
-      .where('service.type IN (:...serviceTypes)', {
-        serviceTypes: [ServiceType.Service, ServiceType.Document],
+    const [services, packages] = await Promise.all([
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.category', 'category')
+        .where('service.type IN (:...serviceTypes)', {
+          serviceTypes: [ServiceType.Service, ServiceType.Document],
+        })
+        .andWhere('service."deletedAt" IS NULL')
+        .orderBy('service.createdAt', 'DESC')
+        .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
+        .getMany(),
+      this.packageRepository.find({
+        where: activePackageWhere(),
+        relations: ['category', 'services', 'services.category'],
+        order: { createdAt: 'DESC' },
+      }),
+    ]);
+    const packageCandidates = packages
+      .map((servicePackage) => {
+        const activeServices = filterActiveServices(servicePackage.services);
+        if (activeServices.length === 0) return null;
+
+        return {
+          id: servicePackage.id,
+          serviceId: null,
+          packageId: servicePackage.id,
+          name: servicePackage.name,
+          description: [
+            servicePackage.description,
+            ...activeServices.map((service) => service.name),
+          ].join(' '),
+          type: 'Пакет услуг',
+          price: servicePackage.price,
+          image: null,
+          skills: [
+            ...(servicePackage.tags ?? []),
+            ...activeServices.flatMap((service) => [
+              service.name,
+              ...(service.skills ?? []),
+            ]),
+          ],
+          categoryId: servicePackage.categoryId,
+          category: servicePackage.category,
+          contractorRatePerHour: null,
+          contractorExperienceYears: null,
+          userId: null,
+          user: null,
+          packages: [],
+          createdAt: servicePackage.createdAt,
+          deletedAt: servicePackage.deletedAt,
+          coveredServiceIds: activeServices.map((service) => service.id),
+        } as unknown as ServiceCandidate;
       })
-      .andWhere('service."deletedAt" IS NULL')
-      .orderBy('service.createdAt', 'DESC')
-      .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
-      .getMany() as Promise<ServiceCandidate[]>;
+      .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
+    const shouldSkipLegacyPackageServices = packageCandidates.length > 0;
+    const serviceCandidates = services
+      .filter(
+        (service) =>
+          !shouldSkipLegacyPackageServices ||
+          service.category?.name !== 'Пакет услуг',
+      )
+      .map((service) => ({
+        ...service,
+        serviceId: service.id,
+        packageId: null,
+        coveredServiceIds: [service.id],
+      })) as ServiceCandidate[];
+
+    return [...packageCandidates, ...serviceCandidates];
   }
 
   private async resolveClientProfile(
@@ -566,9 +667,9 @@ export class RecommendationsService implements OnModuleInit {
   ): clientProfile is Record<string, unknown> {
     return Boolean(
       clientProfile &&
-        typeof clientProfile === 'object' &&
-        Object.keys(clientProfile).length > 0,
-      );
+      typeof clientProfile === 'object' &&
+      Object.keys(clientProfile).length > 0,
+    );
   }
 
   private mergeProfiles(
@@ -596,11 +697,211 @@ export class RecommendationsService implements OnModuleInit {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
+  private async findExistingRecommendationCoverage(
+    userId: string,
+  ): Promise<ExistingRecommendationCoverage[]> {
+    const recommendations = await this.recommendationRepository.find({
+      where: { userId },
+      relations: ['package', 'package.services'],
+    });
+    const coverage: ExistingRecommendationCoverage[] = [];
+
+    recommendations.forEach((recommendation) => {
+      const targetId = this.getRecommendationTargetId(recommendation);
+      if (!targetId) return;
+      const isReplaceableGeneratedRecommendation =
+        recommendation.status === RecommendationStatus.Recommended &&
+        recommendation.generatedAt != null;
+
+      coverage.push({
+        targetId,
+        coveredServiceIds: new Set(
+          this.getRecommendationCoveredServiceIds(recommendation),
+        ),
+        blocksOverlaps: !isReplaceableGeneratedRecommendation,
+      });
+    });
+
+    return coverage;
+  }
+
+  private filterOverlappingRecommendations(
+    items: GeneratedRecommendationItem[],
+    existingCoverage: ExistingRecommendationCoverage[],
+  ): GeneratedRecommendationItem[] {
+    const selected: GeneratedRecommendationItem[] = [];
+    const selectedTargetIds = new Set<string>();
+    const selectedCoveredServiceIds = new Set<string>();
+
+    for (const item of items) {
+      const targetId = this.getGeneratedRecommendationTargetId(item);
+      if (!targetId || selectedTargetIds.has(targetId)) continue;
+
+      const coveredServiceIds =
+        this.getGeneratedRecommendationCoveredServiceIds(item);
+      const existingCoveredServiceIds =
+        this.getExistingCoveredServiceIdsExceptTarget(
+          existingCoverage,
+          targetId,
+        );
+      const overlapsExisting = coveredServiceIds.some((serviceId) =>
+        existingCoveredServiceIds.has(serviceId),
+      );
+      const overlapsSelected = coveredServiceIds.some((serviceId) =>
+        selectedCoveredServiceIds.has(serviceId),
+      );
+
+      if (overlapsExisting) continue;
+
+      if (overlapsSelected) {
+        const overlappingSelected = selected.filter((selectedItem) =>
+          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).some(
+            (serviceId) => coveredServiceIds.includes(serviceId),
+          ),
+        );
+
+        if (
+          !this.shouldReplaceOverlappingRecommendations(
+            item,
+            overlappingSelected,
+          )
+        ) {
+          continue;
+        }
+
+        overlappingSelected.forEach((selectedItem) => {
+          const selectedTargetId =
+            this.getGeneratedRecommendationTargetId(selectedItem);
+          if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
+          const selectedIndex = selected.indexOf(selectedItem);
+          if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
+        });
+        selectedCoveredServiceIds.clear();
+        selected.forEach((selectedItem) => {
+          this.getGeneratedRecommendationCoveredServiceIds(
+            selectedItem,
+          ).forEach((serviceId) => selectedCoveredServiceIds.add(serviceId));
+        });
+      }
+
+      selected.push(item);
+      selectedTargetIds.add(targetId);
+      coveredServiceIds.forEach((serviceId) =>
+        selectedCoveredServiceIds.add(serviceId),
+      );
+    }
+
+    return selected;
+  }
+
+  private shouldReplaceOverlappingRecommendations(
+    item: GeneratedRecommendationItem,
+    overlappingSelected: GeneratedRecommendationItem[],
+  ): boolean {
+    if (!item.packageId || overlappingSelected.length === 0) {
+      return false;
+    }
+
+    const itemCoverageSize =
+      this.getGeneratedRecommendationCoveredServiceIds(item).length;
+    const maxSelectedCoverageSize = Math.max(
+      ...overlappingSelected.map(
+        (selectedItem) =>
+          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).length,
+      ),
+    );
+
+    return itemCoverageSize > maxSelectedCoverageSize;
+  }
+
+  private getExistingCoveredServiceIdsExceptTarget(
+    coverage: ExistingRecommendationCoverage[],
+    targetId: string,
+  ): Set<string> {
+    const result = new Set<string>();
+
+    coverage.forEach((entry) => {
+      if (!entry.blocksOverlaps || entry.targetId === targetId) return;
+      entry.coveredServiceIds.forEach((serviceId) => result.add(serviceId));
+    });
+
+    return result;
+  }
+
+  private async pruneStaleGeneratedRecommendations(
+    userId: string,
+    currentItems: GeneratedRecommendationItem[],
+  ): Promise<void> {
+    const currentTargetIds = new Set(
+      currentItems
+        .map((item) => this.getGeneratedRecommendationTargetId(item))
+        .filter((targetId): targetId is string => Boolean(targetId)),
+    );
+    const generatedRecommendations = await this.recommendationRepository.find({
+      where: {
+        userId,
+        status: RecommendationStatus.Recommended,
+        generatedAt: Not(IsNull()),
+      },
+    });
+    const staleIds = generatedRecommendations
+      .filter((recommendation) => {
+        const targetId = this.getRecommendationTargetId(recommendation);
+        return !targetId || !currentTargetIds.has(targetId);
+      })
+      .map((recommendation) => recommendation.id);
+
+    if (staleIds.length === 0) return;
+
+    await this.recommendationRepository.delete(staleIds);
+  }
+
+  private getGeneratedRecommendationTargetId(
+    item: GeneratedRecommendationItem,
+  ): string | null {
+    return item.packageId ?? item.serviceId ?? null;
+  }
+
+  private getGeneratedRecommendationCoveredServiceIds(
+    item: GeneratedRecommendationItem,
+  ): string[] {
+    if (item.coveredServiceIds?.length) {
+      return item.coveredServiceIds;
+    }
+    return item.serviceId ? [item.serviceId] : [];
+  }
+
+  private getRecommendationTargetId(
+    recommendation: Recommendation,
+  ): string | null {
+    return recommendation.packageId ?? recommendation.serviceId ?? null;
+  }
+
+  private getRecommendationCoveredServiceIds(
+    recommendation: Recommendation,
+  ): string[] {
+    if (recommendation.packageId) {
+      return filterActiveServices(recommendation.package?.services).map(
+        (service) => service.id,
+      );
+    }
+    return recommendation.serviceId ? [recommendation.serviceId] : [];
+  }
+
   private async upsertGeneratedRecommendation(
     userId: string,
     item: GeneratedRecommendationItem,
   ): Promise<Recommendation> {
-    const where = { userId, serviceId: item.serviceId };
+    const serviceId = item.serviceId ?? null;
+    const packageId = item.packageId ?? null;
+    if (!serviceId && !packageId) {
+      throw new BadRequestException(
+        'Generated recommendation target is missing',
+      );
+    }
+    const where = serviceId
+      ? { userId, serviceId }
+      : { userId, packageId: packageId as string };
 
     const existing = await this.recommendationRepository.findOne({
       where,
@@ -616,8 +917,8 @@ export class RecommendationsService implements OnModuleInit {
 
     const recommendation = this.recommendationRepository.create({
       userId,
-      serviceId: item.serviceId,
-      packageId: null,
+      serviceId,
+      packageId,
       status: RecommendationStatus.Recommended,
       priority: item.priority,
       rationale: item.rationale,
@@ -663,11 +964,13 @@ export class RecommendationsService implements OnModuleInit {
 
     return recommendations.map((item) => ({
       serviceId: item.serviceId,
+      packageId: item.packageId ?? null,
       serviceName: item.serviceName,
       priority: item.priority,
       rationale: item.rationale,
       diagnosticSignals: item.diagnosticSignals,
       score: item.score,
+      coveredServiceIds: item.coveredServiceIds ?? [],
       recommendationId: item.recommendation?.id,
     }));
   }
@@ -679,7 +982,9 @@ export class RecommendationsService implements OnModuleInit {
     const hasService = Boolean(serviceId);
     const hasPackage = Boolean(packageId);
     if (hasService === hasPackage) {
-      throw new BadRequestException('Exactly one of serviceId or packageId must be provided');
+      throw new BadRequestException(
+        'Exactly one of serviceId or packageId must be provided',
+      );
     }
     if (serviceId) {
       await this.ensureServiceCanBeRecommended(serviceId);
@@ -695,12 +1000,21 @@ export class RecommendationsService implements OnModuleInit {
     const hasService = dto.serviceId !== undefined;
     const hasPackage = dto.packageId !== undefined;
     if (hasService && hasPackage) {
-      return this.resolveAndValidateRecommendationTarget(dto.serviceId, dto.packageId);
+      return this.resolveAndValidateRecommendationTarget(
+        dto.serviceId,
+        dto.packageId,
+      );
     }
     if (hasService) {
-      return this.resolveAndValidateRecommendationTarget(dto.serviceId, undefined);
+      return this.resolveAndValidateRecommendationTarget(
+        dto.serviceId,
+        undefined,
+      );
     }
-    return this.resolveAndValidateRecommendationTarget(undefined, dto.packageId);
+    return this.resolveAndValidateRecommendationTarget(
+      undefined,
+      dto.packageId,
+    );
   }
 
   // ── Validation helpers ────────────────────────────────────────────
@@ -717,21 +1031,28 @@ export class RecommendationsService implements OnModuleInit {
     await this.getUserOrThrow(userId);
   }
 
-  private async ensureServiceCanBeRecommended(serviceId: string): Promise<void> {
+  private async ensureServiceCanBeRecommended(
+    serviceId: string,
+  ): Promise<void> {
     const service = await this.serviceRepository.findOne({
       where: { id: serviceId, deletedAt: IsNull() },
     });
     if (!service) {
       throw new NotFoundException(`Service with id ${serviceId} not found`);
     }
-    if (service.type !== ServiceType.Service && service.type !== ServiceType.Document) {
+    if (
+      service.type !== ServiceType.Service &&
+      service.type !== ServiceType.Document
+    ) {
       throw new BadRequestException(
         'Only services and documents can be assigned as recommendations',
       );
     }
   }
 
-  private async ensurePackageCanBeRecommended(packageId: string): Promise<void> {
+  private async ensurePackageCanBeRecommended(
+    packageId: string,
+  ): Promise<void> {
     const servicePackage = await this.packageRepository.findOne({
       where: { id: packageId, ...activePackageWhere() },
     });
@@ -788,19 +1109,17 @@ export class RecommendationsService implements OnModuleInit {
   private isUniqueConstraintViolation(error: unknown): boolean {
     return Boolean(
       error &&
-        typeof error === 'object' &&
-        (error as { code?: unknown }).code === '23505',
+      typeof error === 'object' &&
+      (error as { code?: unknown }).code === '23505',
     );
   }
 
   private visibleRecommendationTargetFilter(): Brackets {
     return new Brackets((qb) => {
-      qb
-        .where(
-          'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL',
-          { serviceTypes: [ServiceType.Service, ServiceType.Document] },
-        )
-        .orWhere('package.id IS NOT NULL AND package."deletedAt" IS NULL');
+      qb.where(
+        'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL',
+        { serviceTypes: [ServiceType.Service, ServiceType.Document] },
+      ).orWhere('package.id IS NOT NULL AND package."deletedAt" IS NULL');
     });
   }
 }
