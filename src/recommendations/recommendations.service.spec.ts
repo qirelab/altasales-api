@@ -278,6 +278,68 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('skips legacy package-category services that duplicate real package candidates', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'legacy-package-service-id',
+        name: 'CRM Бронза',
+        description: 'Базовый запуск CRM',
+        type: ServiceType.Service,
+        price: 60000,
+        skills: ['crm бронза'],
+        category: { name: 'Пакет услуг' },
+      },
+      {
+        id: 'regular-service-id',
+        name: 'Интеграция телефонии',
+        description: 'Подключение звонков',
+        type: ServiceType.Service,
+        price: 20000,
+        skills: ['телефония'],
+        category: { name: 'CRM система' },
+      },
+    ]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'real-package-id',
+        name: 'CRM Бронза',
+        description: 'Package',
+        price: 80000,
+        tags: ['crm'],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'regular-service-id',
+            name: 'Интеграция телефонии',
+            deletedAt: null,
+            skills: ['телефония'],
+            category: { name: 'CRM система' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.packageId ?? item.serviceId)).toEqual(
+      expect.arrayContaining(['real-package-id', 'regular-service-id']),
+    );
+    expect(candidates.map((item) => item.serviceId)).not.toContain(
+      'legacy-package-service-id',
+    );
+  });
+
   it('removes a service recommendation when a selected package already covers it', async () => {
     const { service, relevanceRanker } = createService();
     relevanceRanker.rankRecommendations.mockReturnValue([

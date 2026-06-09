@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
+import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import {
   GeneratedRecommendationItem,
   RecommendationScoringService,
@@ -97,6 +98,9 @@ const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
   other: 2,
 };
 
+const URGENT_RANKER_SCORE = 70;
+const MEDIUM_RANKER_SCORE = 12;
+
 @Injectable()
 export class QuestionnaireRelevanceRankerService {
   constructor(private readonly scoringService: RecommendationScoringService) {}
@@ -168,7 +172,7 @@ export class QuestionnaireRelevanceRankerService {
 
       rankedCandidates.push({
         ...base,
-        priority: base.priority,
+        priority: this.resolveBoostedPriority(score, base.priority),
         rationale:
           reasons.length > 0
             ? this.buildRationale(service.name, reasons)
@@ -605,6 +609,10 @@ export class QuestionnaireRelevanceRankerService {
         serviceId: base.serviceId,
         packageId: base.packageId,
         serviceName: service.name,
+        priority: this.resolveBoostedPriority(
+          Math.max(Number(base.score || 0), rule.score),
+          base.priority,
+        ),
         rationale: this.buildRationale(service.name, [rule.reason]),
         diagnosticSignals: this.scoringService.normalizeSignals([
           ...(base.diagnosticSignals ?? []),
@@ -619,6 +627,23 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return selected;
+  }
+
+  private resolveBoostedPriority(
+    score: number,
+    basePriority: RecommendationPriority,
+  ): RecommendationPriority {
+    if (basePriority === RecommendationPriority.Urgent) {
+      return RecommendationPriority.Urgent;
+    }
+    if (score >= URGENT_RANKER_SCORE) return RecommendationPriority.Urgent;
+    if (
+      score >= MEDIUM_RANKER_SCORE ||
+      basePriority === RecommendationPriority.Medium
+    ) {
+      return RecommendationPriority.Medium;
+    }
+    return RecommendationPriority.Low;
   }
 
   private getServiceGroup(item: GeneratedRecommendationItem): ServiceGroup {

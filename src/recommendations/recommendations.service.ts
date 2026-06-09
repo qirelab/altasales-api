@@ -628,6 +628,10 @@ export class RecommendationsService implements OnModuleInit {
       })
       .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
     const serviceCandidates = services
+      .filter(
+        (service) =>
+          !this.isDuplicateLegacyPackageService(service, packageCandidates),
+      )
       .map((service) => ({
         ...service,
         serviceId: service.id,
@@ -636,6 +640,32 @@ export class RecommendationsService implements OnModuleInit {
       })) as ServiceCandidate[];
 
     return [...packageCandidates, ...serviceCandidates];
+  }
+
+  private isDuplicateLegacyPackageService(
+    service: Service,
+    packageCandidates: ServiceCandidate[],
+  ): boolean {
+    if (service.category?.name !== 'Пакет услуг') return false;
+
+    const serviceName = this.normalizeCatalogName(service.name);
+    return packageCandidates.some((candidate) => {
+      const candidateName = this.normalizeCatalogName(candidate.name);
+      return (
+        candidateName === serviceName ||
+        Boolean(candidate.coveredServiceIds?.includes(service.id))
+      );
+    });
+  }
+
+  private normalizeCatalogName(name: string): string {
+    return name
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private async resolveClientProfile(
