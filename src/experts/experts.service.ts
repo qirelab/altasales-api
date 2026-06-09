@@ -626,6 +626,47 @@ export class ExpertsService {
     };
   }
 
+  async getAllExpertUsers(query: ExpertGroupsQueryDto): Promise<AvailableGroupExpertsDto> {
+    const { offset = 0, limit = 20 } = query;
+    const search = query.search?.trim();
+
+    const qb = this.userRepository
+      .createQueryBuilder('u')
+      .where('u.role = :role', { role: UserRole.EXPERT });
+
+    if (search) {
+      qb.andWhere(
+        new Brackets((subQb) => {
+          subQb
+            .where('u.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('u."lastName" ILIKE :search', { search: `%${search}%` })
+            .orWhere(`CONCAT(u.name, ' ', u."lastName") ILIKE :search`, { search: `%${search}%` })
+            .orWhere('u.email ILIKE :search', { search: `%${search}%` });
+        }),
+      );
+    }
+
+    const total = await qb.getCount();
+    const users = await qb
+      .orderBy('u."createdAt"', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getMany();
+
+    return {
+      data: users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        lastName: user.lastName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+      })),
+      total,
+      offset,
+      limit,
+    };
+  }
+
   async addExpertToGroup(groupId: string, dto: AddExpertToGroupDto): Promise<AdminExpertGroupDetailsDto> {
     await this.dataSource.transaction(async (manager) => {
       await this.findActiveGroupOrThrow(groupId, manager);
