@@ -1,5 +1,6 @@
 import {
   Column,
+  DeleteDateColumn,
   Entity,
   JoinColumn,
   ManyToOne,
@@ -30,4 +31,11 @@ export class ExpertPositionOffering {
   @ApiProperty({ example: 'Разовая консультация по вопросам должности' })
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  @ApiProperty({ example: 120000, description: 'Default price for newly attached experts' })
+  @Column({ type: 'decimal', precision: 12, scale: 2 })
+  defaultPrice: number;
+
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
 }

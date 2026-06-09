@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   OneToMany,
   PrimaryGeneratedColumn,
@@ -19,6 +20,10 @@ export class ExpertPosition {
   @Column({ type: 'varchar', length: 120 })
   name: string;
 
+  @ApiProperty({ example: 'MRK' })
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  iconLabel: string | null;
+
   @ApiProperty({ example: 'Стратегия, реклама и аналитика продаж' })
   @Column({ type: 'text' })
   description: string;
@@ -31,4 +36,7 @@ export class ExpertPosition {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  deletedAt: Date | null;
 }
