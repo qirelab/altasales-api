@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 
 export class CreateAdminExpertGroupDto {
   @ApiProperty({ example: 'Маркетолог' })
@@ -22,6 +22,7 @@ export class CreateAdminExpertGroupDto {
   @ApiPropertyOptional({ example: 'https://cdn.example.com/expert-groups/marketing.png' })
   @IsOptional()
   @IsString()
+  @IsUrl({ require_protocol: true })
   @MaxLength(1024)
   image?: string | null;
 }

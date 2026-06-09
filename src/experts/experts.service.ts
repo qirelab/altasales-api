@@ -602,18 +602,31 @@ export class ExpertsService {
     await this.findActiveGroupOrThrow(groupId);
     const { offset = 0, limit = 20 } = query;
 
-    const qb = this.orderItemRepository
+    const total = await this.orderItemRepository.count({
+      where: { expertPositionId: groupId },
+    });
+
+    const idRows = await this.orderItemRepository
+      .createQueryBuilder('item')
+      .leftJoin('item.order', 'order')
+      .select('item.id', 'id')
+      .where('item."expertPositionId" = :groupId', { groupId })
+      .orderBy('order."createdAt"', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getRawMany<{ id: string }>();
+    const itemIds = idRows.map((row) => row.id);
+
+    const items = itemIds.length === 0 ? [] : await this.orderItemRepository
       .createQueryBuilder('item')
       .leftJoinAndSelect('item.order', 'order')
       .leftJoinAndSelect('order.user', 'client')
       .leftJoinAndSelect('item.executor', 'executor')
       .leftJoinAndSelect('item.subItems', 'subItem')
       .leftJoinAndSelect('subItem.expertPositionOffering', 'offering')
-      .where('item."expertPositionId" = :groupId', { groupId })
-      .orderBy('order."createdAt"', 'DESC');
-
-    const total = await qb.getCount();
-    const items = await qb.offset(offset).limit(limit).getMany();
+      .where('item.id IN (:...itemIds)', { itemIds })
+      .orderBy('order."createdAt"', 'DESC')
+      .getMany();
 
     const data: AdminExpertGroupOrderItem[] = items.map((item) => {
       const firstOffering = item.subItems?.find((sub) => sub.expertPositionOffering)?.expertPositionOffering;
