@@ -89,6 +89,7 @@ export interface AdminExpertGroupsListItemDto {
   id: string;
   title: string;
   iconLabel: string | null;
+  image: string | null;
   description: string;
   expertsCount: number;
   expertsPreview: AdminExpertGroupPreviewMember[];
@@ -101,6 +102,7 @@ export interface AdminExpertGroupDetailsDto {
   id: string;
   title: string;
   iconLabel: string | null;
+  image: string | null;
   description: string;
   experts: Array<{
     id: string;
@@ -442,6 +444,7 @@ export class ExpertsService {
         id: group.id,
         title: group.name,
         iconLabel: group.iconLabel ?? null,
+        image: group.image ?? null,
         description: group.description,
         expertsCount: expertsCountByGroup.get(group.id) ?? 0,
         expertsPreview: expertsPreviewByGroup.get(group.id) ?? [],
@@ -506,6 +509,7 @@ export class ExpertsService {
       id: group.id,
       title: group.name,
       iconLabel: group.iconLabel ?? null,
+      image: group.image ?? null,
       description: group.description,
       experts,
       services: services.map((service) => ({
@@ -530,6 +534,7 @@ export class ExpertsService {
       name: dto.title.trim(),
       description: dto.description.trim(),
       iconLabel: dto.iconLabel?.trim() || null,
+      image: dto.image?.trim() || null,
     });
     const saved = await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(saved.id);
@@ -553,6 +558,7 @@ export class ExpertsService {
     }
     if (dto.description !== undefined) group.description = dto.description.trim();
     if (dto.iconLabel !== undefined) group.iconLabel = dto.iconLabel?.trim() || null;
+    if (dto.image !== undefined) group.image = dto.image?.trim() || null;
 
     await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(group.id);

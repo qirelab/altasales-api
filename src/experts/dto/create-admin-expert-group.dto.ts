@@ -18,6 +18,12 @@ export class CreateAdminExpertGroupDto {
   @IsString()
   @MaxLength(16)
   iconLabel?: string | null;
+
+  @ApiPropertyOptional({ example: 'https://cdn.example.com/expert-groups/marketing.png' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1024)
+  image?: string | null;
 }
 
 export class UpdateAdminExpertGroupDto extends PartialType(CreateAdminExpertGroupDto) {}
