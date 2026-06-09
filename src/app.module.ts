@@ -19,6 +19,7 @@ import { PackagesModule } from './packages/packages.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CatalogStorageModule } from './catalog-storage/catalog-storage.module';
 import { ExpertsModule } from './experts/experts.module';
+import { FeedbackModule } from './feedback/feedback.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ExpertsModule } from './experts/experts.module';
     CategoriesModule,
     CatalogStorageModule,
     ExpertsModule,
+    FeedbackModule,
   ],
 })
 export class AppModule {}
