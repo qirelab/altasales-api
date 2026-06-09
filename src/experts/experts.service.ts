@@ -79,12 +79,19 @@ export interface ExpertPositionDetailDto extends ExpertPositionBase {
   executors: ExpertExecutorDto[];
 }
 
+export interface AdminExpertGroupPreviewMember {
+  id: string;
+  name: string;
+  lastName: string;
+}
+
 export interface AdminExpertGroupsListItemDto {
   id: string;
   title: string;
   iconLabel: string | null;
   description: string;
   expertsCount: number;
+  expertsPreview: AdminExpertGroupPreviewMember[];
   servicesCount: number;
   priceFrom: number | null;
   ordersCount: number;
@@ -401,6 +408,28 @@ export class ExpertsService {
       .groupBy('item."expertPositionId"')
       .getRawMany<{ positionId: string; count: string }>();
 
+    const previewMembers = await this.memberRepository
+      .createQueryBuilder('member')
+      .leftJoinAndSelect('member.user', 'user')
+      .where('member."positionId" IN (:...groupIds)', { groupIds })
+      .andWhere('member."deletedAt" IS NULL')
+      .orderBy('member."positionId"')
+      .addOrderBy('member."createdAt"', 'ASC')
+      .getMany();
+    const expertsPreviewByGroup = new Map<string, AdminExpertGroupPreviewMember[]>();
+    for (const member of previewMembers) {
+      if (!member.user || member.user.role !== UserRole.EXPERT) continue;
+      const list = expertsPreviewByGroup.get(member.positionId) ?? [];
+      if (list.length < 3) {
+        list.push({
+          id: member.user.id,
+          name: member.user.name,
+          lastName: member.user.lastName,
+        });
+        expertsPreviewByGroup.set(member.positionId, list);
+      }
+    }
+
     const expertsCountByGroup = new Map(expertsCountsRaw.map((row) => [row.positionId, Number(row.count)]));
     const servicesCountByGroup = new Map(servicesCountsRaw.map((row) => [row.positionId, Number(row.count)]));
     const priceFromByGroup = new Map(
@@ -415,6 +444,7 @@ export class ExpertsService {
         iconLabel: group.iconLabel ?? null,
         description: group.description,
         expertsCount: expertsCountByGroup.get(group.id) ?? 0,
+        expertsPreview: expertsPreviewByGroup.get(group.id) ?? [],
         servicesCount: servicesCountByGroup.get(group.id) ?? 0,
         priceFrom: priceFromByGroup.get(group.id) ?? null,
         ordersCount: ordersCountByGroup.get(group.id) ?? 0,
