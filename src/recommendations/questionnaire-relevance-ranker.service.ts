@@ -42,6 +42,7 @@ type NormalizedQuestionnaireProfile = {
   productStageText: string;
   desiredText: string;
   leadTypeText: string;
+  desiredPeriod: string;
   managersCount: number;
   targetRevenue: number;
 };
@@ -149,7 +150,14 @@ export class QuestionnaireRelevanceRankerService {
       if (defaultTargetIds.has(targetId)) continue;
 
       const serviceText = this.normalizeCandidateText(service);
-      if (this.getAntiRecommendationReason(serviceText, stage, desiredText)) {
+      if (
+        this.getAntiRecommendationReason(
+          serviceText,
+          stage,
+          desiredText,
+          normalizedProfile.desiredPeriod,
+        )
+      ) {
         continue;
       }
 
@@ -398,6 +406,7 @@ export class QuestionnaireRelevanceRankerService {
       productStageText: this.normalize(String(profile.productStage ?? '')),
       desiredText: this.normalize(JSON.stringify(desiredTerms)),
       leadTypeText: this.normalize(JSON.stringify(leadGenerationTypes)),
+      desiredPeriod: this.getDesiredPeriod(profile),
       managersCount: Math.max(
         this.toNumber(profile.calculatedManagersCount),
         this.inferManagersCount(profile),
@@ -406,6 +415,13 @@ export class QuestionnaireRelevanceRankerService {
         this.toNumber(profile.targetRevenue) ||
         this.toNumber(profile.desiredRevenue),
     };
+  }
+
+  private getDesiredPeriod(profile: Record<string, unknown>): string {
+    if (this.isPlainObject(profile.desiredResult)) {
+      return String(profile.desiredResult.period ?? '');
+    }
+    return String(profile.period ?? '');
   }
 
   private inferManagersCount(profile: Record<string, unknown>): number {
@@ -465,7 +481,21 @@ export class QuestionnaireRelevanceRankerService {
     serviceText: string,
     stage: QuestionnaireStage,
     desiredText: string,
+    desiredPeriod: string,
   ): string | null {
+    if (
+      desiredPeriod === '1m' &&
+      this.includesAny(serviceText, [
+        'на 3 месяца',
+        '3 месяца',
+        'трехмесяч',
+        'трех месяцев',
+        'трехмесячный',
+      ])
+    ) {
+      return 'срок услуги не соответствует цели на 1 месяц';
+    }
+
     if (
       stage === 'new_department' &&
       this.includesAny(serviceText, [

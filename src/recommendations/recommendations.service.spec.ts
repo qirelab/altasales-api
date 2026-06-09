@@ -362,6 +362,33 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('skips placeholder legacy package-category services even when they have content', async () => {
+    const { service, serviceRepository, relevanceRanker } = createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'test-package-service-id',
+        name: 'Тестовый пакет',
+        description: 'CRM и настройка воронок',
+        type: ServiceType.Service,
+        price: 425353,
+        skills: ['crm'],
+        category: { name: 'Пакет услуг' },
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.serviceId)).not.toContain(
+      'test-package-service-id',
+    );
+  });
+
   it('skips placeholder real package candidates without own description or tags', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();
@@ -376,6 +403,48 @@ describe('RecommendationsService', () => {
         packageType: 'custom',
         price: 425353,
         tags: [],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'inner-service-id',
+            name: 'Настройка CRM',
+            description: 'Аудит, воронки, роботы и статусы отказа',
+            deletedAt: null,
+            skills: ['crm'],
+            category: { name: 'CRM система' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.packageId)).not.toContain(
+      'placeholder-package-id',
+    );
+  });
+
+  it('skips placeholder real package candidates even when they have content', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'placeholder-package-id',
+        name: 'Тестовый пакет',
+        description: 'CRM и настройка воронок',
+        packageType: 'custom',
+        price: 425353,
+        tags: ['crm'],
         categoryId: 'category-id',
         category: { name: 'Пакет услуг' },
         services: [

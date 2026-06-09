@@ -669,6 +669,7 @@ export class RecommendationsService implements OnModuleInit {
 
   private hasRecommendableServiceContent(service: Service): boolean {
     if (service.category?.name !== 'Пакет услуг') return true;
+    if (this.isPlaceholderCatalogName(service.name)) return false;
 
     const text = this.normalizeCatalogName(
       [
@@ -689,6 +690,8 @@ export class RecommendationsService implements OnModuleInit {
   private isPlaceholderPackageCandidate(
     servicePackage: ServicePackage,
   ): boolean {
+    if (this.isPlaceholderCatalogName(servicePackage.name)) return true;
+
     const text = this.normalizeCatalogName(
       [
         servicePackage.name,
@@ -702,6 +705,10 @@ export class RecommendationsService implements OnModuleInit {
     );
 
     return !body && this.isPlaceholderCatalogText(text);
+  }
+
+  private isPlaceholderCatalogName(name: string): boolean {
+    return this.isPlaceholderCatalogText(this.normalizeCatalogName(name));
   }
 
   private isPlaceholderCatalogText(text: string): boolean {

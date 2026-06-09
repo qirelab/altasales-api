@@ -22,6 +22,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('from-zero', 'Отдел продаж с нуля'),
     service('base-setup', 'Базовая настройка работы отдела продаж'),
     service('docs-package', 'Пакет документов отдела продаж'),
+    service('training-3m', 'Пакет обучения на 3 месяца'),
+    service('training-1m', 'Пакет обучения на месяц'),
     service('crm-start', 'CRM Старт'),
     service('crm-bronze', 'CRM Бронза'),
     service('crm-silver', 'CRM Серебро'),
@@ -491,6 +493,50 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'telephony',
       'messenger',
     ]);
+  });
+
+  it('does not recommend three-month packages for a one-month goal', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '1m',
+            description: 'Нужно быстро обучить менеджеров за месяц',
+          },
+          components: components({
+            trainingSystem: true,
+          }),
+          targetRevenue: 4000000,
+        },
+        persist: false,
+      },
+      services,
+      [
+        {
+          serviceId: 'training-3m',
+          serviceName: 'Пакет обучения на 3 месяца',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+        {
+          serviceId: 'training-1m',
+          serviceName: 'Пакет обучения на месяц',
+          priority: RecommendationPriority.Medium,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 90,
+        },
+      ],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('training-3m');
+    expect(result.map((item) => item.serviceId)).toContain('training-1m');
   });
 
   it('does not cap questionnaire recommendations at five when no limit is provided', () => {
