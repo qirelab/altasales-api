@@ -125,7 +125,10 @@ export class RecommendationScoringService {
 
       const parsed = this.parseAiRecommendationResponse(response.content);
       const servicesById = new Map(
-        services.map((service) => [this.getCandidateTargetId(service), service]),
+        catalogSlice.map((service) => [
+          this.getCandidateTargetId(service),
+          service,
+        ]),
       );
       const result: GeneratedRecommendationItem[] = [];
       const usedTargetIds = new Set<string>();
@@ -162,12 +165,11 @@ export class RecommendationScoringService {
         });
       }
 
-      return result
-        .sort(
-          (a, b) =>
-            b.score - a.score ||
-            this.scorePriority(b.priority) - this.scorePriority(a.priority),
-        );
+      return result.sort(
+        (a, b) =>
+          b.score - a.score ||
+          this.scorePriority(b.priority) - this.scorePriority(a.priority),
+      );
     } catch (error) {
       this.logger.warn({
         eventName: 'AI_RECOMMENDATION_GENERATION_FAILED',
@@ -323,8 +325,7 @@ export class RecommendationScoringService {
     }
 
     return (
-      fallbackRationale ||
-      `${serviceName} подходит по результатам диагностики.`
+      fallbackRationale || `${serviceName} подходит по результатам диагностики.`
     );
   }
 

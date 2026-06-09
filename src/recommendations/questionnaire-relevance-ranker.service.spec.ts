@@ -65,7 +65,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
   });
 
   const scoringService = {
-    scoreService: (candidate: ServiceCandidate): GeneratedRecommendationItem => ({
+    scoreService: (
+      candidate: ServiceCandidate,
+    ): GeneratedRecommendationItem => ({
       serviceId: candidate.id,
       serviceName: candidate.name,
       priority: RecommendationPriority.Low,
@@ -117,12 +119,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           desiredRevenue: 4000000,
           calculatedManagersCount: 2,
           leadGenerationType: 'Входящая',
-          desiredSalesDepartment: [
-            'CRM',
-            'Телефония',
-            'Мессенджер',
-            'Скрипты',
-          ],
+          desiredSalesDepartment: ['CRM', 'Телефония', 'Мессенджер', 'Скрипты'],
         },
         persist: false,
       },
@@ -200,7 +197,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
-  it('keeps visible priority distribution independent from raw relevance score', () => {
+  it('keeps generated recommendation priorities neutral', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -217,12 +214,39 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
 
     expect(result.map((item) => item.priority)).toEqual([
-      RecommendationPriority.Urgent,
       RecommendationPriority.Medium,
       RecommendationPriority.Medium,
-      RecommendationPriority.Low,
-      RecommendationPriority.Low,
+      RecommendationPriority.Medium,
+      RecommendationPriority.Medium,
+      RecommendationPriority.Medium,
     ]);
+  });
+
+  it('does not treat a new product alone as a new sales department', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'Новый',
+          targetResult: 'Увеличить продажи в команде из 6 менеджеров',
+          calculatedManagersCount: 6,
+          components: components({
+            analytics: true,
+            callAnalysis: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      8,
+    );
+
+    expect(result.map((item) => item.serviceId)).toContain('dashboard');
+    expect(result.map((item) => item.serviceId)).not.toEqual(
+      expect.arrayContaining(['from-zero']),
+    );
   });
 
   it('prioritizes requested tools and hiring for a new product with inbound leads', () => {
@@ -395,8 +419,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           productStage: 'Уже продаю',
-          targetResult:
-            'Нужны CRM, аналитика, телефония и контроль качества',
+          targetResult: 'Нужны CRM, аналитика, телефония и контроль качества',
           desiredRevenue: 15000000,
           calculatedManagersCount: 8,
           desiredSalesDepartment: [
@@ -418,8 +441,12 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const serviceIds = result.map((item) => item.serviceId);
 
-    expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
-    expect(serviceIds.filter((id) => id?.startsWith('crm')).length).toBeLessThanOrEqual(2);
+    expect(serviceIds).toEqual(
+      expect.arrayContaining(['dashboard', 'quality']),
+    );
+    expect(
+      serviceIds.filter((id) => id?.startsWith('crm')).length,
+    ).toBeLessThanOrEqual(2);
   });
 
   it('treats canonical high-revenue questionnaire answers as mature department', () => {
@@ -453,7 +480,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const serviceIds = result.map((item) => item.serviceId);
 
-    expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
+    expect(serviceIds).toEqual(
+      expect.arrayContaining(['dashboard', 'quality']),
+    );
     expect(serviceIds).not.toEqual(
       expect.arrayContaining(['from-zero', 'crm-start', 'crm-bronze']),
     );

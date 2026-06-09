@@ -1,4 +1,5 @@
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
+import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { RecommendationsService } from './recommendations.service';
 
 describe('RecommendationsService', () => {
@@ -28,6 +29,7 @@ describe('RecommendationsService', () => {
       findOne: jest.fn(),
       create: jest.fn((value) => value),
       save: jest.fn((value) => Promise.resolve(value)),
+      delete: jest.fn().mockResolvedValue({ affected: 0 }),
     };
     const userRepository = {
       findOne: jest.fn().mockResolvedValue({ id: userId }),
@@ -232,7 +234,8 @@ describe('RecommendationsService', () => {
   });
 
   it('keeps the same existing package but skips separate services already covered by it', async () => {
-    const { service, recommendationRepository, relevanceRanker } = createService();
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
     recommendationRepository.find.mockResolvedValue([
       {
         serviceId: null,
@@ -275,6 +278,74 @@ describe('RecommendationsService', () => {
     ]);
   });
 
+  it('allows a generated package to replace an older generated service recommendation', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'old-service-recommendation-id',
+        serviceId: 'service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'package-id',
+    ]);
+  });
+
+  it('keeps protected existing recommendations from being replaced by overlapping packages', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'planned-service-recommendation-id',
+        serviceId: 'service-id',
+        packageId: null,
+        status: RecommendationStatus.Planned,
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result).toEqual([]);
+  });
+
   it('keeps the more complete package when generated packages overlap', async () => {
     const { service, relevanceRanker } = createService();
     relevanceRanker.rankRecommendations.mockReturnValue([
@@ -311,7 +382,8 @@ describe('RecommendationsService', () => {
   });
 
   it('persists generated packages with packageId instead of serviceId', async () => {
-    const { service, recommendationRepository, relevanceRanker } = createService();
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
     recommendationRepository.findOne.mockResolvedValue(null);
     relevanceRanker.rankRecommendations.mockReturnValue([
       {
@@ -337,5 +409,50 @@ describe('RecommendationsService', () => {
         packageId: 'package-id',
       }),
     );
+  });
+
+  it('prunes stale generated recommendations after persisting the current set', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'stale-service-recommendation-id',
+          serviceId: 'stale-service-id',
+          packageId: null,
+          status: RecommendationStatus.Recommended,
+          generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+        {
+          id: 'current-package-recommendation-id',
+          serviceId: null,
+          packageId: 'package-id',
+          status: RecommendationStatus.Recommended,
+          generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ]);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-id'],
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'stale-service-recommendation-id',
+    ]);
   });
 });

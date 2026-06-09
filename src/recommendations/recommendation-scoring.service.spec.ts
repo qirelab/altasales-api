@@ -174,6 +174,32 @@ describe('RecommendationScoringService', () => {
     expect(result.map((item) => item.serviceId)).toEqual(['crm-service-id']);
   });
 
+  it('ignores AI service ids outside the catalog slice sent to the model', async () => {
+    const candidates = Array.from({ length: 51 }, (_, index) => ({
+      id: `crm-service-${index}`,
+      name: `CRM setup ${index}`,
+      description: 'CRM data quality and setup',
+      type: ServiceType.Service,
+      skills: ['CRM'],
+      category: null,
+    })) as any[];
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"crm-service-50","priority":"medium","rationale":"Подходит для CRM","diagnosticSignals":["crm_quality"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['CRM data quality'],
+      },
+      candidates,
+      'crm data quality',
+    );
+
+    expect(result).toEqual([]);
+  });
+
   it('does not declare user diagnostics as no_pii for proxy calls', async () => {
     llmProxy.chat.mockResolvedValueOnce({ content: '{"recommendations":[]}' });
 
