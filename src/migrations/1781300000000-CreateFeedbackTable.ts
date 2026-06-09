@@ -4,6 +4,7 @@ export class CreateFeedbackTable1781300000000 implements MigrationInterface {
   name = 'CreateFeedbackTable1781300000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
     await queryRunner.query(`
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'feedback_status_enum') THEN

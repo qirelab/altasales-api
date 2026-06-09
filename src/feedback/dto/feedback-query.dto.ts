@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { FeedbackStatus } from '../entities/feedback-status.enum';
 
 export type FeedbackSortBy = 'createdAt' | 'rating' | 'status';
@@ -34,11 +34,11 @@ export class FeedbackAdminQueryDto {
 
   @ApiPropertyOptional({ enum: ['createdAt', 'rating', 'status'], default: 'createdAt' })
   @IsOptional()
-  @IsString()
+  @IsIn(['createdAt', 'rating', 'status'])
   sortBy?: FeedbackSortBy = 'createdAt';
 
   @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
   @IsOptional()
-  @IsString()
+  @IsIn(['asc', 'desc'])
   sortDir?: SortDir = 'desc';
 }

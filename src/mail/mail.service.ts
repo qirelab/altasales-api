@@ -361,6 +361,12 @@ export class MailService {
     message: string;
     rating: number | null;
   }): Promise<void> {
+    const escape = (value: string): string => value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
     const admins = await this.userRepository.find({
       where: { role: UserRole.ADMIN },
       select: ['email'],
@@ -387,13 +393,13 @@ export class MailService {
           <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Автор:</td>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">
-              ${author ? `${author.name} ${author.lastName} (${author.email})` : feedback.userId}
+              ${author ? `${escape(author.name)} ${escape(author.lastName)} (${escape(author.email)})` : escape(feedback.userId)}
             </td>
           </tr>
           ${ratingLine}
           <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666; vertical-align: top;">Сообщение:</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; white-space: pre-wrap;">${feedback.message}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; white-space: pre-wrap;">${escape(feedback.message)}</td>
           </tr>
         </table>
         <p>
