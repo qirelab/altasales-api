@@ -594,6 +594,7 @@ export class RecommendationsService implements OnModuleInit {
       .map((servicePackage) => {
         const activeServices = filterActiveServices(servicePackage.services);
         if (activeServices.length === 0) return null;
+        if (this.isPlaceholderPackageCandidate(servicePackage)) return null;
 
         return {
           id: servicePackage.id,
@@ -602,7 +603,13 @@ export class RecommendationsService implements OnModuleInit {
           name: servicePackage.name,
           description: [
             servicePackage.description,
-            ...activeServices.map((service) => service.name),
+            servicePackage.packageType,
+            servicePackage.category?.name,
+            ...activeServices.flatMap((service) => [
+              service.name,
+              service.description,
+              service.category?.name,
+            ]),
           ].join(' '),
           type: 'Пакет услуг',
           price: servicePackage.price,
@@ -611,6 +618,7 @@ export class RecommendationsService implements OnModuleInit {
             ...(servicePackage.tags ?? []),
             ...activeServices.flatMap((service) => [
               service.name,
+              service.description,
               ...(service.skills ?? []),
             ]),
           ],
@@ -630,6 +638,7 @@ export class RecommendationsService implements OnModuleInit {
     const serviceCandidates = services
       .filter(
         (service) =>
+          this.hasRecommendableServiceContent(service) &&
           !this.isDuplicateLegacyPackageService(service, packageCandidates),
       )
       .map((service) => ({
@@ -656,6 +665,50 @@ export class RecommendationsService implements OnModuleInit {
         Boolean(candidate.coveredServiceIds?.includes(service.id))
       );
     });
+  }
+
+  private hasRecommendableServiceContent(service: Service): boolean {
+    if (service.category?.name !== 'Пакет услуг') return true;
+
+    const text = this.normalizeCatalogName(
+      [
+        service.name,
+        service.description,
+        service.category?.name,
+        ...(service.skills ?? []),
+      ].join(' '),
+    );
+    const body = this.normalizeCatalogName(
+      [service.description, ...(service.skills ?? [])].join(' '),
+    );
+
+    if (!body) return false;
+    return !this.isPlaceholderCatalogText(text);
+  }
+
+  private isPlaceholderPackageCandidate(
+    servicePackage: ServicePackage,
+  ): boolean {
+    const text = this.normalizeCatalogName(
+      [
+        servicePackage.name,
+        servicePackage.description,
+        servicePackage.packageType,
+        ...(servicePackage.tags ?? []),
+      ].join(' '),
+    );
+    const body = this.normalizeCatalogName(
+      [servicePackage.description, ...(servicePackage.tags ?? [])].join(' '),
+    );
+
+    return !body && this.isPlaceholderCatalogText(text);
+  }
+
+  private isPlaceholderCatalogText(text: string): boolean {
+    const tokens = new Set(text.split(' ').filter(Boolean));
+    return ['test', 'тест', 'тестовый', 'demo', 'демо'].some((token) =>
+      tokens.has(token),
+    );
   }
 
   private normalizeCatalogName(name: string): string {

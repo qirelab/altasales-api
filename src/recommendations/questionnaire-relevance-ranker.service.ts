@@ -197,7 +197,12 @@ export class QuestionnaireRelevanceRankerService {
     profile: NormalizedQuestionnaireProfile,
   ): QuestionnaireStage {
     if (
-      this.includesAny(profile.rawText, ['построить отдел продаж', 'с нуля'])
+      this.includesAny(profile.rawText, [
+        'построить отдел продаж',
+        'с нуля',
+        'отсутствует отдел продаж',
+        'нет отдела продаж',
+      ])
     ) {
       return 'new_department';
     }
@@ -364,7 +369,14 @@ export class QuestionnaireRelevanceRankerService {
   ): NormalizedQuestionnaireProfile {
     const componentTerms = this.getComponentTerms(profile.components);
     const desiredSalesDepartment = this.toArray(profile.desiredSalesDepartment);
-    const desiredTerms = [...desiredSalesDepartment, ...componentTerms];
+    const desiredTerms = [
+      ...desiredSalesDepartment,
+      ...componentTerms,
+      profile.desiredResult,
+      profile.targetResult,
+      profile.product,
+      profile.industry,
+    ];
     const canonicalLeadGenerationTypes = this.toArray(
       profile.leadGenerationTypes,
     );
