@@ -166,11 +166,12 @@ export class ExpertsService {
 
     const positionIds = positions.map((p) => p.id);
     const memberOfferings = positionIds.length > 0
-      ? await this.memberOfferingRepository
-        .createQueryBuilder('mo')
-        .innerJoin('mo.member', 'member')
-        .select(['mo.price AS price', 'member.positionId AS "positionId"'])
-        .where('member.positionId IN (:...positionIds)', { positionIds })
+      ? await this.expertServicePriceRepository
+        .createQueryBuilder('esp')
+        .innerJoin('esp.groupService', 'offering')
+        .select(['esp.price AS price', 'offering."positionId" AS "positionId"'])
+        .where('offering."positionId" IN (:...positionIds)', { positionIds })
+        .andWhere('esp.price IS NOT NULL')
         .getRawMany<{ price: string; positionId: string }>()
       : [];
 
