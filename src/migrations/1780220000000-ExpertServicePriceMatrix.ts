@@ -116,6 +116,29 @@ export class ExpertServicePriceMatrix1780220000000 implements MigrationInterface
           FROM information_schema.columns
           WHERE table_schema = 'public'
             AND table_name = 'expert_service_price'
+            AND column_name = 'offeringId'
+        ) AND EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'expert_service_price'
+            AND column_name = 'groupServiceId'
+        ) THEN
+          UPDATE "expert_service_price"
+          SET "groupServiceId" = "offeringId"
+          WHERE "groupServiceId" IS NULL;
+        END IF;
+      END $$;
+    `);
+
+    await queryRunner.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'expert_service_price'
             AND column_name = 'memberId'
         ) THEN
           UPDATE "expert_service_price" esp
@@ -125,6 +148,11 @@ export class ExpertServicePriceMatrix1780220000000 implements MigrationInterface
             AND esp."expertId" IS NULL;
         END IF;
       END $$;
+    `);
+
+    await queryRunner.query(`
+      DELETE FROM "expert_service_price"
+      WHERE "expertId" IS NULL OR "groupServiceId" IS NULL
     `);
 
     await queryRunner.query(`
@@ -151,6 +179,21 @@ export class ExpertServicePriceMatrix1780220000000 implements MigrationInterface
             AND column_name = 'memberId'
         ) THEN
           ALTER TABLE "expert_service_price" DROP COLUMN "memberId";
+        END IF;
+      END $$;
+    `);
+
+    await queryRunner.query(`
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'expert_service_price'
+            AND column_name = 'offeringId'
+        ) THEN
+          ALTER TABLE "expert_service_price" DROP COLUMN "offeringId";
         END IF;
       END $$;
     `);
