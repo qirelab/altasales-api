@@ -608,10 +608,10 @@ export class ExpertsService {
 
     const idRows = await this.orderItemRepository
       .createQueryBuilder('item')
-      .leftJoin('item.order', 'order')
+      .leftJoin('item.order', 'parentOrder')
       .select('item.id', 'id')
       .where('item."expertPositionId" = :groupId', { groupId })
-      .orderBy('order."createdAt"', 'DESC')
+      .orderBy('parentOrder."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
       .getRawMany<{ id: string }>();
@@ -619,13 +619,13 @@ export class ExpertsService {
 
     const items = itemIds.length === 0 ? [] : await this.orderItemRepository
       .createQueryBuilder('item')
-      .leftJoinAndSelect('item.order', 'order')
-      .leftJoinAndSelect('order.user', 'client')
+      .leftJoinAndSelect('item.order', 'parentOrder')
+      .leftJoinAndSelect('parentOrder.user', 'client')
       .leftJoinAndSelect('item.executor', 'executor')
       .leftJoinAndSelect('item.subItems', 'subItem')
       .leftJoinAndSelect('subItem.expertPositionOffering', 'offering')
       .where('item.id IN (:...itemIds)', { itemIds })
-      .orderBy('order."createdAt"', 'DESC')
+      .orderBy('parentOrder."createdAt"', 'DESC')
       .getMany();
 
     const data: AdminExpertGroupOrderItem[] = items.map((item) => {
@@ -638,7 +638,7 @@ export class ExpertsService {
         executorLastName: item.executor?.lastName ?? null,
         serviceName: firstOffering?.name ?? null,
         amount: Number(item.amount),
-        createdAt: item.order?.createdAt ?? new Date(),
+        createdAt: item.order?.createdAt ?? new Date(0),
         status: item.status,
       };
     });
@@ -897,7 +897,13 @@ export class ExpertsService {
     });
   }
 
-  async createGroupService(groupId: string, dto: CreateGroupServiceDto): Promise<AdminExpertGroupDetailsDto> {
+  async createGroupService(groupId: string, dto: CreateGroupServiceDto): Promise<{
+    id: string;
+    name: string;
+    description: string | null;
+    defaultPrice: number;
+  }> {
+    let createdServiceId = '';
     await this.dataSource.transaction(async (manager) => {
       await this.findActiveGroupOrThrow(groupId, manager);
       const serviceRepo = manager.getRepository(ExpertPositionOffering);
@@ -917,6 +923,7 @@ export class ExpertsService {
         defaultPrice: dto.defaultPrice,
       });
       const savedService = await serviceRepo.save(service);
+      createdServiceId = savedService.id;
 
       const members = await memberRepo.find({
         where: { positionId: groupId, deletedAt: IsNull() },
@@ -938,7 +945,15 @@ export class ExpertsService {
       }
     });
 
-    return this.getAdminExpertGroupById(groupId);
+    const created = await this.offeringRepository.findOneOrFail({
+      where: { id: createdServiceId },
+    });
+    return {
+      id: created.id,
+      name: created.name,
+      description: created.description,
+      defaultPrice: Number(created.defaultPrice),
+    };
   }
 
   async updateGroupService(
