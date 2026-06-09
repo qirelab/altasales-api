@@ -110,6 +110,8 @@ export interface AdminExpertGroupDetailsDto {
     lastName: string;
     email: string;
     phoneNumber: string;
+    experienceYears: number | null;
+    ordersCount: number;
   }>;
   services: Array<{
     id: string;
@@ -118,6 +120,31 @@ export interface AdminExpertGroupDetailsDto {
     defaultPrice: number;
   }>;
   prices: Record<string, Record<string, number | null>>;
+  stats: {
+    totalOrders: number;
+    activeOrders: number;
+    completedOrders: number;
+    averageCheck: number | null;
+  };
+}
+
+export interface AdminExpertGroupOrderItem {
+  id: string;
+  clientName: string;
+  clientLastName: string;
+  executorName: string | null;
+  executorLastName: string | null;
+  serviceName: string | null;
+  amount: number;
+  createdAt: Date;
+  status: OrderStatus;
+}
+
+export interface AdminExpertGroupOrdersResponse {
+  data: AdminExpertGroupOrderItem[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 export interface AvailableGroupExpertsDto {
@@ -474,15 +501,32 @@ export class ExpertsService {
       }),
     ]);
 
-    const experts = members
-      .filter((member) => member.user?.role === UserRole.EXPERT)
-      .map((member) => ({
-        id: member.user!.id,
-        name: member.user!.name,
-        lastName: member.user!.lastName,
-        email: member.user!.email,
-        phoneNumber: member.user!.phoneNumber,
-      }));
+    const expertMembers = members.filter((member) => member.user?.role === UserRole.EXPERT);
+
+    const expertIds = expertMembers.map((member) => member.user!.id);
+    const expertOrdersCountsRaw = expertIds.length > 0
+      ? await this.orderItemRepository
+        .createQueryBuilder('item')
+        .select('item."executorUserId"', 'executorUserId')
+        .addSelect('COUNT(item.id)', 'count')
+        .where('item."expertPositionId" = :groupId', { groupId })
+        .andWhere('item."executorUserId" IN (:...expertIds)', { expertIds })
+        .groupBy('item."executorUserId"')
+        .getRawMany<{ executorUserId: string; count: string }>()
+      : [];
+    const expertOrdersCountById = new Map(
+      expertOrdersCountsRaw.map((row) => [row.executorUserId, Number(row.count)]),
+    );
+
+    const experts = expertMembers.map((member) => ({
+      id: member.user!.id,
+      name: member.user!.name,
+      lastName: member.user!.lastName,
+      email: member.user!.email,
+      phoneNumber: member.user!.phoneNumber,
+      experienceYears: member.user!.experienceYears ?? null,
+      ordersCount: expertOrdersCountById.get(member.user!.id) ?? 0,
+    }));
 
     const matrix: Record<string, Record<string, number | null>> = {};
     experts.forEach((expert) => {
@@ -506,6 +550,28 @@ export class ExpertsService {
       });
     }
 
+    const groupOrders = await this.orderItemRepository.find({
+      where: { expertPositionId: groupId },
+    });
+    const activeStatuses = new Set<OrderStatus>([
+      OrderStatus.PendingPayment,
+      OrderStatus.Planned,
+      OrderStatus.InProgress,
+    ]);
+    let totalOrders = 0;
+    let activeOrders = 0;
+    let completedOrders = 0;
+    let completedAmountSum = 0;
+    groupOrders.forEach((item) => {
+      totalOrders += 1;
+      if (activeStatuses.has(item.status)) activeOrders += 1;
+      if (item.status === OrderStatus.Completed) {
+        completedOrders += 1;
+        completedAmountSum += Number(item.amount);
+      }
+    });
+    const averageCheck = completedOrders > 0 ? completedAmountSum / completedOrders : null;
+
     return {
       id: group.id,
       title: group.name,
@@ -520,7 +586,51 @@ export class ExpertsService {
         defaultPrice: Number(service.defaultPrice),
       })),
       prices: matrix,
+      stats: {
+        totalOrders,
+        activeOrders,
+        completedOrders,
+        averageCheck,
+      },
     };
+  }
+
+  async getAdminExpertGroupOrders(
+    groupId: string,
+    query: ExpertGroupsQueryDto,
+  ): Promise<AdminExpertGroupOrdersResponse> {
+    await this.findActiveGroupOrThrow(groupId);
+    const { offset = 0, limit = 20 } = query;
+
+    const qb = this.orderItemRepository
+      .createQueryBuilder('item')
+      .leftJoinAndSelect('item.order', 'order')
+      .leftJoinAndSelect('order.user', 'client')
+      .leftJoinAndSelect('item.executor', 'executor')
+      .leftJoinAndSelect('item.subItems', 'subItem')
+      .leftJoinAndSelect('subItem.expertPositionOffering', 'offering')
+      .where('item."expertPositionId" = :groupId', { groupId })
+      .orderBy('order."createdAt"', 'DESC');
+
+    const total = await qb.getCount();
+    const items = await qb.offset(offset).limit(limit).getMany();
+
+    const data: AdminExpertGroupOrderItem[] = items.map((item) => {
+      const firstOffering = item.subItems?.find((sub) => sub.expertPositionOffering)?.expertPositionOffering;
+      return {
+        id: item.orderId,
+        clientName: item.order?.user?.name ?? '',
+        clientLastName: item.order?.user?.lastName ?? '',
+        executorName: item.executor?.name ?? null,
+        executorLastName: item.executor?.lastName ?? null,
+        serviceName: firstOffering?.name ?? null,
+        amount: Number(item.amount),
+        createdAt: item.order?.createdAt ?? new Date(),
+        status: item.status,
+      };
+    });
+
+    return { data, total, offset, limit };
   }
 
   async createAdminExpertGroup(dto: CreateAdminExpertGroupDto): Promise<AdminExpertGroupDetailsDto> {
