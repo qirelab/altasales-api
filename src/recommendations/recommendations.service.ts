@@ -29,6 +29,7 @@ import {
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
 import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
+import { RecommendationSource } from './entities/recommendation-source.enum';
 import {
   RecommendationScoringService,
   type GeneratedRecommendationItem,
@@ -69,12 +70,16 @@ export type AdminRecommendationListItem = {
   id: string;
   serviceId: string | null;
   packageId: string | null;
+  name: string;
   category: string;
   status: RecommendationStatus;
+  source: RecommendationSource;
   priority: RecommendationPriority;
   price: number;
   rationale: string | null;
   dependencyIds: string[];
+  diagnosticSignals: string[];
+  createdAt: Date;
 };
 
 @Injectable()
@@ -190,14 +195,26 @@ export class RecommendationsService implements OnModuleInit {
     ));
   }
 
-  async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
-    return this.recommendationRepository
+  async findAssignedToUserForAdmin(userId: string): Promise<AdminRecommendationListItem[]> {
+    const rows = await this.recommendationRepository
       .createQueryBuilder('recommendation')
-      .leftJoinAndSelect('recommendation.service', 'service')
-      .leftJoinAndSelect('service.category', 'serviceCategory')
-      .leftJoinAndSelect('recommendation.package', 'package')
-      .leftJoinAndSelect('package.category', 'packageCategory')
-      .leftJoinAndSelect('recommendation.order', 'order')
+      .leftJoin('recommendation.service', 'service')
+      .leftJoin('service.category', 'serviceCategory')
+      .leftJoin('recommendation.package', 'package')
+      .leftJoin('package.category', 'packageCategory')
+      .select('recommendation.id', 'id')
+      .addSelect('recommendation."serviceId"', 'serviceId')
+      .addSelect('recommendation."packageId"', 'packageId')
+      .addSelect('COALESCE(service.name, package.name)', 'name')
+      .addSelect("COALESCE(serviceCategory.name, packageCategory.name, '')", 'category')
+      .addSelect('COALESCE(service.price, package.price)', 'price')
+      .addSelect('recommendation.status', 'status')
+      .addSelect('recommendation.source', 'source')
+      .addSelect('recommendation.priority', 'priority')
+      .addSelect('recommendation.rationale', 'rationale')
+      .addSelect('recommendation."dependencyIds"', 'dependencyIds')
+      .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
+      .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy(
@@ -205,7 +222,14 @@ export class RecommendationsService implements OnModuleInit {
         'ASC',
       )
       .addOrderBy('recommendation."createdAt"', 'DESC')
-      .getMany();
+      .getRawMany<AdminRecommendationListItem>();
+
+    return rows.map((row) => ({
+      ...row,
+      price: Number(row.price),
+      dependencyIds: row.dependencyIds ?? [],
+      diagnosticSignals: row.diagnosticSignals ?? [],
+    }));
   }
 
   // ── Admin CRUD (merged from develop) ──────────────────────────────
@@ -233,6 +257,7 @@ export class RecommendationsService implements OnModuleInit {
       dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
       diagnosticSignals: this.scoringService.normalizeSignals(dto.diagnosticSignals ?? []),
       generatedAt: null,
+      source: RecommendationSource.Manual,
       orderId: null,
     });
 
@@ -544,9 +569,13 @@ export class RecommendationsService implements OnModuleInit {
     });
 
     if (existing) {
+      if (existing.source === RecommendationSource.Manual) {
+        return existing;
+      }
       existing.priority = item.priority;
       existing.rationale = item.rationale;
       existing.diagnosticSignals = item.diagnosticSignals;
+      existing.source = RecommendationSource.AI;
       existing.generatedAt = new Date();
       return this.recommendationRepository.save(existing);
     }
@@ -561,6 +590,7 @@ export class RecommendationsService implements OnModuleInit {
       dependencyIds: [],
       diagnosticSignals: item.diagnosticSignals,
       generatedAt: new Date(),
+      source: RecommendationSource.AI,
       orderId: null,
     });
 
@@ -577,6 +607,7 @@ export class RecommendationsService implements OnModuleInit {
       retryExisting.priority = item.priority;
       retryExisting.rationale = item.rationale;
       retryExisting.diagnosticSignals = item.diagnosticSignals;
+      retryExisting.source = RecommendationSource.AI;
       retryExisting.generatedAt = new Date();
       return this.recommendationRepository.save(retryExisting);
     }
