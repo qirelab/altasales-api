@@ -96,6 +96,12 @@ export class ExpertServicePriceMatrix1780220000000 implements MigrationInterface
           WHERE table_schema = 'public'
             AND table_name = 'expert_service_price'
             AND column_name = 'offeringId'
+        ) AND NOT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'expert_service_price'
+            AND column_name = 'groupServiceId'
         ) THEN
           ALTER TABLE "expert_service_price" RENAME COLUMN "offeringId" TO "groupServiceId";
         END IF;
