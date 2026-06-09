@@ -278,6 +278,132 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('adds inner service descriptions to package recommendation candidates', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'real-package-id',
+        name: 'CRM Пакет',
+        description: '',
+        packageType: 'bronze',
+        price: 80000,
+        tags: [],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'inner-service-id',
+            name: 'Настройка CRM',
+            description: 'Аудит, воронки, роботы и статусы отказа',
+            deletedAt: null,
+            skills: ['crm'],
+            category: { name: 'CRM система' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    const packageCandidate = candidates.find(
+      (item) => item.packageId === 'real-package-id',
+    );
+    expect(packageCandidate.description).toContain(
+      'Аудит, воронки, роботы и статусы отказа',
+    );
+  });
+
+  it('skips empty placeholder legacy package-category services', async () => {
+    const { service, serviceRepository, relevanceRanker } = createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'empty-test-package-service-id',
+        name: 'Тестовый пакет',
+        description: '',
+        type: ServiceType.Service,
+        price: 425353,
+        skills: [],
+        category: { name: 'Пакет услуг' },
+      },
+      {
+        id: 'regular-service-id',
+        name: 'Интеграция телефонии',
+        description: 'Подключение звонков',
+        type: ServiceType.Service,
+        price: 20000,
+        skills: ['телефония'],
+        category: { name: 'CRM система' },
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.serviceId)).not.toContain(
+      'empty-test-package-service-id',
+    );
+    expect(candidates.map((item) => item.serviceId)).toContain(
+      'regular-service-id',
+    );
+  });
+
+  it('skips placeholder real package candidates without own description or tags', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'placeholder-package-id',
+        name: 'Тестовый пакет',
+        description: '',
+        packageType: 'custom',
+        price: 425353,
+        tags: [],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'inner-service-id',
+            name: 'Настройка CRM',
+            description: 'Аудит, воронки, роботы и статусы отказа',
+            deletedAt: null,
+            skills: ['crm'],
+            category: { name: 'CRM система' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.packageId)).not.toContain(
+      'placeholder-package-id',
+    );
+  });
+
   it('skips legacy package-category services that duplicate real package candidates', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();

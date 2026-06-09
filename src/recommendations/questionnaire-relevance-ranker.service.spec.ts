@@ -461,6 +461,38 @@ describe('QuestionnaireRelevanceRankerService', () => {
     ]);
   });
 
+  it('treats explicit missing sales department text as a new department request', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '1m',
+            description:
+              'отсутствует отдел продаж, нужно настроить отдел продаж',
+          },
+          targetRevenue: 500000,
+          averageCheck: 1000000,
+          conversionRate: 1,
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'from-zero',
+      'crm-start',
+      'turnkey-hiring',
+      'telephony',
+      'messenger',
+    ]);
+  });
+
   it('does not cap questionnaire recommendations at five when no limit is provided', () => {
     const result = ranker.rankRecommendations(
       {
