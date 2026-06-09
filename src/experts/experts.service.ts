@@ -44,10 +44,16 @@ function sortOfferingsByName<T extends { name: string }>(items: T[]): T[] {
   );
 }
 
-export interface ExpertPositionListItem {
+export interface ExpertPositionBase {
   id: string;
   name: string;
   description: string;
+}
+
+export interface ExpertPositionListItem extends ExpertPositionBase {
+  executorsCount: number;
+  offeringsCount: number;
+  minPrice: number | null;
 }
 
 export interface ExpertExecutorOfferingPrice {
@@ -60,10 +66,11 @@ export interface ExpertExecutorDto {
   id: string;
   name: string;
   lastName: string;
+  experienceYears: number | null;
   offerings: ExpertExecutorOfferingPrice[];
 }
 
-export interface ExpertPositionDetailDto extends ExpertPositionListItem {
+export interface ExpertPositionDetailDto extends ExpertPositionBase {
   offerings: Array<{
     id: string;
     name: string;
@@ -154,11 +161,36 @@ export class ExpertsService {
     const positions = await this.positionRepository.find({
       where: { deletedAt: IsNull() },
       order: { createdAt: 'ASC' },
+      relations: ['offerings', 'members'],
     });
+
+    const positionIds = positions.map((p) => p.id);
+    const memberOfferings = positionIds.length > 0
+      ? await this.memberOfferingRepository
+        .createQueryBuilder('mo')
+        .innerJoin('mo.member', 'member')
+        .select(['mo.price AS price', 'member.positionId AS "positionId"'])
+        .where('member.positionId IN (:...positionIds)', { positionIds })
+        .getRawMany<{ price: string; positionId: string }>()
+      : [];
+
+    const minPriceByPosition = new Map<string, number>();
+    for (const row of memberOfferings) {
+      const price = Number(row.price);
+      if (!Number.isFinite(price) || price <= 0) continue;
+      const current = minPriceByPosition.get(row.positionId);
+      if (current === undefined || price < current) {
+        minPriceByPosition.set(row.positionId, price);
+      }
+    }
+
     return positions.map((position) => ({
       id: position.id,
       name: position.name,
       description: position.description,
+      executorsCount: position.members?.length ?? 0,
+      offeringsCount: position.offerings?.length ?? 0,
+      minPrice: minPriceByPosition.get(position.id) ?? null,
     }));
   }
 
@@ -189,6 +221,7 @@ export class ExpertsService {
             id: member.user!.id,
             name: member.user!.name,
             lastName: member.user!.lastName,
+            experienceYears: member.user!.experienceYears ?? null,
             offerings: prices,
           };
         }),
