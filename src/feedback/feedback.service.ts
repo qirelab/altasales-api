@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
@@ -30,9 +30,12 @@ export interface FeedbackListResponse {
   pageSize: number;
 }
 
+const SUBMIT_COOLDOWN_MS = 60_000;
+
 @Injectable()
 export class FeedbackService {
   private readonly logger = new Logger(FeedbackService.name);
+  private readonly lastSubmitByUser = new Map<string, number>();
 
   constructor(
     @InjectRepository(Feedback)
@@ -41,12 +44,22 @@ export class FeedbackService {
   ) {}
 
   async createForUser(userId: string, dto: CreateFeedbackDto): Promise<Feedback> {
+    const now = Date.now();
+    const last = this.lastSubmitByUser.get(userId);
+    if (last && now - last < SUBMIT_COOLDOWN_MS) {
+      const wait = Math.ceil((SUBMIT_COOLDOWN_MS - (now - last)) / 1000);
+      throw new BadRequestException(
+        `Можно отправлять обратную связь не чаще раза в минуту. Подождите ${wait} с.`,
+      );
+    }
+
     const feedback = this.feedbackRepository.create({
       userId,
       message: dto.message.trim(),
       rating: dto.rating ?? null,
     });
     const saved = await this.feedbackRepository.save(feedback);
+    this.lastSubmitByUser.set(userId, now);
 
     this.mailService
       .sendNewFeedbackNotification(saved)
