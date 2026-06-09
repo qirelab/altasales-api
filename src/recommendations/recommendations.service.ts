@@ -668,8 +668,8 @@ export class RecommendationsService implements OnModuleInit {
   }
 
   private hasRecommendableServiceContent(service: Service): boolean {
-    if (service.category?.name !== 'Пакет услуг') return true;
     if (this.isPlaceholderCatalogName(service.name)) return false;
+    if (service.category?.name !== 'Пакет услуг') return true;
 
     const text = this.normalizeCatalogName(
       [

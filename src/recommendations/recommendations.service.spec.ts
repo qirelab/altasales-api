@@ -389,6 +389,45 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('skips placeholder regular service candidates regardless of category', async () => {
+    const { service, serviceRepository, relevanceRanker } = createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'test-package-service-id',
+        name: 'Тестовый пакет',
+        description: 'CRM и настройка воронок',
+        type: ServiceType.Service,
+        price: 425353,
+        skills: ['crm'],
+        category: { name: 'CRM система' },
+      },
+      {
+        id: 'regular-service-id',
+        name: 'Интеграция телефонии',
+        description: 'Подключение звонков',
+        type: ServiceType.Service,
+        price: 20000,
+        skills: ['телефония'],
+        category: { name: 'CRM система' },
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.serviceId)).not.toContain(
+      'test-package-service-id',
+    );
+    expect(candidates.map((item) => item.serviceId)).toContain(
+      'regular-service-id',
+    );
+  });
+
   it('skips placeholder real package candidates without own description or tags', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();

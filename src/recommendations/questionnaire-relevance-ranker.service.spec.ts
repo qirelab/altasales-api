@@ -199,6 +199,42 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
+  it('keeps explicitly selected telephony, messenger and chatbot-related automation visible', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '1m',
+            description:
+              'отсутствует отдел продаж, нужно настроить отдел продаж',
+          },
+          targetRevenue: 500000,
+          averageCheck: 1000000,
+          conversionRate: 1,
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            chatbot: true,
+            salesManager: true,
+            analytics: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      12,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['telephony', 'messenger', 'automation']),
+    );
+  });
+
   it('promotes generated recommendation priorities after questionnaire boosts', () => {
     const result = ranker.rankRecommendations(
       {
