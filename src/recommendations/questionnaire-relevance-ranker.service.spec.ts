@@ -197,7 +197,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
-  it('keeps generated recommendation priorities neutral', () => {
+  it('promotes generated recommendation priorities after questionnaire boosts', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -208,18 +208,103 @@ describe('QuestionnaireRelevanceRankerService', () => {
         persist: false,
       },
       services,
+      [
+        {
+          serviceId: 'from-zero',
+          serviceName: 'Отдел продаж с нуля',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+        {
+          serviceId: 'crm-start',
+          serviceName: 'CRM Старт',
+          priority: RecommendationPriority.Medium,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 95,
+        },
+      ],
+      '',
+      2,
+    );
+
+    expect(result.map((item) => item.priority)).toEqual([
+      RecommendationPriority.Urgent,
+      RecommendationPriority.Urgent,
+    ]);
+  });
+
+  it('does not leave questionnaire-boosted recommendations as low priority', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Навести порядок в работе 2 менеджеров',
+          },
+          targetRevenue: 4000000,
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
       [],
+      '',
+      3,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['crm-bronze', 'telephony', 'messenger']),
+    );
+    expect(result.map((item) => item.priority)).not.toContain(
+      RecommendationPriority.Low,
+    );
+  });
+
+  it('does not recommend basic sales department setup when sales already exist', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Навести порядок в работе 2 менеджеров',
+          },
+          targetRevenue: 4000000,
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            scripts: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [
+        {
+          serviceId: 'base-setup',
+          serviceName: 'Базовая настройка работы отдела продаж',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+      ],
       '',
       5,
     );
 
-    expect(result.map((item) => item.priority)).toEqual([
-      RecommendationPriority.Medium,
-      RecommendationPriority.Medium,
-      RecommendationPriority.Medium,
-      RecommendationPriority.Medium,
-      RecommendationPriority.Medium,
-    ]);
+    expect(result.map((item) => item.serviceId)).not.toContain('base-setup');
   });
 
   it('does not treat a new product alone as a new sales department', () => {

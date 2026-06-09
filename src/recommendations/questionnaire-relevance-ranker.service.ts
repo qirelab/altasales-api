@@ -98,6 +98,9 @@ const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
   other: 2,
 };
 
+const URGENT_RANKER_SCORE = 70;
+const MEDIUM_RANKER_SCORE = 12;
+
 @Injectable()
 export class QuestionnaireRelevanceRankerService {
   constructor(private readonly scoringService: RecommendationScoringService) {}
@@ -132,7 +135,7 @@ export class QuestionnaireRelevanceRankerService {
       );
 
       if (defaultItems.length >= maxItems) {
-        return this.normalizePriorities(defaultItems);
+        return defaultItems;
       }
     }
 
@@ -169,7 +172,7 @@ export class QuestionnaireRelevanceRankerService {
 
       rankedCandidates.push({
         ...base,
-        priority: base.priority,
+        priority: this.resolveBoostedPriority(score, base.priority),
         rationale:
           reasons.length > 0
             ? this.buildRationale(service.name, reasons)
@@ -187,7 +190,7 @@ export class QuestionnaireRelevanceRankerService {
       maxItems,
     );
 
-    return this.normalizePriorities(diverse);
+    return diverse;
   }
 
   private detectStage(
@@ -500,6 +503,7 @@ export class QuestionnaireRelevanceRankerService {
       stage === 'basic_department' &&
       this.includesAny(serviceText, [
         'отдел продаж с нуля',
+        'базовая настройка работы отдела продаж',
         'crm серебро',
         'crm золото',
         'ии роп',
@@ -605,6 +609,10 @@ export class QuestionnaireRelevanceRankerService {
         serviceId: base.serviceId,
         packageId: base.packageId,
         serviceName: service.name,
+        priority: this.resolveBoostedPriority(
+          Math.max(Number(base.score || 0), rule.score),
+          base.priority,
+        ),
         rationale: this.buildRationale(service.name, [rule.reason]),
         diagnosticSignals: this.scoringService.normalizeSignals([
           ...(base.diagnosticSignals ?? []),
@@ -621,13 +629,21 @@ export class QuestionnaireRelevanceRankerService {
     return selected;
   }
 
-  private normalizePriorities(
-    items: GeneratedRecommendationItem[],
-  ): GeneratedRecommendationItem[] {
-    return items.map((item) => ({
-      ...item,
-      priority: RecommendationPriority.Medium,
-    }));
+  private resolveBoostedPriority(
+    score: number,
+    basePriority: RecommendationPriority,
+  ): RecommendationPriority {
+    if (basePriority === RecommendationPriority.Urgent) {
+      return RecommendationPriority.Urgent;
+    }
+    if (score >= URGENT_RANKER_SCORE) return RecommendationPriority.Urgent;
+    if (
+      score >= MEDIUM_RANKER_SCORE ||
+      basePriority === RecommendationPriority.Medium
+    ) {
+      return RecommendationPriority.Medium;
+    }
+    return RecommendationPriority.Low;
   }
 
   private getServiceGroup(item: GeneratedRecommendationItem): ServiceGroup {
