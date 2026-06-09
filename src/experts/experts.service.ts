@@ -608,10 +608,10 @@ export class ExpertsService {
 
     const idRows = await this.orderItemRepository
       .createQueryBuilder('item')
-      .leftJoin('item.order', 'parentOrder')
+      .leftJoin('item.order', 'parent_order')
       .select('item.id', 'id')
       .where('item."expertPositionId" = :groupId', { groupId })
-      .orderBy('parentOrder."createdAt"', 'DESC')
+      .orderBy('parent_order."createdAt"', 'DESC')
       .offset(offset)
       .limit(limit)
       .getRawMany<{ id: string }>();
@@ -619,13 +619,13 @@ export class ExpertsService {
 
     const items = itemIds.length === 0 ? [] : await this.orderItemRepository
       .createQueryBuilder('item')
-      .leftJoinAndSelect('item.order', 'parentOrder')
-      .leftJoinAndSelect('parentOrder.user', 'client')
+      .leftJoinAndSelect('item.order', 'parent_order')
+      .leftJoinAndSelect('parent_order.user', 'client')
       .leftJoinAndSelect('item.executor', 'executor')
       .leftJoinAndSelect('item.subItems', 'subItem')
       .leftJoinAndSelect('subItem.expertPositionOffering', 'offering')
       .where('item.id IN (:...itemIds)', { itemIds })
-      .orderBy('parentOrder."createdAt"', 'DESC')
+      .orderBy('parent_order."createdAt"', 'DESC')
       .getMany();
 
     const data: AdminExpertGroupOrderItem[] = items.map((item) => {
