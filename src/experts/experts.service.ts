@@ -127,6 +127,7 @@ export interface AvailableGroupExpertsDto {
     lastName: string;
     email: string;
     phoneNumber: string;
+    experienceYears: number | null;
   }>;
   total: number;
   offset: number;
@@ -625,6 +626,7 @@ export class ExpertsService {
         lastName: user.lastName,
         email: user.email,
         phoneNumber: user.phoneNumber,
+        experienceYears: user.experienceYears ?? null,
       })),
       total,
       offset,
@@ -666,6 +668,7 @@ export class ExpertsService {
         lastName: user.lastName,
         email: user.email,
         phoneNumber: user.phoneNumber,
+        experienceYears: user.experienceYears ?? null,
       })),
       total,
       offset,
