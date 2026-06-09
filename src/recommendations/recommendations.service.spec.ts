@@ -1,6 +1,7 @@
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { RecommendationsService } from './recommendations.service';
+import { ServiceType } from '../services/entities/service-type.enum';
 
 describe('RecommendationsService', () => {
   const userId = 'user-id';
@@ -56,7 +57,16 @@ describe('RecommendationsService', () => {
     const scoringService = {
       buildDiagnosticContext: jest.fn().mockReturnValue('context'),
       generateAiRecommendations: jest.fn().mockResolvedValue([]),
-      scoreService: jest.fn(),
+      scoreService: jest.fn((candidate) => ({
+        serviceId: candidate.packageId ? null : candidate.serviceId,
+        packageId: candidate.packageId ?? null,
+        serviceName: candidate.name,
+        priority: 'medium',
+        rationale: 'fallback',
+        diagnosticSignals: [],
+        score: 0,
+        coveredServiceIds: candidate.coveredServiceIds ?? [],
+      })),
       normalizeSignals: jest.fn((signals: string[]) => signals),
     };
     const relevanceRanker = {
@@ -103,6 +113,7 @@ describe('RecommendationsService', () => {
       service,
       questionnaireRepository,
       recommendationRepository,
+      serviceRepository,
       packageRepository,
       scoringService,
       relevanceRanker,
@@ -199,6 +210,71 @@ describe('RecommendationsService', () => {
       [],
       'context',
       undefined,
+    );
+  });
+
+  it('keeps legacy package-category services in recommendation candidates alongside real packages', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'legacy-package-service-id',
+        name: 'CRM Бронза',
+        description: 'Базовый запуск CRM',
+        type: ServiceType.Service,
+        price: 60000,
+        skills: ['crm бронза'],
+        category: { name: 'Пакет услуг' },
+      },
+      {
+        id: 'regular-service-id',
+        name: 'Интеграция телефонии',
+        description: 'Подключение звонков',
+        type: ServiceType.Service,
+        price: 20000,
+        skills: ['телефония'],
+        category: { name: 'CRM система' },
+      },
+    ]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'real-package-id',
+        name: 'CRM package',
+        description: 'Package',
+        price: 80000,
+        tags: ['crm'],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'regular-service-id',
+            name: 'Интеграция телефонии',
+            deletedAt: null,
+            skills: ['телефония'],
+            category: { name: 'CRM система' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(
+      candidates.map((item) => item.packageId ?? item.serviceId),
+    ).toEqual(
+      expect.arrayContaining([
+        'real-package-id',
+        'legacy-package-service-id',
+        'regular-service-id',
+      ]),
     );
   });
 

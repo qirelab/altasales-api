@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
-import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import {
   GeneratedRecommendationItem,
   RecommendationScoringService,
@@ -132,7 +131,7 @@ export class QuestionnaireRelevanceRankerService {
       );
 
       if (defaultItems.length >= maxItems) {
-        return this.normalizePriorities(defaultItems);
+        return defaultItems;
       }
     }
 
@@ -187,7 +186,7 @@ export class QuestionnaireRelevanceRankerService {
       maxItems,
     );
 
-    return this.normalizePriorities(diverse);
+    return diverse;
   }
 
   private detectStage(
@@ -500,6 +499,7 @@ export class QuestionnaireRelevanceRankerService {
       stage === 'basic_department' &&
       this.includesAny(serviceText, [
         'отдел продаж с нуля',
+        'базовая настройка работы отдела продаж',
         'crm серебро',
         'crm золото',
         'ии роп',
@@ -619,15 +619,6 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return selected;
-  }
-
-  private normalizePriorities(
-    items: GeneratedRecommendationItem[],
-  ): GeneratedRecommendationItem[] {
-    return items.map((item) => ({
-      ...item,
-      priority: RecommendationPriority.Medium,
-    }));
   }
 
   private getServiceGroup(item: GeneratedRecommendationItem): ServiceGroup {

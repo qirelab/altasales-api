@@ -627,13 +627,7 @@ export class RecommendationsService implements OnModuleInit {
         } as unknown as ServiceCandidate;
       })
       .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
-    const shouldSkipLegacyPackageServices = packageCandidates.length > 0;
     const serviceCandidates = services
-      .filter(
-        (service) =>
-          !shouldSkipLegacyPackageServices ||
-          service.category?.name !== 'Пакет услуг',
-      )
       .map((service) => ({
         ...service,
         serviceId: service.id,
