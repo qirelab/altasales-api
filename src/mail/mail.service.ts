@@ -380,7 +380,7 @@ export class MailService {
       select: ['name', 'lastName', 'email'],
     });
     const clientUrl = process.env.CLIENT_URI || 'http://localhost:3000';
-    const adminLink = `${clientUrl}/admin/feedback`;
+    const adminLink = `${clientUrl}/admin/feedback?open=${feedback.id}`;
     const ratingLine = feedback.rating !== null
       ? `<tr><td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Оценка:</td>`
         + `<td style="padding: 8px; border-bottom: 1px solid #eee;">${feedback.rating} / 5</td></tr>`
