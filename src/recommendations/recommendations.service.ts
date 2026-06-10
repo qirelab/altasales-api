@@ -48,6 +48,7 @@ export type PackageInnerServiceItem = {
   name: string;
   type: ServiceType;
   price: number;
+  giftEligible: boolean;
   status: RecommendationStatus | null;
 };
 
@@ -77,6 +78,7 @@ export type UserRecommendationListItem = {
   type: ServiceType | 'Пакет услуг';
   category: string;
   price: number;
+  giftEligible: boolean | null;
   status: RecommendationStatus;
   priority: RecommendationPriority;
   rationale: string | null;
@@ -173,6 +175,7 @@ export class RecommendationsService implements OnModuleInit {
         'category',
       )
       .addSelect('COALESCE(service.price, package.price)', 'price')
+      .addSelect('COALESCE(service."giftEligible", package."giftEligible")', 'giftEligible')
       .addSelect('recommendation.status', 'status')
       .addSelect('recommendation.priority', 'priority')
       .addSelect('recommendation.rationale', 'rationale')
@@ -183,10 +186,20 @@ export class RecommendationsService implements OnModuleInit {
       .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
-      .getRawMany<UserRecommendationListItem & { orderId: string | null }>();
+      .getRawMany<
+        UserRecommendationListItem & {
+          orderId: string | null;
+          giftEligible: boolean | 'true' | 'false' | 't' | 'f' | null;
+        }
+      >();
 
     const rows: UserRecommendationListItem[] = rawRows.map(
-      ({ orderId: _omit, ...rest }) => rest,
+      ({ orderId: _omit, giftEligible, ...rest }) => ({
+        ...rest,
+        giftEligible: giftEligible == null
+          ? null
+          : giftEligible === true || giftEligible === 'true' || giftEligible === 't',
+      }),
     );
 
     const packageRows = rawRows.filter((row) => row.packageId);
@@ -209,6 +222,7 @@ export class RecommendationsService implements OnModuleInit {
           name: service.name,
           type: service.type,
           price: Number(service.price),
+          giftEligible: service.giftEligible,
           status: null,
         })),
       );
