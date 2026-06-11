@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -14,6 +15,10 @@ import { ExpertPosition } from './expert-position.entity';
 
 @Entity('expert_position_member')
 @Unique(['positionId', 'userId'])
+@Index('UQ_expert_position_member_user_active', ['userId'], {
+  unique: true,
+  where: '"deletedAt" IS NULL',
+})
 export class ExpertPositionMember {
   @ApiProperty({ format: 'uuid' })
   @PrimaryGeneratedColumn('uuid')
