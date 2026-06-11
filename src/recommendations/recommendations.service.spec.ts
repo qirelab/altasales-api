@@ -1,4 +1,5 @@
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
+import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { RecommendationsService } from './recommendations.service';
 import { ServiceType } from '../services/entities/service-type.enum';
@@ -783,6 +784,49 @@ describe('RecommendationsService', () => {
       expect.objectContaining({
         serviceId: null,
         packageId: 'package-id',
+      }),
+    );
+  });
+
+  it('filters out generated recommendations with ranking below 5/10 before persisting', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'low-score-service-id',
+        packageId: null,
+        serviceName: 'Low score service',
+        priority: RecommendationPriority.Low,
+        rationale: 'weak fit',
+        diagnosticSignals: [],
+        score: 4,
+        coveredServiceIds: ['low-score-service-id'],
+      },
+      {
+        serviceId: 'threshold-service-id',
+        packageId: null,
+        serviceName: 'Threshold service',
+        priority: RecommendationPriority.Medium,
+        rationale: 'minimum fit',
+        diagnosticSignals: [],
+        score: 5,
+        coveredServiceIds: ['threshold-service-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'threshold-service-id',
+    ]);
+    expect(recommendationRepository.create).toHaveBeenCalledTimes(1);
+    expect(recommendationRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceId: 'threshold-service-id',
       }),
     );
   });

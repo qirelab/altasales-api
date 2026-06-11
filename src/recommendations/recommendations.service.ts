@@ -43,6 +43,7 @@ import {
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
+const MIN_RECOMMENDATION_RANKING_SCORE = 5;
 
 export type PackageInnerServiceItem = {
   id: string;
@@ -519,6 +520,9 @@ export class RecommendationsService implements OnModuleInit {
       ranked,
       context,
       limit,
+    );
+    ranked = ranked.filter(
+      (item) => Number(item.score || 0) >= MIN_RECOMMENDATION_RANKING_SCORE,
     );
     ranked = this.filterOverlappingRecommendations(
       ranked,
