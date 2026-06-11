@@ -15,6 +15,7 @@ import { Service } from '../../services/entities/service.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
 import { Order } from '../../orders/entities/order.entity';
 import { RecommendationPriority } from './recommendation-priority.enum';
+import { RecommendationSource } from './recommendation-source.enum';
 import { RecommendationStatus } from './recommendation-status.enum';
 
 @Entity()
@@ -125,6 +126,18 @@ export class Recommendation {
   @ApiPropertyOptional({ description: 'When recommendation was AI-generated' })
   @Column({ type: 'timestamptz', nullable: true })
   generatedAt: Date | null;
+
+  @ApiProperty({
+    enum: RecommendationSource,
+    description: 'Recommendation origin source',
+    default: RecommendationSource.Manual,
+  })
+  @Column({
+    type: 'varchar',
+    length: 10,
+    default: RecommendationSource.Manual,
+  })
+  source: RecommendationSource;
 
   @ApiProperty({ description: 'Recommendation creation date' })
   @CreateDateColumn({ type: 'timestamptz' })
