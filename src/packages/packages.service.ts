@@ -20,6 +20,7 @@ export interface AdminPackageListItem {
   tags: string[];
   packageType: string;
   price: number;
+  giftEligible: boolean;
   image: string | null;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
@@ -276,6 +277,7 @@ export class PackagesService {
       tags: pkg.tags ?? [],
       packageType: pkg.packageType,
       price: Number(pkg.price),
+      giftEligible: pkg.giftEligible,
       image: pkg.image,
       categoryId: pkg.categoryId,
       category: pkg.category

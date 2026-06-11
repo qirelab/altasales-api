@@ -151,6 +151,7 @@ export class ServicesService {
       skills: string[];
       createdAt: Date;
       userId: string | null;
+      giftEligible: boolean;
       contractorRatePerHour: number | null;
       contractorExperienceYears: number | null;
       ordersCount: number;
@@ -197,6 +198,7 @@ export class ServicesService {
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
+      .addSelect('s."giftEligible"', 'giftEligible')
       .addSelect('s."createdAt"', 'createdAt')
       .addSelect('s."userId"', 'userId')
       .addSelect('COUNT(oi.id)', 'ordersCount')
@@ -217,6 +219,7 @@ export class ServicesService {
         skills: string[] | string;
         createdAt: Date;
         userId: string | null;
+        giftEligible: boolean;
         ordersCount: string;
       }>();
 
@@ -233,6 +236,7 @@ export class ServicesService {
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
+        giftEligible: row.giftEligible,
         contractorRatePerHour: null,
         contractorExperienceYears: null,
         ordersCount: Number(row.ordersCount),
@@ -581,6 +585,7 @@ export class ServicesService {
       price: number;
       image: string | null;
       skills: string[];
+      giftEligible: boolean;
       createdAt: Date;
     };
     stats: {
@@ -655,6 +660,7 @@ export class ServicesService {
         price: Number(service.price),
         image: service.image,
         skills: service.skills,
+        giftEligible: service.giftEligible,
         createdAt: service.createdAt,
       },
       stats: {
