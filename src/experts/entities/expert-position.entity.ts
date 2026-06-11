@@ -28,6 +28,10 @@ export class ExpertPosition {
   @Column({ type: 'text' })
   description: string;
 
+  @ApiProperty({ example: 'https://cdn.example.com/expert-groups/marketing.png', nullable: true })
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  image: string | null;
+
   @OneToMany(() => ExpertPositionOffering, (offering) => offering.position, { cascade: true })
   offerings: ExpertPositionOffering[];
 

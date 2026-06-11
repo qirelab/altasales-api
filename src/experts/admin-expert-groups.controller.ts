@@ -81,6 +81,22 @@ export class AdminExpertGroupsController {
     await this.expertsService.removeAdminExpertGroup(id);
   }
 
+  @Get('available-experts/all')
+  @ApiOperation({ summary: 'List all EXPERT users (used when creating a new group)' })
+  getAllAvailableExperts(@Query() query: ExpertGroupsQueryDto) {
+    return this.expertsService.getAllExpertUsers(query);
+  }
+
+  @Get(':id/orders')
+  @ApiOperation({ summary: 'List orders bound to expert group with pagination' })
+  @ApiParam({ name: 'id', description: 'Group ID' })
+  getGroupOrders(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ExpertGroupsQueryDto,
+  ) {
+    return this.expertsService.getAdminExpertGroupOrders(id, query);
+  }
+
   @Get(':id/available-experts')
   @ApiOperation({ summary: 'List EXPERT users not attached to group' })
   @ApiParam({ name: 'id', description: 'Group ID' })
