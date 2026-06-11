@@ -173,6 +173,7 @@ export class CartService {
     const positionId = dto.expertPositionId!;
     const executorUserId = dto.executorUserId!;
     const offeringIds = dto.offeringIds!;
+    const quantityToAdd = dto.quantity ?? 1;
 
     try {
       await this.expertsService.resolveCheckoutLines({ positionId, executorUserId, offeringIds });
@@ -184,23 +185,17 @@ export class CartService {
     }
 
     const existing = await this.cartItemRepository.findOne({
-      where: { cartId, expertPositionId: positionId },
+      where: {
+        cartId,
+        expertPositionId: positionId,
+        executorUserId,
+      },
       relations: ['offerings'],
     });
 
     if (existing) {
-      await this.dataSource.transaction(async (manager) => {
-        existing.executorUserId = executorUserId;
-        await manager.save(CartItem, existing);
-        await manager.delete(CartItemOffering, { cartItemId: existing.id });
-        await manager.save(
-          CartItemOffering,
-          offeringIds.map((offeringId) => manager.create(CartItemOffering, {
-            cartItemId: existing.id,
-            expertPositionOfferingId: offeringId,
-          })),
-        );
-      });
+      existing.quantity += quantityToAdd;
+      await this.cartItemRepository.save(existing);
       return this.getMyCart(userId);
     }
 
@@ -211,7 +206,7 @@ export class CartService {
         packageId: null,
         expertPositionId: positionId,
         executorUserId,
-        quantity: 1,
+        quantity: quantityToAdd,
       });
       const savedItem = await manager.save(CartItem, item);
       await manager.save(
@@ -232,9 +227,6 @@ export class CartService {
     });
     if (!existing) {
       throw new NotFoundException('Cart item not found');
-    }
-    if (existing.expertPositionId) {
-      throw new BadRequestException('Quantity is not applicable for expert position cart items');
     }
     existing.quantity = dto.quantity;
     await this.cartItemRepository.save(existing);

@@ -96,6 +96,12 @@ export class CheckoutItemDto {
   @Min(0.01)
   hours?: number;
 
+  @ApiPropertyOptional({ example: 2, description: 'Quantity (for expert position lines)' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  quantity?: number;
+
   @ApiProperty({ example: 50000, description: 'Line amount' })
   @IsNumber()
   @Min(0.01)

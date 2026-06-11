@@ -26,9 +26,9 @@ import { CartItemOffering } from './cart-item-offering.entity';
   unique: true,
   where: '"packageId" IS NOT NULL',
 })
-@Index('UQ_cart_item_cart_expert_position_not_null', ['cartId', 'expertPositionId'], {
+@Index('UQ_cart_item_cart_expert_position_executor_not_null', ['cartId', 'expertPositionId', 'executorUserId'], {
   unique: true,
-  where: '"expertPositionId" IS NOT NULL',
+  where: '"expertPositionId" IS NOT NULL AND "executorUserId" IS NOT NULL',
 })
 @Check(
   'CHK_cart_item_product_type',
