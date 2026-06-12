@@ -9,17 +9,11 @@ import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { Order } from './entities/order.entity';
 import { OrderStatus } from './entities/order-status.enum';
 
-export interface OrderPaidItemOffering {
-  name: string;
-  amount: number;
-}
-
 export interface OrderPaidItem {
   orderId: string;
   name: string;
   type: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет' | 'Услуги эксперта';
   amount: number;
-  offerings?: OrderPaidItemOffering[];
 }
 
 export interface OrderPaidSocketPayload {
@@ -60,8 +54,6 @@ export class OrderNotificationService {
         'item.service',
         'item.package',
         'item.executor',
-        'item.subItems',
-        'item.subItems.expertPositionOffering',
       ],
     });
 
@@ -117,18 +109,11 @@ export class OrderNotificationService {
       const fullName = executor
         ? [executor.name, executor.lastName].filter(Boolean).join(' ').trim()
         : '';
-      const offerings: OrderPaidItemOffering[] = (orderItem?.subItems ?? [])
-        .filter((sub) => sub.expertPositionOfferingId)
-        .map((sub) => ({
-          name: sub.expertPositionOffering?.name ?? 'Услуга эксперта',
-          amount: Number(sub.unitPrice ?? 0),
-        }));
       return {
         orderId: order.id,
         name: fullName ? `Услуги ${fullName}` : 'Услуги эксперта',
         type: 'Услуги эксперта',
         amount: Number(order.amount),
-        offerings: offerings.length > 0 ? offerings : undefined,
       };
     }
 

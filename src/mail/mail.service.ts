@@ -21,7 +21,6 @@ interface OrderItemRow {
   name: string;
   type: string;
   amount: number;
-  offerings?: Array<{ name: string; amount: number }>;
 }
 
 function formatAmount(amount: number): string {
@@ -30,8 +29,8 @@ function formatAmount(amount: number): string {
 
 function renderOrderItemRows(items: OrderItemRow[]): string {
   return items
-    .map((item) => {
-      const mainRow = `
+    .map(
+      (item) => `
           <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; `
             + `font-size: 11px; color: #6B7280;">${item.orderId}</td>
@@ -40,25 +39,8 @@ function renderOrderItemRows(items: OrderItemRow[]): string {
             <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; `
             + `white-space: nowrap;">${formatAmount(item.amount)}</td>
           </tr>
-        `;
-      const offerings = item.offerings ?? [];
-      if (offerings.length === 0) return mainRow;
-      const offeringRows = offerings
-        .map(
-          (o) => `
-          <tr>
-            <td></td>
-            <td style="padding: 4px 8px 4px 24px; border-bottom: 1px solid #f5f5f5; `
-            + `color: #6B7280; font-size: 13px;">↳ ${o.name}</td>
-            <td style="border-bottom: 1px solid #f5f5f5;"></td>
-            <td style="padding: 4px 8px; border-bottom: 1px solid #f5f5f5; text-align: right; `
-            + `color: #6B7280; font-size: 13px; white-space: nowrap;">${formatAmount(o.amount)}</td>
-          </tr>
         `,
-        )
-        .join('');
-      return mainRow + offeringRows;
-    })
+    )
     .join('');
 }
 
