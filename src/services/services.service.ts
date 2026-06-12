@@ -331,13 +331,13 @@ export class ServicesService {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
     }
 
-    await this.ensureCategoryExists(dto.categoryId);
+    const expertCategoryId = await this.resolveExpertCategoryId();
 
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
       name: dto.name,
       description: dto.description,
-      categoryId: dto.categoryId,
+      categoryId: expertCategoryId,
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
@@ -682,10 +682,6 @@ export class ServicesService {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
-    if (dto.categoryId !== undefined) {
-      await this.ensureCategoryExists(dto.categoryId);
-      contractor.categoryId = dto.categoryId;
-    }
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
     if (dto.ratePerHour !== undefined) {
       contractor.contractorRatePerHour = dto.ratePerHour;
@@ -763,6 +759,14 @@ export class ServicesService {
     if (!category) {
       throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
     }
+  }
+
+  private async resolveExpertCategoryId(): Promise<string> {
+    const category = await this.categoryRepository.findOne({ where: { name: 'Эксперты' } });
+    if (!category) {
+      throw new NotFoundException('Категория «Эксперты» не найдена');
+    }
+    return category.id;
   }
 
   private async getCategoryContentForFilter(categoryIds: string[]): Promise<{
