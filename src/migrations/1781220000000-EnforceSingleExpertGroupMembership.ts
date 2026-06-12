@@ -11,11 +11,10 @@ export class EnforceSingleExpertGroupMembership1781220000000 implements Migratio
             ORDER BY m."createdAt" ASC, m.id ASC
           ) AS rn
         FROM "expert_position_member" m
-        INNER JOIN "expert_position" p ON p.id = m."positionId"
         WHERE m."deletedAt" IS NULL
-          AND p."deletedAt" IS NULL
       )
-      DELETE FROM "expert_position_member" m
+      UPDATE "expert_position_member" m
+      SET "deletedAt" = NOW()
       USING ranked r
       WHERE m.id = r.id
         AND r.rn > 1
