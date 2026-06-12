@@ -16,12 +16,14 @@ describe('QuestionnaireRelevanceRankerService', () => {
       price: 0,
       skills: [],
       category: null,
-    }) as ServiceCandidate;
+    }) as unknown as ServiceCandidate;
 
   const services = [
     service('from-zero', 'Отдел продаж с нуля'),
     service('base-setup', 'Базовая настройка работы отдела продаж'),
     service('docs-package', 'Пакет документов отдела продаж'),
+    service('training-3m', 'Пакет обучения на 3 месяца'),
+    service('training-1m', 'Пакет обучения на месяц'),
     service('crm-start', 'CRM Старт'),
     service('crm-bronze', 'CRM Бронза'),
     service('crm-silver', 'CRM Серебро'),
@@ -65,7 +67,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
   });
 
   const scoringService = {
-    scoreService: (candidate: ServiceCandidate): GeneratedRecommendationItem => ({
+    scoreService: (
+      candidate: ServiceCandidate,
+    ): GeneratedRecommendationItem => ({
       serviceId: candidate.id,
       serviceName: candidate.name,
       priority: RecommendationPriority.Low,
@@ -117,12 +121,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           desiredRevenue: 4000000,
           calculatedManagersCount: 2,
           leadGenerationType: 'Входящая',
-          desiredSalesDepartment: [
-            'CRM',
-            'Телефония',
-            'Мессенджер',
-            'Скрипты',
-          ],
+          desiredSalesDepartment: ['CRM', 'Телефония', 'Мессенджер', 'Скрипты'],
         },
         persist: false,
       },
@@ -200,7 +199,43 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
-  it('keeps visible priority distribution independent from raw relevance score', () => {
+  it('keeps explicitly selected telephony, messenger and chatbot-related automation visible', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '1m',
+            description:
+              'отсутствует отдел продаж, нужно настроить отдел продаж',
+          },
+          targetRevenue: 500000,
+          averageCheck: 1000000,
+          conversionRate: 1,
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            chatbot: true,
+            salesManager: true,
+            analytics: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      12,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['telephony', 'messenger', 'automation']),
+    );
+  });
+
+  it('promotes generated recommendation priorities after questionnaire boosts', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -211,18 +246,130 @@ describe('QuestionnaireRelevanceRankerService', () => {
         persist: false,
       },
       services,
-      [],
+      [
+        {
+          serviceId: 'from-zero',
+          serviceName: 'Отдел продаж с нуля',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+        {
+          serviceId: 'crm-start',
+          serviceName: 'CRM Старт',
+          priority: RecommendationPriority.Medium,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 95,
+        },
+      ],
       '',
-      5,
+      2,
     );
 
     expect(result.map((item) => item.priority)).toEqual([
       RecommendationPriority.Urgent,
-      RecommendationPriority.Medium,
-      RecommendationPriority.Medium,
-      RecommendationPriority.Low,
-      RecommendationPriority.Low,
+      RecommendationPriority.Urgent,
     ]);
+  });
+
+  it('does not leave questionnaire-boosted recommendations as low priority', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Навести порядок в работе 2 менеджеров',
+          },
+          targetRevenue: 4000000,
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      3,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['crm-bronze', 'telephony', 'messenger']),
+    );
+    expect(result.map((item) => item.priority)).not.toContain(
+      RecommendationPriority.Low,
+    );
+  });
+
+  it('does not recommend basic sales department setup when sales already exist', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Навести порядок в работе 2 менеджеров',
+          },
+          targetRevenue: 4000000,
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            scripts: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [
+        {
+          serviceId: 'base-setup',
+          serviceName: 'Базовая настройка работы отдела продаж',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+      ],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('base-setup');
+  });
+
+  it('does not treat a new product alone as a new sales department', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'Новый',
+          targetResult: 'Увеличить продажи в команде из 6 менеджеров',
+          calculatedManagersCount: 6,
+          components: components({
+            analytics: true,
+            callAnalysis: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      8,
+    );
+
+    expect(result.map((item) => item.serviceId)).toContain('dashboard');
+    expect(result.map((item) => item.serviceId)).not.toEqual(
+      expect.arrayContaining(['from-zero']),
+    );
   });
 
   it('prioritizes requested tools and hiring for a new product with inbound leads', () => {
@@ -352,6 +499,82 @@ describe('QuestionnaireRelevanceRankerService', () => {
     ]);
   });
 
+  it('treats explicit missing sales department text as a new department request', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '1m',
+            description:
+              'отсутствует отдел продаж, нужно настроить отдел продаж',
+          },
+          targetRevenue: 500000,
+          averageCheck: 1000000,
+          conversionRate: 1,
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'from-zero',
+      'crm-start',
+      'turnkey-hiring',
+      'telephony',
+      'messenger',
+    ]);
+  });
+
+  it('does not recommend three-month packages for a one-month goal', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '1m',
+            description: 'Нужно быстро обучить менеджеров за месяц',
+          },
+          components: components({
+            trainingSystem: true,
+          }),
+          targetRevenue: 4000000,
+        },
+        persist: false,
+      },
+      services,
+      [
+        {
+          serviceId: 'training-3m',
+          serviceName: 'Пакет обучения на 3 месяца',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+        {
+          serviceId: 'training-1m',
+          serviceName: 'Пакет обучения на месяц',
+          priority: RecommendationPriority.Medium,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 90,
+        },
+      ],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('training-3m');
+    expect(result.map((item) => item.serviceId)).toContain('training-1m');
+  });
+
   it('does not cap questionnaire recommendations at five when no limit is provided', () => {
     const result = ranker.rankRecommendations(
       {
@@ -395,8 +618,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           productStage: 'Уже продаю',
-          targetResult:
-            'Нужны CRM, аналитика, телефония и контроль качества',
+          targetResult: 'Нужны CRM, аналитика, телефония и контроль качества',
           desiredRevenue: 15000000,
           calculatedManagersCount: 8,
           desiredSalesDepartment: [
@@ -418,8 +640,12 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const serviceIds = result.map((item) => item.serviceId);
 
-    expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
-    expect(serviceIds.filter((id) => id.startsWith('crm')).length).toBeLessThanOrEqual(2);
+    expect(serviceIds).toEqual(
+      expect.arrayContaining(['dashboard', 'quality']),
+    );
+    expect(
+      serviceIds.filter((id) => id?.startsWith('crm')).length,
+    ).toBeLessThanOrEqual(2);
   });
 
   it('treats canonical high-revenue questionnaire answers as mature department', () => {
@@ -453,7 +679,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const serviceIds = result.map((item) => item.serviceId);
 
-    expect(serviceIds).toEqual(expect.arrayContaining(['dashboard', 'quality']));
+    expect(serviceIds).toEqual(
+      expect.arrayContaining(['dashboard', 'quality']),
+    );
     expect(serviceIds).not.toEqual(
       expect.arrayContaining(['from-zero', 'crm-start', 'crm-bronze']),
     );

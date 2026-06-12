@@ -37,11 +37,28 @@ type DefaultServiceRule = {
   reason: string;
 };
 
+type SelectedComponent =
+  | 'crm'
+  | 'telephony'
+  | 'messenger'
+  | 'chatbot'
+  | 'voiceRobot'
+  | 'contactDatabase'
+  | 'salesManager'
+  | 'trainingSystem'
+  | 'analytics'
+  | 'scripts'
+  | 'callAnalysis'
+  | 'businessTrainer'
+  | 'salesHead';
+
 type NormalizedQuestionnaireProfile = {
   rawText: string;
   productStageText: string;
   desiredText: string;
   leadTypeText: string;
+  desiredPeriod: string;
+  selectedComponents: SelectedComponent[];
   managersCount: number;
   targetRevenue: number;
 };
@@ -98,6 +115,142 @@ const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
   other: 2,
 };
 
+const URGENT_RANKER_SCORE = 70;
+const MEDIUM_RANKER_SCORE = 12;
+const EXPLICIT_COMPONENT_POINTS = 60;
+
+const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
+  crm: ['CRM'],
+  telephony: ['Телефония'],
+  messenger: ['Мессенджер'],
+  chatbot: ['Чат-бот', 'Робот', 'Автоматизация'],
+  voiceRobot: ['Робот', 'Автоматизация'],
+  contactDatabase: ['База контактов'],
+  salesManager: ['Менеджер по продажам'],
+  trainingSystem: ['Система обучения'],
+  analytics: ['Аналитика'],
+  scripts: ['Скрипты'],
+  callAnalysis: ['Анализ звонков'],
+  businessTrainer: ['Бизнес тренер'],
+  salesHead: ['РОП'],
+};
+
+const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
+  crm: [
+    { terms: ['crm'], points: EXPLICIT_COMPONENT_POINTS, reason: 'CRM выбрана в анкете' },
+    { terms: ['технического задания'], points: 6, reason: 'CRM выбрана в анкете' },
+  ],
+  telephony: [
+    {
+      terms: ['интеграция телефонии'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'телефония выбрана в анкете',
+    },
+  ],
+  messenger: [
+    {
+      terms: ['интеграция мессенджера'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'мессенджер выбран в анкете',
+    },
+  ],
+  chatbot: [
+    {
+      terms: ['робот'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'чат-бот/робот выбран в анкете',
+    },
+    {
+      terms: ['автоматизац'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'чат-бот/робот выбран в анкете',
+    },
+  ],
+  voiceRobot: [
+    {
+      terms: ['робот'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'голосовой робот выбран в анкете',
+    },
+    {
+      terms: ['автоматизац'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'голосовой робот выбран в анкете',
+    },
+  ],
+  contactDatabase: [
+    {
+      terms: ['баз контактов'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'база контактов выбрана в анкете',
+    },
+  ],
+  salesManager: [
+    {
+      terms: ['подбор', 'ключ'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'нужен менеджер по продажам',
+    },
+    { terms: ['профиль вакансии'], points: 8, reason: 'нужно описать профиль кандидата' },
+  ],
+  trainingSystem: [
+    {
+      terms: ['план тренингов'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'система обучения выбрана в анкете',
+    },
+    { terms: ['тренинг'], points: 10, reason: 'нужно развивать навыки менеджеров' },
+    { terms: ['адаптации моп'], points: 8, reason: 'нужна адаптация менеджеров' },
+  ],
+  analytics: [
+    {
+      terms: ['дашборд оп'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'аналитика выбрана в анкете',
+    },
+    { terms: ['отказ'], points: 8, reason: 'нужно разбирать потери сделок' },
+  ],
+  scripts: [
+    {
+      terms: ['скрипт продаж'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'скрипты выбраны в анкете',
+    },
+  ],
+  callAnalysis: [
+    {
+      terms: ['на контроле'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'анализ звонков выбран в анкете',
+    },
+    {
+      terms: ['отчет', 'звонков'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'нужно оценивать звонки',
+    },
+  ],
+  businessTrainer: [
+    {
+      terms: ['тренинг'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'бизнес-тренер выбран в анкете',
+    },
+  ],
+  salesHead: [
+    { terms: ['роп-фокус'], points: EXPLICIT_COMPONENT_POINTS, reason: 'РОП выбран в анкете' },
+    {
+      terms: ['руководитель отдела продаж'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'нужно усилить управление отделом',
+    },
+    {
+      terms: ['ии роп'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'нужно управлять отделом по данным',
+    },
+  ],
+};
+
 @Injectable()
 export class QuestionnaireRelevanceRankerService {
   constructor(private readonly scoringService: RecommendationScoringService) {}
@@ -116,7 +269,10 @@ export class QuestionnaireRelevanceRankerService {
     const rules = this.buildRules(normalizedProfile, stage);
     const desiredText = normalizedProfile.desiredText;
     const rankedById = new Map(
-      ranked.map((item, index) => [item.serviceId, { item, index }]),
+      ranked.map((item, index) => [
+        this.getItemTargetId(item),
+        { item, index },
+      ]),
     );
     let defaultItems: GeneratedRecommendationItem[] = [];
 
@@ -129,24 +285,32 @@ export class QuestionnaireRelevanceRankerService {
       );
 
       if (defaultItems.length >= maxItems) {
-        return this.normalizePriorities(defaultItems);
+        return defaultItems;
       }
     }
 
-    const defaultServiceIds = new Set(
-      defaultItems.map((item) => item.serviceId),
+    const defaultTargetIds = new Set(
+      defaultItems.map((item) => this.getItemTargetId(item)),
     );
     const rankedCandidates: GeneratedRecommendationItem[] = [...defaultItems];
 
     for (const service of services) {
-      if (defaultServiceIds.has(service.id)) continue;
+      const targetId = this.getCandidateTargetId(service);
+      if (defaultTargetIds.has(targetId)) continue;
 
       const serviceText = this.normalizeCandidateText(service);
-      if (this.getAntiRecommendationReason(serviceText, stage, desiredText)) {
+      if (
+        this.getAntiRecommendationReason(
+          serviceText,
+          stage,
+          desiredText,
+          normalizedProfile.desiredPeriod,
+        )
+      ) {
         continue;
       }
 
-      const fromRanked = rankedById.get(service.id);
+      const fromRanked = rankedById.get(targetId);
       const fallback = this.scoringService.scoreService(service, context);
       const matchedRules = rules.filter((rule) =>
         rule.terms.every((term) => serviceText.includes(this.normalize(term))),
@@ -165,7 +329,7 @@ export class QuestionnaireRelevanceRankerService {
 
       rankedCandidates.push({
         ...base,
-        priority: base.priority,
+        priority: this.resolveBoostedPriority(score, base.priority),
         rationale:
           reasons.length > 0
             ? this.buildRationale(service.name, reasons)
@@ -183,18 +347,18 @@ export class QuestionnaireRelevanceRankerService {
       maxItems,
     );
 
-    return this.normalizePriorities(diverse);
+    return diverse;
   }
 
   private detectStage(
     profile: NormalizedQuestionnaireProfile,
   ): QuestionnaireStage {
     if (
-      profile.productStageText === 'new' ||
-      this.includesAny(profile.productStageText, ['новый']) ||
       this.includesAny(profile.rawText, [
         'построить отдел продаж',
         'с нуля',
+        'отсутствует отдел продаж',
+        'нет отдела продаж',
       ])
     ) {
       return 'new_department';
@@ -216,7 +380,6 @@ export class QuestionnaireRelevanceRankerService {
     stage: QuestionnaireStage,
   ): RelevanceRule[] {
     const rules: RelevanceRule[] = [];
-    const desired = profile.desiredText;
     const leadType = profile.leadTypeText;
     const add = (terms: string[], points: number, reason: string): void => {
       rules.push({ terms, points, reason });
@@ -226,7 +389,11 @@ export class QuestionnaireRelevanceRankerService {
       add(['отдел продаж с нуля'], 36, 'клиент строит отдел продаж с нуля');
       add(['базовая'], 32, 'нужна базовая настройка отдела');
       add(['crm старт'], 22, 'нужен стартовый CRM-контур');
-      add(['пакет документов', 'отдел продаж'], 18, 'нужны базовые документы отдела');
+      add(
+        ['пакет документов', 'отдел продаж'],
+        18,
+        'нужны базовые документы отдела',
+      );
       add(['подбор', 'ключ'], 16, 'нужен подбор менеджеров');
       add(['скрипт продаж'], 8, 'нужны первые скрипты продаж');
     }
@@ -241,85 +408,35 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     if (stage === 'advanced_department') {
-      add(['дашборд оп'], 26, 'развитому отделу нужна управленческая аналитика');
+      add(
+        ['дашборд оп'],
+        26,
+        'развитому отделу нужна управленческая аналитика',
+      );
       add(['ии роп'], 24, 'нужно управлять командой по данным');
       add(['на контроле'], 22, 'нужен контроль качества коммуникаций');
       add(['crm серебро'], 18, 'нужна расширенная CRM-настройка');
-      add(['руководитель отдела продаж'], 18, 'нужно усиление управления продажами');
+      add(
+        ['руководитель отдела продаж'],
+        18,
+        'нужно усиление управления продажами',
+      );
       add(['роп-фокус'], 16, 'нужно усиление роли РОПа');
     }
 
-    if (desired.includes('crm')) {
-      add(
-        [
-          stage === 'new_department'
-            ? 'crm старт'
-            : stage === 'advanced_department'
-              ? 'crm серебро'
-              : 'crm бронза',
-        ],
-        10,
-        'CRM выбрана в анкете',
+    profile.selectedComponents.forEach((component) => {
+      COMPONENT_RELEVANCE_RULES[component].forEach((rule) =>
+        add(rule.terms, rule.points, rule.reason),
       );
-      add(['технического задания'], 6, 'CRM выбрана в анкете');
-    }
-    if (desired.includes('телефония')) {
-      add(
-        ['интеграция телефонии'],
-        stage === 'new_department' ? 20 : 12,
-        'телефония выбрана в анкете',
-      );
-    }
-    if (desired.includes('мессенджер')) {
-      add(
-        ['интеграция мессенджера'],
-        stage === 'new_department' ? 20 : 12,
-        'мессенджер выбран в анкете',
-      );
-    }
-    if (
-      desired.includes('чат бот') ||
-      desired.includes('чат-бот') ||
-      desired.includes('робот')
-    ) {
-      add(['робот'], 9, 'роботизация выбрана в анкете');
-    }
-    if (desired.includes('база контактов')) {
-      add(['баз контактов'], 9, 'база контактов выбрана в анкете');
-    }
-    if (desired.includes('менеджер по продажам')) {
-      add(
-        ['подбор', 'ключ'],
-        stage === 'new_department' ? 22 : 12,
-        'нужен менеджер по продажам',
-      );
-      add(['профиль вакансии'], 8, 'нужно описать профиль кандидата');
-    }
-    if (desired.includes('скрипт')) {
-      add(['скрипт продаж'], 12, 'скрипты выбраны в анкете');
-    }
-    if (desired.includes('аналитик')) {
-      add(['дашборд оп'], 12, 'аналитика выбрана в анкете');
-      add(['отказ'], 8, 'нужно разбирать потери сделок');
-    }
-    if (desired.includes('анализ звонков')) {
-      add(['на контроле'], 12, 'анализ звонков выбран в анкете');
-      add(['отчет', 'звонков'], 10, 'нужно оценивать звонки');
-    }
-    if (desired.includes('система обучения')) {
-      add(['план тренингов'], 12, 'система обучения выбрана в анкете');
-      add(['тренинг'], 10, 'нужно развивать навыки менеджеров');
-      add(['адаптации моп'], 8, 'нужна адаптация менеджеров');
-    }
-    if (desired.includes('роп')) {
-      add(['роп-фокус'], 14, 'РОП выбран в анкете');
-      add(['руководитель отдела продаж'], 10, 'нужно усилить управление отделом');
-      add(['ии роп'], 10, 'нужно управлять отделом по данным');
-    }
+    });
 
     if (leadType.includes('исход') || leadType.includes('outbound')) {
       add(['скрипт продаж'], 8, 'исходящая лидогенерация требует скриптов');
-      add(['портрет соискателя'], 5, 'для исходящей лидогенерации нужен портрет');
+      add(
+        ['портрет соискателя'],
+        5,
+        'для исходящей лидогенерации нужен портрет',
+      );
     }
     if (leadType.includes('вход') || leadType.includes('inbound')) {
       add(
@@ -340,9 +457,22 @@ export class QuestionnaireRelevanceRankerService {
   private normalizeProfile(
     profile: Record<string, unknown>,
   ): NormalizedQuestionnaireProfile {
-    const componentTerms = this.getComponentTerms(profile.components);
     const desiredSalesDepartment = this.toArray(profile.desiredSalesDepartment);
-    const desiredTerms = [...desiredSalesDepartment, ...componentTerms];
+    const selectedComponents = this.getSelectedComponents(
+      profile.components,
+      desiredSalesDepartment,
+    );
+    const componentTerms = selectedComponents.flatMap(
+      (component) => COMPONENT_LABELS[component],
+    );
+    const desiredTerms = [
+      ...desiredSalesDepartment,
+      ...componentTerms,
+      profile.desiredResult,
+      profile.targetResult,
+      profile.product,
+      profile.industry,
+    ];
     const canonicalLeadGenerationTypes = this.toArray(
       profile.leadGenerationTypes,
     );
@@ -364,6 +494,8 @@ export class QuestionnaireRelevanceRankerService {
       productStageText: this.normalize(String(profile.productStage ?? '')),
       desiredText: this.normalize(JSON.stringify(desiredTerms)),
       leadTypeText: this.normalize(JSON.stringify(leadGenerationTypes)),
+      desiredPeriod: this.getDesiredPeriod(profile),
+      selectedComponents,
       managersCount: Math.max(
         this.toNumber(profile.calculatedManagersCount),
         this.inferManagersCount(profile),
@@ -372,6 +504,13 @@ export class QuestionnaireRelevanceRankerService {
         this.toNumber(profile.targetRevenue) ||
         this.toNumber(profile.desiredRevenue),
     };
+  }
+
+  private getDesiredPeriod(profile: Record<string, unknown>): string {
+    if (this.isPlainObject(profile.desiredResult)) {
+      return String(profile.desiredResult.period ?? '');
+    }
+    return String(profile.period ?? '');
   }
 
   private inferManagersCount(profile: Record<string, unknown>): number {
@@ -386,30 +525,32 @@ export class QuestionnaireRelevanceRankerService {
     }, 0);
   }
 
-  private getComponentTerms(value: unknown): string[] {
-    if (!this.isPlainObject(value)) return [];
+  private getSelectedComponents(
+    componentsValue: unknown,
+    desiredSalesDepartment: unknown[],
+  ): SelectedComponent[] {
+    const selected = new Set<SelectedComponent>();
+    const components = this.isPlainObject(componentsValue)
+      ? (componentsValue as Record<string, unknown>)
+      : {};
+    const componentKeys = Object.keys(COMPONENT_LABELS) as SelectedComponent[];
 
-    const components = value as Record<string, unknown>;
-    const terms: string[] = [];
-    const addIfEnabled = (key: string, labels: string[]): void => {
-      if (components[key] === true) terms.push(...labels);
-    };
+    componentKeys.forEach((component) => {
+      if (components[component] === true) selected.add(component);
+    });
 
-    addIfEnabled('crm', ['CRM']);
-    addIfEnabled('telephony', ['Телефония']);
-    addIfEnabled('messenger', ['Мессенджер']);
-    addIfEnabled('chatbot', ['Чат-бот']);
-    addIfEnabled('voiceRobot', ['Робот']);
-    addIfEnabled('contactDatabase', ['База контактов']);
-    addIfEnabled('salesManager', ['Менеджер по продажам']);
-    addIfEnabled('trainingSystem', ['Система обучения']);
-    addIfEnabled('analytics', ['Аналитика']);
-    addIfEnabled('scripts', ['Скрипты']);
-    addIfEnabled('callAnalysis', ['Анализ звонков']);
-    addIfEnabled('businessTrainer', ['Бизнес тренер']);
-    addIfEnabled('salesHead', ['РОП']);
+    const legacyText = this.normalize(JSON.stringify(desiredSalesDepartment));
+    componentKeys.forEach((component) => {
+      if (
+        COMPONENT_LABELS[component].some((label) =>
+          legacyText.includes(this.normalize(label)),
+        )
+      ) {
+        selected.add(component);
+      }
+    });
 
-    return terms;
+    return [...selected];
   }
 
   private toArray(value: unknown): unknown[] {
@@ -431,7 +572,21 @@ export class QuestionnaireRelevanceRankerService {
     serviceText: string,
     stage: QuestionnaireStage,
     desiredText: string,
+    desiredPeriod: string,
   ): string | null {
+    if (
+      desiredPeriod === '1m' &&
+      this.includesAny(serviceText, [
+        'на 3 месяца',
+        '3 месяца',
+        'трехмесяч',
+        'трех месяцев',
+        'трехмесячный',
+      ])
+    ) {
+      return 'срок услуги не соответствует цели на 1 месяц';
+    }
+
     if (
       stage === 'new_department' &&
       this.includesAny(serviceText, [
@@ -481,6 +636,7 @@ export class QuestionnaireRelevanceRankerService {
       stage === 'basic_department' &&
       this.includesAny(serviceText, [
         'отдел продаж с нуля',
+        'базовая настройка работы отдела продаж',
         'crm серебро',
         'crm золото',
         'ии роп',
@@ -540,7 +696,8 @@ export class QuestionnaireRelevanceRankerService {
       if (selected.length >= limit) break;
       if (
         !selected.some(
-          (selectedItem) => selectedItem.serviceId === item.serviceId,
+          (selectedItem) =>
+            this.getItemTargetId(selectedItem) === this.getItemTargetId(item),
         )
       ) {
         selected.push(item);
@@ -552,31 +709,43 @@ export class QuestionnaireRelevanceRankerService {
 
   private buildNewDepartmentDefaultRecommendations(
     services: ServiceCandidate[],
-    rankedById: Map<string, { item: GeneratedRecommendationItem; index: number }>,
+    rankedById: Map<
+      string,
+      { item: GeneratedRecommendationItem; index: number }
+    >,
     context: string,
     limit: number,
   ): GeneratedRecommendationItem[] {
     const selected: GeneratedRecommendationItem[] = [];
-    const usedServiceIds = new Set<string>();
+    const usedTargetIds = new Set<string>();
 
     for (const rule of NEW_DEPARTMENT_DEFAULT_RULES) {
       const service = services.find((candidate) => {
-        if (usedServiceIds.has(candidate.id)) return false;
+        if (usedTargetIds.has(this.getCandidateTargetId(candidate)))
+          return false;
         const serviceText = this.normalizeCandidateText(candidate);
-        return rule.terms.every((term) => serviceText.includes(this.normalize(term)));
+        return rule.terms.every((term) =>
+          serviceText.includes(this.normalize(term)),
+        );
       });
 
       if (!service) continue;
 
-      usedServiceIds.add(service.id);
+      const targetId = this.getCandidateTargetId(service);
+      usedTargetIds.add(targetId);
       const base =
-        rankedById.get(service.id)?.item ??
+        rankedById.get(targetId)?.item ??
         this.scoringService.scoreService(service, context);
 
       selected.push({
         ...base,
-        serviceId: service.id,
+        serviceId: base.serviceId,
+        packageId: base.packageId,
         serviceName: service.name,
+        priority: this.resolveBoostedPriority(
+          Math.max(Number(base.score || 0), rule.score),
+          base.priority,
+        ),
         rationale: this.buildRationale(service.name, [rule.reason]),
         diagnosticSignals: this.scoringService.normalizeSignals([
           ...(base.diagnosticSignals ?? []),
@@ -584,6 +753,7 @@ export class QuestionnaireRelevanceRankerService {
           rule.reason,
         ]),
         score: Math.max(Number(base.score || 0), rule.score),
+        coveredServiceIds: base.coveredServiceIds,
       });
 
       if (selected.length >= limit) break;
@@ -592,31 +762,40 @@ export class QuestionnaireRelevanceRankerService {
     return selected;
   }
 
-  private normalizePriorities(
-    items: GeneratedRecommendationItem[],
-  ): GeneratedRecommendationItem[] {
-    return items.map((item, index) => ({
-      ...item,
-      priority:
-        index === 0
-          ? RecommendationPriority.Urgent
-          : index <= 2
-            ? RecommendationPriority.Medium
-            : RecommendationPriority.Low,
-    }));
+  private resolveBoostedPriority(
+    score: number,
+    basePriority: RecommendationPriority,
+  ): RecommendationPriority {
+    if (basePriority === RecommendationPriority.Urgent) {
+      return RecommendationPriority.Urgent;
+    }
+    if (score >= URGENT_RANKER_SCORE) return RecommendationPriority.Urgent;
+    if (
+      score >= MEDIUM_RANKER_SCORE ||
+      basePriority === RecommendationPriority.Medium
+    ) {
+      return RecommendationPriority.Medium;
+    }
+    return RecommendationPriority.Low;
   }
 
   private getServiceGroup(item: GeneratedRecommendationItem): ServiceGroup {
-    const text = this.normalize(`${item.serviceName} ${item.diagnosticSignals.join(' ')}`);
+    const text = this.normalize(
+      `${item.serviceName} ${item.diagnosticSignals.join(' ')}`,
+    );
 
     if (text.includes('crm')) return 'crm';
     if (this.includesAny(text, ['телефони', 'мессенджер', 'звонк'])) {
       return 'communications';
     }
-    if (this.includesAny(text, ['скрипт', 'документ', 'регламент', 'инструкц'])) {
+    if (
+      this.includesAny(text, ['скрипт', 'документ', 'регламент', 'инструкц'])
+    ) {
       return 'documents';
     }
-    if (this.includesAny(text, ['подбор', 'ваканси', 'соискател', 'скрининг'])) {
+    if (
+      this.includesAny(text, ['подбор', 'ваканси', 'соискател', 'скрининг'])
+    ) {
       return 'hiring';
     }
     if (this.includesAny(text, ['дашборд', 'аналит', 'отчет', 'отказ'])) {
@@ -634,6 +813,14 @@ export class QuestionnaireRelevanceRankerService {
     if (this.includesAny(text, ['робот', 'автоматизац'])) return 'automation';
     if (text.includes('баз контактов')) return 'data';
     return 'other';
+  }
+
+  private getCandidateTargetId(service: ServiceCandidate): string {
+    return service.packageId ?? service.serviceId ?? service.id;
+  }
+
+  private getItemTargetId(item: GeneratedRecommendationItem): string {
+    return item.packageId ?? item.serviceId ?? '';
   }
 
   private normalizeCandidateText(service: ServiceCandidate): string {
