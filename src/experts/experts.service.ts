@@ -11,6 +11,7 @@ import {
   EntityManager,
   In,
   IsNull,
+  QueryFailedError,
   Repository,
 } from 'typeorm';
 import { OrderItem } from '../orders/entities/order-item.entity';
@@ -155,6 +156,7 @@ export interface AvailableGroupExpertsDto {
     email: string;
     phoneNumber: string;
     experienceYears: number | null;
+    assignedToGroupId: string | null;
   }>;
   total: number;
   offset: number;
@@ -741,6 +743,7 @@ export class ExpertsService {
       .offset(offset)
       .limit(limit)
       .getMany();
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds(users.map((user) => user.id));
 
     return {
       data: users.map((user) => ({
@@ -750,6 +753,7 @@ export class ExpertsService {
         email: user.email,
         phoneNumber: user.phoneNumber,
         experienceYears: user.experienceYears ?? null,
+        assignedToGroupId: assignedByUserId.get(user.id) ?? null,
       })),
       total,
       offset,
@@ -783,6 +787,7 @@ export class ExpertsService {
       .offset(offset)
       .limit(limit)
       .getMany();
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds(users.map((user) => user.id));
 
     return {
       data: users.map((user) => ({
@@ -792,6 +797,7 @@ export class ExpertsService {
         email: user.email,
         phoneNumber: user.phoneNumber,
         experienceYears: user.experienceYears ?? null,
+        assignedToGroupId: assignedByUserId.get(user.id) ?? null,
       })),
       total,
       offset,
@@ -800,58 +806,109 @@ export class ExpertsService {
   }
 
   async addExpertToGroup(groupId: string, dto: AddExpertToGroupDto): Promise<AdminExpertGroupDetailsDto> {
-    await this.dataSource.transaction(async (manager) => {
-      await this.findActiveGroupOrThrow(groupId, manager);
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        await this.findActiveGroupOrThrow(groupId, manager);
 
-      const userRepo = manager.getRepository(User);
-      const memberRepo = manager.getRepository(ExpertPositionMember);
-      const serviceRepo = manager.getRepository(ExpertPositionOffering);
+        const userRepo = manager.getRepository(User);
+        const memberRepo = manager.getRepository(ExpertPositionMember);
+        const serviceRepo = manager.getRepository(ExpertPositionOffering);
 
-      const expert = await userRepo.findOne({ where: { id: dto.expertId } });
-      if (!expert) {
-        throw new NotFoundException(`Эксперт с ID ${dto.expertId} не найден`);
-      }
-      if (expert.role !== UserRole.EXPERT) {
-        throw new BadRequestException('Только пользователи с ролью EXPERT могут быть добавлены в группу');
-      }
+        const expert = await userRepo.findOne({ where: { id: dto.expertId } });
+        if (!expert) {
+          throw new NotFoundException(`Эксперт с ID ${dto.expertId} не найден`);
+        }
+        if (expert.role !== UserRole.EXPERT) {
+          throw new BadRequestException('Только пользователи с ролью EXPERT могут быть добавлены в группу');
+        }
 
-      const existing = await memberRepo.findOne({
-        where: { positionId: groupId, userId: dto.expertId },
-      });
-      if (existing && !existing.deletedAt) {
-        throw new BadRequestException('Эксперт уже в группе');
-      }
-      if (existing && existing.deletedAt) {
-        existing.deletedAt = null;
-        await memberRepo.save(existing);
-      } else {
-        const member = memberRepo.create({
-          positionId: groupId,
-          userId: dto.expertId,
+        const activeMembership = await memberRepo
+          .createQueryBuilder('member')
+          .innerJoin(ExpertPosition, 'position', 'position.id = member."positionId"')
+          .where('member."userId" = :expertId', { expertId: dto.expertId })
+          .andWhere('member."deletedAt" IS NULL')
+          .andWhere('position."deletedAt" IS NULL')
+          .orderBy('member."createdAt"', 'ASC')
+          .addOrderBy('member.id', 'ASC')
+          .getOne();
+
+        if (activeMembership && activeMembership.positionId !== groupId) {
+          throw new BadRequestException('Эксперт уже состоит в другой группе');
+        }
+        if (activeMembership && activeMembership.positionId === groupId) {
+          throw new BadRequestException('Эксперт уже в группе');
+        }
+
+        const existing = await memberRepo.findOne({
+          where: { positionId: groupId, userId: dto.expertId },
         });
-        await memberRepo.save(member);
-      }
+        if (existing && existing.deletedAt) {
+          existing.deletedAt = null;
+          await memberRepo.save(existing);
+        } else if (!existing) {
+          const member = memberRepo.create({
+            positionId: groupId,
+            userId: dto.expertId,
+          });
+          await memberRepo.save(member);
+        }
 
-      const services = await serviceRepo.find({
-        where: { positionId: groupId, deletedAt: IsNull() },
+        const services = await serviceRepo.find({
+          where: { positionId: groupId, deletedAt: IsNull() },
+        });
+        if (services.length) {
+          const values = services.map((service) => ({
+            expertId: dto.expertId,
+            groupServiceId: service.id,
+            price: Number(service.defaultPrice),
+          }));
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(ExpertServicePrice)
+            .values(values)
+            .orIgnore()
+            .execute();
+        }
       });
-      if (services.length) {
-        const values = services.map((service) => ({
-          expertId: dto.expertId,
-          groupServiceId: service.id,
-          price: Number(service.defaultPrice),
-        }));
-        await manager
-          .createQueryBuilder()
-          .insert()
-          .into(ExpertServicePrice)
-          .values(values)
-          .orIgnore()
-          .execute();
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError
+        && String(error.message).includes('UQ_expert_position_member_user_active')
+      ) {
+        throw new BadRequestException('Эксперт уже состоит в другой группе');
       }
-    });
+      throw error;
+    }
 
     return this.getAdminExpertGroupById(groupId);
+  }
+
+  private async loadAssignedGroupsByUserIds(userIds: string[]): Promise<Map<string, string>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const raw = await this.memberRepository
+      .createQueryBuilder('member')
+      .innerJoin(ExpertPosition, 'position', 'position.id = member."positionId"')
+      .select('member."userId"', 'userId')
+      .addSelect('member."positionId"', 'positionId')
+      .where('member."userId" IN (:...userIds)', { userIds })
+      .andWhere('member."deletedAt" IS NULL')
+      .andWhere('position."deletedAt" IS NULL')
+      .orderBy('member."userId"', 'ASC')
+      .addOrderBy('member."createdAt"', 'ASC')
+      .addOrderBy('member.id', 'ASC')
+      .getRawMany<{ userId: string; positionId: string }>();
+
+    const assignedByUserId = new Map<string, string>();
+    for (const row of raw) {
+      if (!assignedByUserId.has(row.userId)) {
+        assignedByUserId.set(row.userId, row.positionId);
+      }
+    }
+    return assignedByUserId;
   }
 
   async removeExpertFromGroup(groupId: string, expertId: string): Promise<void> {
