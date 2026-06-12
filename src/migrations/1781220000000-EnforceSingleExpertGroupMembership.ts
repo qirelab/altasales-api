@@ -15,7 +15,7 @@ export class EnforceSingleExpertGroupMembership1781220000000 implements Migratio
       )
       UPDATE "expert_position_member" m
       SET "deletedAt" = NOW()
-      USING ranked r
+      FROM ranked r
       WHERE m.id = r.id
         AND r.rn > 1
     `);
