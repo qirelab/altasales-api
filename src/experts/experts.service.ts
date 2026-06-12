@@ -215,6 +215,17 @@ export class ExpertsService {
       : [];
 
     const minPriceByPosition = new Map<string, number>();
+    for (const position of positions) {
+      for (const offering of position.offerings ?? []) {
+        if (offering.deletedAt) continue;
+        const price = Number(offering.defaultPrice);
+        if (!Number.isFinite(price) || price <= 0) continue;
+        const current = minPriceByPosition.get(position.id);
+        if (current === undefined || price < current) {
+          minPriceByPosition.set(position.id, price);
+        }
+      }
+    }
     for (const row of memberOfferings) {
       const price = Number(row.price);
       if (!Number.isFinite(price) || price <= 0) continue;
@@ -317,14 +328,15 @@ export class ExpertsService {
         groupServiceId: In(uniqueOfferingIds),
       },
     });
-    const activePrices = memberPrices.filter((entry) => entry.price !== null);
-    if (activePrices.length !== uniqueOfferingIds.length) {
-      throw new BadRequestException('У исполнителя не заданы цены на выбранные услуги');
-    }
+    const priceByOfferingId = new Map(
+      memberPrices
+        .filter((entry) => entry.price !== null)
+        .map((entry) => [entry.groupServiceId, Number(entry.price)]),
+    );
 
-    const offeringLines = activePrices.map((entry) => ({
-      offeringId: entry.groupServiceId,
-      unitPrice: Number(entry.price),
+    const offeringLines = offerings.map((offering) => ({
+      offeringId: offering.id,
+      unitPrice: priceByOfferingId.get(offering.id) ?? Number(offering.defaultPrice),
     }));
     const amount = offeringLines.reduce((sum, line) => sum + line.unitPrice, 0);
     if (amount <= 0) {
@@ -358,13 +370,11 @@ export class ExpertsService {
         .filter((entry) => entry.price !== null)
         .map((entry) => [entry.groupServiceId, Number(entry.price)]),
     );
-    return sortOfferingsByName(positionOfferings)
-      .filter((offering) => priceByOfferingId.has(offering.id))
-      .map((offering) => ({
-        offeringId: offering.id,
-        name: offering.name,
-        price: priceByOfferingId.get(offering.id)!,
-      }));
+    return sortOfferingsByName(positionOfferings).map((offering) => ({
+      offeringId: offering.id,
+      name: offering.name,
+      price: priceByOfferingId.get(offering.id) ?? Number(offering.defaultPrice),
+    }));
   }
 
   async getAdminExpertGroups(query: ExpertGroupsQueryDto): Promise<{
