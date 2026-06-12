@@ -309,12 +309,13 @@ export class OrdersService {
         let resolvedPackage: ServicePackage | null = null;
 
         if (checkoutItem.expertPositionId) {
+          const quantity = checkoutItem.quantity ?? 1;
           const expert = await this.expertsService.resolveCheckoutLines({
             positionId: checkoutItem.expertPositionId,
             executorUserId: checkoutItem.executorUserId!,
             offeringIds: checkoutItem.offeringIds!,
           });
-          resolvedAmount = expert.amount;
+          resolvedAmount = expert.amount * quantity;
           if (Math.abs(resolvedAmount - Number(checkoutItem.amount)) > 0.01) {
             throw new BadRequestException('Order amount does not match selected offering prices');
           }
@@ -351,7 +352,7 @@ export class OrdersService {
             orderItemId: item.id,
             expertPositionOfferingId: offering.id,
             serviceId: null,
-            unitPrice: priceByOfferingId.get(offering.id)!,
+            unitPrice: priceByOfferingId.get(offering.id)! * quantity,
             status: OrderStatus.PendingPayment,
           }));
           if (subItems.length > 0) {
