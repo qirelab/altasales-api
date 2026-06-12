@@ -3,22 +3,29 @@ import { AgentId } from '../ai/enums/agent-id.enum';
 import { LlmTask } from '../ai/enums/llm-task.enum';
 import { LlmProxyService } from '../ai/llm-proxy.service';
 import { Service } from '../services/entities/service.entity';
+import { ServiceType } from '../services/entities/service-type.enum';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { Recommendation } from './entities/recommendation.entity';
 import { SIGNAL_GROUPS } from './signal-groups.config';
 
-export type ServiceCandidate = Service & {
+export type ServiceCandidate = Omit<Service, 'type'> & {
   category?: { name?: string } | null;
+  serviceId?: string | null;
+  packageId?: string | null;
+  type: ServiceType | 'Пакет услуг';
+  coveredServiceIds?: string[];
 };
 
 export type GeneratedRecommendationItem = {
-  serviceId: string;
+  serviceId: string | null;
+  packageId?: string | null;
   serviceName: string;
   priority: RecommendationPriority;
   rationale: string;
   diagnosticSignals: string[];
   score: number;
+  coveredServiceIds?: string[];
   recommendation?: Recommendation;
 };
 
@@ -60,14 +67,17 @@ export class RecommendationScoringService {
     );
     const score = matchedSignals.reduce((sum, group) => sum + group.weight, 0);
     const priority = this.resolvePriority(score, matchedSignals);
+    const serviceId = this.getCandidateServiceId(service);
 
     return {
-      serviceId: service.id,
+      serviceId,
+      packageId: service.packageId ?? null,
       serviceName: service.name,
       priority,
-      rationale: this.buildRationale(service.name, priority, matchedSignals),
+      rationale: this.buildRationale(service.name, matchedSignals),
       diagnosticSignals: matchedSignals.map((group) => group.signal),
       score,
+      coveredServiceIds: this.getCandidateCoveredServiceIds(service, serviceId),
     };
   }
 
@@ -91,17 +101,17 @@ export class RecommendationScoringService {
           {
             role: 'system',
             content:
-              'You are an AI recommendation engine for AltaSales. Pick relevant service IDs from the provided catalog. Return only valid JSON.',
+              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог. Обоснование пиши на русском. Верни только валидный JSON.',
           },
           {
             role: 'user',
             content: JSON.stringify({
               instruction:
-                'Return {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"short reason","diagnosticSignals":["signal"]}]}',
+                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}. Возвращай только реально релевантные рекомендации.',
               clientProfile: dto.clientProfile ?? {},
               diagnostics: dto.diagnostics ?? [],
               catalog: catalogSlice.map((service) => ({
-                serviceId: service.id,
+                serviceId: this.getCandidateTargetId(service),
                 name: service.name,
                 description: service.description,
                 category: service.category?.name ?? null,
@@ -114,16 +124,24 @@ export class RecommendationScoringService {
       });
 
       const parsed = this.parseAiRecommendationResponse(response.content);
-      const servicesById = new Map(services.map((s) => [s.id, s]));
+      const servicesById = new Map(
+        catalogSlice.map((service) => [
+          this.getCandidateTargetId(service),
+          service,
+        ]),
+      );
       const result: GeneratedRecommendationItem[] = [];
-      const usedServiceIds = new Set<string>();
+      const usedTargetIds = new Set<string>();
 
       for (const item of parsed) {
         const service = servicesById.get(item.serviceId);
-        if (!service || usedServiceIds.has(service.id)) continue;
+        const targetId = service ? this.getCandidateTargetId(service) : null;
+        if (!service || !targetId || usedTargetIds.has(targetId)) continue;
 
-        usedServiceIds.add(service.id);
+        usedTargetIds.add(targetId);
         const fallback = this.scoreService(service, context);
+        if (fallback.score <= 0) continue;
+
         const priority =
           this.normalizePriority(item.priority) ?? fallback.priority;
         const diagnosticSignals = this.normalizeSignals([
@@ -132,20 +150,26 @@ export class RecommendationScoringService {
         ]);
 
         result.push({
-          serviceId: service.id,
+          serviceId: fallback.serviceId,
+          packageId: fallback.packageId,
           serviceName: service.name,
           priority,
-          rationale:
-            item.rationale?.trim() ||
-            fallback.rationale ||
-            `${service.name} was selected by AI based on onboarding diagnostics.`,
+          rationale: this.resolveRussianRationale(
+            item.rationale,
+            fallback.rationale,
+            service.name,
+          ),
           diagnosticSignals,
-          score:
-            fallback.score > 0 ? fallback.score : this.scorePriority(priority),
+          score: fallback.score,
+          coveredServiceIds: fallback.coveredServiceIds,
         });
       }
 
-      return result;
+      return result.sort(
+        (a, b) =>
+          b.score - a.score ||
+          this.scorePriority(b.priority) - this.scorePriority(a.priority),
+      );
     } catch (error) {
       this.logger.warn({
         eventName: 'AI_RECOMMENDATION_GENERATION_FAILED',
@@ -239,6 +263,25 @@ export class RecommendationScoringService {
       .map((item) => item.service);
   }
 
+  private getCandidateTargetId(service: ServiceCandidate): string {
+    return service.packageId ?? service.serviceId ?? service.id;
+  }
+
+  private getCandidateServiceId(service: ServiceCandidate): string | null {
+    if (service.packageId) return null;
+    return service.serviceId ?? service.id;
+  }
+
+  private getCandidateCoveredServiceIds(
+    service: ServiceCandidate,
+    serviceId: string | null,
+  ): string[] {
+    if (service.coveredServiceIds?.length) {
+      return service.coveredServiceIds;
+    }
+    return serviceId ? [serviceId] : [];
+  }
+
   private includesTerm(normalizedText: string, term: string): boolean {
     const normalizedTerm = this.normalizeText(term);
     if (!normalizedTerm) return false;
@@ -263,13 +306,43 @@ export class RecommendationScoringService {
 
   private buildRationale(
     serviceName: string,
-    priority: RecommendationPriority,
     matchedSignals: { signal: string; title?: string }[],
   ): string {
     const signalText = matchedSignals
-      .map((group) => group.title ?? group.signal)
+      .map((group) => this.getSignalLabel(group.signal))
       .join(', ');
-    return `${serviceName} matched diagnostics (${signalText || 'general fit'}) with ${priority} urgency.`;
+    return `${serviceName} подходит по результатам диагностики: ${signalText || 'общее соответствие запросу'}.`;
+  }
+
+  private resolveRussianRationale(
+    aiRationale: string | undefined,
+    fallbackRationale: string,
+    serviceName: string,
+  ): string {
+    const trimmed = aiRationale?.trim();
+    if (trimmed && /[а-яё]/i.test(trimmed)) {
+      return trimmed;
+    }
+
+    return (
+      fallbackRationale || `${serviceName} подходит по результатам диагностики.`
+    );
+  }
+
+  private getSignalLabel(signal: string): string {
+    const labels: Record<string, string> = {
+      revenue_risk: 'риск по выручке',
+      funnel_conversion: 'просадка конверсии воронки',
+      lead_generation_gap: 'нехватка лидогенерации',
+      analytics_visibility: 'недостаток аналитики продаж',
+      crm_quality: 'качество данных в CRM',
+      retention_growth: 'удержание и повторные продажи',
+      unit_economics: 'давление на юнит-экономику',
+      team_performance: 'эффективность команды продаж',
+      sales_process: 'невыстроенный процесс продаж',
+    };
+
+    return labels[signal] ?? signal;
   }
 
   private extractJson(content: string): string {
