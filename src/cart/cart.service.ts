@@ -172,7 +172,7 @@ export class CartService {
   private async addExpertItem(cartId: string, dto: AddCartItemDto, userId: string) {
     const positionId = dto.expertPositionId!;
     const executorUserId = dto.executorUserId!;
-    const offeringIds = dto.offeringIds!;
+    const offeringIds = [...new Set(dto.offeringIds!)];
     const quantityToAdd = dto.quantity ?? 1;
 
     try {
@@ -194,8 +194,26 @@ export class CartService {
     });
 
     if (existing) {
-      existing.quantity += quantityToAdd;
-      await this.cartItemRepository.save(existing);
+      const existingOfferingIds = new Set(
+        (existing.offerings ?? []).map((offering) => offering.expertPositionOfferingId),
+      );
+      const missingOfferingIds = offeringIds.filter((offeringId) => !existingOfferingIds.has(offeringId));
+
+      if (missingOfferingIds.length > 0) {
+        await this.dataSource.transaction(async (manager) => {
+          await manager.save(
+            CartItemOffering,
+            missingOfferingIds.map((offeringId) => manager.create(CartItemOffering, {
+              cartItemId: existing.id,
+              expertPositionOfferingId: offeringId,
+            })),
+          );
+        });
+      } else {
+        existing.quantity += quantityToAdd;
+        await this.cartItemRepository.save(existing);
+      }
+
       return this.getMyCart(userId);
     }
 
@@ -230,6 +248,34 @@ export class CartService {
     }
     existing.quantity = dto.quantity;
     await this.cartItemRepository.save(existing);
+    return this.getMyCart(userId);
+  }
+
+  async removeExpertOffering(userId: string, itemId: string, offeringId: string) {
+    const cart = await this.ensureActiveCart(userId);
+    const existing = await this.cartItemRepository.findOne({
+      where: { cartId: cart.id, id: itemId },
+      relations: ['offerings'],
+    });
+    if (!existing || !existing.expertPositionId) {
+      throw new NotFoundException('Expert cart item not found');
+    }
+
+    const offeringEntry = (existing.offerings ?? [])
+      .find((offering) => offering.expertPositionOfferingId === offeringId);
+    if (!offeringEntry) {
+      throw new NotFoundException('Offering not found in cart item');
+    }
+
+    if ((existing.offerings?.length ?? 0) <= 1) {
+      await this.cartItemRepository.delete({ cartId: cart.id, id: itemId });
+      return this.getMyCart(userId);
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.delete(CartItemOffering, { id: offeringEntry.id, cartItemId: existing.id });
+    });
+
     return this.getMyCart(userId);
   }
 
