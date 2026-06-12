@@ -1,8 +1,8 @@
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
-import { ServiceType } from '../services/entities/service-type.enum';
 import { RecommendationsService } from './recommendations.service';
+import { ServiceType } from '../services/entities/service-type.enum';
 
 describe('RecommendationsService', () => {
   const userId = 'user-id';
@@ -27,9 +27,11 @@ describe('RecommendationsService', () => {
 
   const createService = () => {
     const recommendationRepository = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
       create: jest.fn((value) => value),
       save: jest.fn((value) => Promise.resolve(value)),
+      delete: jest.fn().mockResolvedValue({ affected: 0 }),
     };
     const userRepository = {
       findOne: jest.fn().mockResolvedValue({ id: userId }),
@@ -38,10 +40,14 @@ describe('RecommendationsService', () => {
       createQueryBuilder: jest.fn(createQueryBuilder),
     };
     const packageRepository = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
     };
     const orderRepository = {
       findOne: jest.fn(),
+    };
+    const orderItemRepository = {
+      find: jest.fn().mockResolvedValue([]),
     };
     const questionnaireRepository = {
       findOne: jest.fn().mockResolvedValue({
@@ -52,7 +58,16 @@ describe('RecommendationsService', () => {
     const scoringService = {
       buildDiagnosticContext: jest.fn().mockReturnValue('context'),
       generateAiRecommendations: jest.fn().mockResolvedValue([]),
-      scoreService: jest.fn(),
+      scoreService: jest.fn((candidate) => ({
+        serviceId: candidate.packageId ? null : candidate.serviceId,
+        packageId: candidate.packageId ?? null,
+        serviceName: candidate.name,
+        priority: 'medium',
+        rationale: 'fallback',
+        diagnosticSignals: [],
+        score: 0,
+        coveredServiceIds: candidate.coveredServiceIds ?? [],
+      })),
       normalizeSignals: jest.fn((signals: string[]) => signals),
     };
     const relevanceRanker = {
@@ -87,6 +102,7 @@ describe('RecommendationsService', () => {
       serviceRepository as any,
       packageRepository as any,
       orderRepository as any,
+      orderItemRepository as any,
       questionnaireRepository as any,
       scoringService as any,
       relevanceRanker as any,
@@ -97,6 +113,9 @@ describe('RecommendationsService', () => {
     return {
       service,
       questionnaireRepository,
+      recommendationRepository,
+      serviceRepository,
+      packageRepository,
       scoringService,
       relevanceRanker,
       generationJobService,
@@ -194,6 +213,7 @@ describe('RecommendationsService', () => {
       undefined,
     );
   });
+
   it('keeps legacy package-category services in recommendation candidates alongside real packages', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();

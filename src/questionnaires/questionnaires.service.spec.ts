@@ -12,7 +12,9 @@ describe('QuestionnairesService', () => {
     components: { crm: true },
   };
 
-  const createService = (existingQuestionnaire: Record<string, unknown> | null = null) => {
+  const createService = (
+    existingQuestionnaire: Record<string, unknown> | null = null,
+  ) => {
     const savedQuestionnaire = {
       id: existingQuestionnaire?.id ?? 'questionnaire-id',
       userId,
@@ -21,14 +23,16 @@ describe('QuestionnairesService', () => {
     const repo = {
       findOne: jest.fn().mockResolvedValue(existingQuestionnaire),
       create: jest.fn().mockReturnValue(savedQuestionnaire),
-      save: jest.fn().mockResolvedValue(savedQuestionnaire),
+      save: jest.fn((value) => Promise.resolve(value)),
     };
     const recommendationsService = {
       startGenerationForUser: jest.fn().mockResolvedValue({ id: 'job-id' }),
       findAssignedToUserList: jest.fn(),
     };
     const usersService = {
-      findOne: jest.fn().mockResolvedValue({ id: userId, email: 'user@test.dev' }),
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: userId, email: 'user@test.dev' }),
     };
     const mailService = {
       notifyAdminsAboutNewQuestionnaire: jest.fn().mockResolvedValue(undefined),
@@ -92,5 +96,32 @@ describe('QuestionnairesService', () => {
       },
     );
     expect(balanceService.hasRegistrationGift).not.toHaveBeenCalled();
+  });
+
+  it('starts recommendation generation after admin updates questionnaire answers', async () => {
+    const existing = {
+      id: 'existing-questionnaire-id',
+      userId,
+      answers: {
+        ...answers,
+        components: { crm: false },
+      },
+    };
+    const { service, recommendationsService } = createService(existing);
+
+    await service.updateAnswersForAdmin('existing-questionnaire-id', {
+      components: { crm: true },
+    } as any);
+
+    expect(recommendationsService.startGenerationForUser).toHaveBeenCalledWith(
+      userId,
+      {
+        clientProfile: {
+          ...answers,
+          components: { crm: true },
+        },
+        persist: true,
+      },
+    );
   });
 });
