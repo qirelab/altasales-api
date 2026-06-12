@@ -16,8 +16,50 @@ interface NewQuestionnaireNotificationData {
   userId: string;
 }
 
+interface OrderItemRow {
+  orderId: string;
+  name: string;
+  type: string;
+  amount: number;
+  offerings?: Array<{ name: string; amount: number }>;
+}
+
 function formatAmount(amount: number): string {
   return `${amount.toLocaleString('ru-RU')} ₽`;
+}
+
+function renderOrderItemRows(items: OrderItemRow[]): string {
+  return items
+    .map((item) => {
+      const mainRow = `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; `
+            + `font-size: 11px; color: #6B7280;">${item.orderId}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; `
+            + `white-space: nowrap;">${formatAmount(item.amount)}</td>
+          </tr>
+        `;
+      const offerings = item.offerings ?? [];
+      if (offerings.length === 0) return mainRow;
+      const offeringRows = offerings
+        .map(
+          (o) => `
+          <tr>
+            <td></td>
+            <td style="padding: 4px 8px 4px 24px; border-bottom: 1px solid #f5f5f5; `
+            + `color: #6B7280; font-size: 13px;">↳ ${o.name}</td>
+            <td style="border-bottom: 1px solid #f5f5f5;"></td>
+            <td style="padding: 4px 8px; border-bottom: 1px solid #f5f5f5; text-align: right; `
+            + `color: #6B7280; font-size: 13px; white-space: nowrap;">${formatAmount(o.amount)}</td>
+          </tr>
+        `,
+        )
+        .join('');
+      return mainRow + offeringRows;
+    })
+    .join('');
 }
 
 @Injectable()
@@ -125,7 +167,7 @@ export class MailService {
     orderId: string;
     clientName: string;
     amount: number;
-    items: Array<{ orderId: string; name: string; type: string; amount: number }>;
+    items: OrderItemRow[];
     adminOrdersUrl: string | null;
   }): Promise<void> {
     const admins = await this.userRepository.find({
@@ -150,20 +192,7 @@ export class MailService {
            </a>
          </p>`
       : '';
-    const itemRows = data.items
-      .map(
-        (item) => `
-          <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; ` +
-            `font-size: 11px; color: #6B7280;">${item.orderId}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; ` +
-            `white-space: nowrap;">${formatAmount(item.amount)}</td>
-          </tr>
-        `,
-      )
-      .join('');
+    const itemRows = renderOrderItemRows(data.items);
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #E75E32;">Новый оплаченный заказ</h2>
@@ -230,24 +259,11 @@ export class MailService {
   async sendOrderPaidClientEmail(data: {
     email: string;
     clientName: string;
-    items: Array<{ orderId: string; name: string; type: string; amount: number }>;
+    items: OrderItemRow[];
     amount: number;
   }): Promise<void> {
     const subject = `Заказ оплачен — с вами свяжется менеджер`;
-    const itemRows = data.items
-      .map(
-        (item) => `
-          <tr>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; ` +
-            `font-size: 11px; color: #6B7280;">${item.orderId}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.name}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">${item.type}</td>
-            <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; ` +
-            `white-space: nowrap;">${formatAmount(item.amount)}</td>
-          </tr>
-        `,
-      )
-      .join('');
+    const itemRows = renderOrderItemRows(data.items);
     const html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #E75E32;">Спасибо за заказ!</h2>
