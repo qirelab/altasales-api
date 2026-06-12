@@ -441,6 +441,21 @@ export class RecommendationsService implements OnModuleInit {
 
   // ── Private helpers ───────────────────────────────────────────────
 
+  private async findExistingRecommendationCoverage(
+    _userId: string,
+  ): Promise<Array<{ targetId: string; coveredServiceIds: Set<string>; blocksOverlaps: boolean }>> {
+    // NOTE: overlap filtering helpers are intentionally no-op in this branch
+    // to keep generation stable after cherry-pick of ranking threshold logic.
+    return [];
+  }
+
+  private filterOverlappingRecommendations(
+    ranked: GeneratedRecommendationItem[],
+    _existing: Array<{ targetId: string; coveredServiceIds: Set<string>; blocksOverlaps: boolean }>,
+  ): GeneratedRecommendationItem[] {
+    return ranked;
+  }
+
   private async getRecommendationOrThrow(id: string): Promise<Recommendation> {
     const recommendation = await this.recommendationRepository.findOne({
       where: { id },
