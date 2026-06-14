@@ -49,6 +49,7 @@ export interface ExpertPositionBase {
   id: string;
   name: string;
   description: string;
+  image: string | null;
 }
 
 export interface ExpertPositionListItem extends ExpertPositionBase {
@@ -239,6 +240,7 @@ export class ExpertsService {
       id: position.id,
       name: position.name,
       description: position.description,
+      image: position.image ?? null,
       executorsCount: position.members?.length ?? 0,
       offeringsCount: position.offerings?.length ?? 0,
       minPrice: minPriceByPosition.get(position.id) ?? null,
@@ -282,6 +284,7 @@ export class ExpertsService {
       id: position.id,
       name: position.name,
       description: position.description,
+      image: position.image ?? null,
       offerings,
       executors: executors.filter(Boolean) as ExpertExecutorDto[],
     };
