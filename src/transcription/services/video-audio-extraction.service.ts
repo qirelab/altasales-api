@@ -14,6 +14,7 @@ type ExecFileError = NodeJS.ErrnoException & {
 };
 
 const DEFAULT_EXTRACTION_TIMEOUT_MS = 300_000;
+const DEFAULT_MAX_EXTRACTED_AUDIO_SIZE_MB = 100;
 const FFMPEG_OUTPUT_MAX_BUFFER = 1024 * 1024;
 
 @Injectable()
@@ -30,6 +31,7 @@ export class VideoAudioExtractionService {
         await fsPromises.writeFile(inputPath, video.buffer);
       }
       await this.executeFfmpeg(inputPath, outputPath);
+      await this.assertExtractedAudioSize(outputPath);
       const buffer = await fsPromises.readFile(outputPath);
 
       if (!buffer.length) {
@@ -139,6 +141,24 @@ export class VideoAudioExtractionService {
     return Number.isFinite(parsed) && parsed > 0
       ? Math.floor(parsed)
       : DEFAULT_EXTRACTION_TIMEOUT_MS;
+  }
+
+  private async assertExtractedAudioSize(outputPath: string): Promise<void> {
+    const stats = await fsPromises.stat(outputPath);
+    if (stats.size > this.getMaxExtractedAudioSizeBytes()) {
+      throw new TranscriptionProviderError(
+        'TRANSCRIPTION_EXTRACTED_AUDIO_TOO_LARGE',
+        'Extracted audio is too large',
+      );
+    }
+  }
+
+  private getMaxExtractedAudioSizeBytes(): number {
+    const parsed = Number(process.env.TRANSCRIPTION_MAX_AUDIO_SIZE_MB);
+    const sizeMb = Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : DEFAULT_MAX_EXTRACTED_AUDIO_SIZE_MB;
+    return sizeMb * 1024 * 1024;
   }
 
   private getTempBaseDir(): string {

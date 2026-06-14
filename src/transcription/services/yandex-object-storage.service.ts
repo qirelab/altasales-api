@@ -20,6 +20,13 @@ const STORAGE_ENDPOINT = 'https://storage.yandexcloud.net';
 export class YandexObjectStorageService {
   constructor(private readonly client?: ObjectStorageClient) {}
 
+  assertReadyForUpload(): void {
+    this.getConfig(
+      'TRANSCRIPTION_CONFIG_MISSING',
+      'Transcription configuration is missing',
+    );
+  }
+
   async uploadAudio(
     jobId: string,
     file: Express.Multer.File,

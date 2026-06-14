@@ -64,6 +64,32 @@ describe('YandexObjectStorageService', () => {
     });
   });
 
+  it('fails readiness safely when Object Storage config is missing', () => {
+    delete process.env.YANDEX_OBJECT_STORAGE_BUCKET;
+    const client = { send: jest.fn() };
+    const service = new YandexObjectStorageService(client as never);
+
+    try {
+      service.assertReadyForUpload();
+      throw new Error('Expected readiness check to fail');
+    } catch (error) {
+      expect(error).toMatchObject<Partial<TranscriptionProviderError>>({
+        safeErrorCode: 'TRANSCRIPTION_CONFIG_MISSING',
+        message: 'Transcription configuration is missing',
+      });
+    }
+    expect(client.send).not.toHaveBeenCalled();
+  });
+
+  it('passes readiness without SDK calls when Object Storage config exists', () => {
+    const client = { send: jest.fn() };
+    const service = new YandexObjectStorageService(client as never);
+
+    service.assertReadyForUpload();
+
+    expect(client.send).not.toHaveBeenCalled();
+  });
+
   it('deletes temporary audio objects with a safe bucket-scoped request', async () => {
     const client = { send: jest.fn().mockResolvedValue({}) };
     const service = new YandexObjectStorageService(client as never);

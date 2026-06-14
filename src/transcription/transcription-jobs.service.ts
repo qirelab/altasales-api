@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as fsPromises from 'fs/promises';
@@ -16,6 +17,7 @@ import {
 import { TranscriptionTranscriptResponseDto } from './dto/transcription-transcript-response.dto';
 import { TranscriptionJob } from './entities/transcription-job.entity';
 import { TranscriptionJobStatus } from './enums/transcription-job-status.enum';
+import { isTranscriptionProviderError } from './services/transcription-provider-error';
 import { VideoTranscriptionProcessingService } from './services/video-transcription-processing.service';
 import { YandexSpeechKitTranscriptionService } from './services/yandex-speechkit-transcription.service';
 
@@ -31,11 +33,12 @@ export class TranscriptionJobsService {
     private readonly videoTranscriptionService: VideoTranscriptionProcessingService,
   ) {}
 
-  createFromUpload(
+  async createFromUpload(
     user: CurrentUserData,
     file: Express.Multer.File,
     input: { language?: string },
   ): Promise<TranscriptionCreateJobResponseDto> {
+    this.assertReadyForTranscription();
     return this.createJob(user, file, input, (job) => {
       this.transcriptionService.runAsync(job, file);
     });
@@ -49,6 +52,7 @@ export class TranscriptionJobsService {
     let processingStarted = false;
 
     try {
+      this.assertReadyForTranscription();
       return await this.createJob(user, file, input, (job) => {
         this.videoTranscriptionService.runAsync(job, file);
         processingStarted = true;
@@ -176,6 +180,17 @@ export class TranscriptionJobsService {
       await fsPromises.rm(file.path, { force: true });
     } catch {
       // Cleanup failures must not mask validation or persistence errors.
+    }
+  }
+
+  private assertReadyForTranscription(): void {
+    try {
+      this.transcriptionService.assertReadyForTranscription();
+    } catch (error) {
+      if (isTranscriptionProviderError(error)) {
+        throw new ServiceUnavailableException('Transcription is unavailable');
+      }
+      throw error;
     }
   }
 }

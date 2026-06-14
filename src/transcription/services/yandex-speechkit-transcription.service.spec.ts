@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { TranscriptionJob } from '../entities/transcription-job.entity';
 import { TranscriptionJobStatus } from '../enums/transcription-job-status.enum';
+import { TranscriptionProviderError } from './transcription-provider-error';
 import { YandexSpeechKitTranscriptionService } from './yandex-speechkit-transcription.service';
 
 const JOB_ID = '00000000-0000-4000-8000-000000000010';
@@ -47,6 +48,33 @@ describe('YandexSpeechKitTranscriptionService', () => {
         safeErrorMessage: 'Transcription failed',
       }),
     );
+  });
+
+  it('asserts readiness without provider network calls when config is present', () => {
+    const { service, storage } = createService();
+
+    service.assertReadyForTranscription();
+
+    expect(storage.assertReadyForUpload).toHaveBeenCalled();
+    expect(storage.uploadAudio).not.toHaveBeenCalled();
+  });
+
+  it('fails readiness safely when SpeechKit config is missing', () => {
+    delete process.env.YANDEX_SPEECHKIT_API_KEY;
+    const { service, storage } = createService();
+
+    expect(() => service.assertReadyForTranscription()).toThrow(
+      TranscriptionProviderError,
+    );
+    try {
+      service.assertReadyForTranscription();
+    } catch (error) {
+      expect(error).toMatchObject<Partial<TranscriptionProviderError>>({
+        safeErrorCode: 'TRANSCRIPTION_CONFIG_MISSING',
+      });
+    }
+    expect(storage.assertReadyForUpload).not.toHaveBeenCalled();
+    expect(storage.uploadAudio).not.toHaveBeenCalled();
   });
 
   it('uploads audio, starts recognition, polls, and saves normalized transcript', async () => {
@@ -502,6 +530,7 @@ function createService(fetcher: jest.Mock = jest.fn()) {
     save: jest.fn(async (entity) => entity),
   };
   const storage = {
+    assertReadyForUpload: jest.fn(),
     uploadAudio: jest.fn(async () => ({
       key: `transcription/${JOB_ID}/call.mp3`,
       uri: 'https://storage.yandexcloud.net/bucket/transcription/job/call.mp3',

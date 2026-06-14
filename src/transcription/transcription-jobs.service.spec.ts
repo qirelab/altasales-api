@@ -1,8 +1,14 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import * as fsPromises from 'fs/promises';
 import { UserRole } from '../users/entities/user-role.enum';
 import { TranscriptionJob } from './entities/transcription-job.entity';
 import { TranscriptionJobStatus } from './enums/transcription-job-status.enum';
+import { TranscriptionProviderError } from './services/transcription-provider-error';
 import { TranscriptionJobsService } from './transcription-jobs.service';
 
 jest.mock('fs/promises', () => ({
@@ -71,10 +77,11 @@ describe('TranscriptionJobsService', () => {
       expect.objectContaining({ id: JOB_ID, userId: USER.id }),
       file,
     );
+    expect(audioProcessor.assertReadyForTranscription).toHaveBeenCalled();
   });
 
   it('creates a queued video job with original video metadata and starts video processing', async () => {
-    const { service, repository, videoProcessor } = createService();
+    const { service, repository, audioProcessor, videoProcessor } = createService();
     const file = videoFile('demo.mp4', 'video/mp4');
 
     const result = await service.createFromVideoUpload(USER, file, {
@@ -103,7 +110,59 @@ describe('TranscriptionJobsService', () => {
       expect.objectContaining({ id: JOB_ID, userId: USER.id }),
       file,
     );
+    expect(audioProcessor.assertReadyForTranscription).toHaveBeenCalled();
     expect(rmMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects audio upload before job creation when transcription is disabled', async () => {
+    const { service, repository, audioProcessor } = createService();
+    audioProcessor.assertReadyForTranscription.mockImplementationOnce(() => {
+      throw new TranscriptionProviderError('TRANSCRIPTION_DISABLED');
+    });
+
+    await expect(
+      service.createFromUpload(USER, audioFile('call.mp3', 'audio/mpeg'), {
+        language: 'ru-RU',
+      }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(audioProcessor.runAsync).not.toHaveBeenCalled();
+  });
+
+  it('rejects video upload and cleans temp file when transcription is disabled', async () => {
+    const { service, repository, audioProcessor, videoProcessor } = createService();
+    audioProcessor.assertReadyForTranscription.mockImplementationOnce(() => {
+      throw new TranscriptionProviderError('TRANSCRIPTION_DISABLED');
+    });
+    const file = videoFileFromPath('demo.mp4', 'video/mp4', '/tmp/upload/demo.mp4');
+
+    await expect(
+      service.createFromVideoUpload(USER, file, { language: 'ru-RU' }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(videoProcessor.runAsync).not.toHaveBeenCalled();
+    expect(rmMock).toHaveBeenCalledWith('/tmp/upload/demo.mp4', { force: true });
+  });
+
+  it('rejects upload before job creation when transcription config is missing', async () => {
+    const { service, repository, audioProcessor } = createService();
+    audioProcessor.assertReadyForTranscription.mockImplementationOnce(() => {
+      throw new TranscriptionProviderError('TRANSCRIPTION_CONFIG_MISSING');
+    });
+
+    await expect(
+      service.createFromUpload(USER, audioFile('call.mp3', 'audio/mpeg'), {
+        language: 'ru-RU',
+      }),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(audioProcessor.runAsync).not.toHaveBeenCalled();
   });
 
   it('allows en-US language values', async () => {
@@ -265,6 +324,7 @@ function createService(existingJob: TranscriptionJob | null = jobEntity()) {
     findOne: jest.fn(async () => existingJob),
   };
   const processor = {
+    assertReadyForTranscription: jest.fn(),
     runAsync: jest.fn(),
   };
   const videoProcessor = {

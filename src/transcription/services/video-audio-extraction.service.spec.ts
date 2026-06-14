@@ -12,13 +12,18 @@ jest.mock('fs/promises', () => {
   const actual = jest.requireActual<typeof import('fs/promises')>('fs/promises');
   return {
     ...actual,
+    readFile: jest.fn(actual.readFile),
     rm: jest.fn(actual.rm),
+    stat: jest.fn(actual.stat),
   };
 });
 
 describe('VideoAudioExtractionService', () => {
   const env = process.env;
   const execFileMock = execFile as unknown as jest.Mock;
+  const readFileMock = fsPromises.readFile as jest.MockedFunction<
+    typeof fsPromises.readFile
+  >;
   let tempParent: string;
 
   beforeEach(async () => {
@@ -30,6 +35,7 @@ describe('VideoAudioExtractionService', () => {
     tempParent = await fsPromises.mkdtemp(join(tmpdir(), 'video-extraction-test-'));
     process.env.TRANSCRIPTION_VIDEO_TEMP_DIR = tempParent;
     execFileMock.mockReset();
+    readFileMock.mockClear();
   });
 
   afterEach(async () => {
@@ -104,6 +110,24 @@ describe('VideoAudioExtractionService', () => {
         buffer: Buffer.from('ogg audio'),
       }),
     );
+  });
+
+  it('rejects oversized extracted audio before reading it into memory', async () => {
+    process.env.TRANSCRIPTION_MAX_AUDIO_SIZE_MB = '0.000001';
+    execFileMock.mockImplementationOnce(async (_command, args, _options, callback) => {
+      await fsPromises.writeFile(args[args.length - 1], 'oversized ogg audio');
+      callback(null, '', '');
+    });
+    const service = new VideoAudioExtractionService();
+
+    await expect(
+      service.extractAudio(videoFile('demo.mp4', 'video/mp4')),
+    ).rejects.toMatchObject<Partial<TranscriptionProviderError>>({
+      safeErrorCode: 'TRANSCRIPTION_EXTRACTED_AUDIO_TOO_LARGE',
+      message: 'Extracted audio is too large',
+    });
+    expect(readFileMock).not.toHaveBeenCalled();
+    expect(await fsPromises.readdir(tempParent)).toEqual([]);
   });
 
   it('maps a missing ffmpeg binary to a safe error', async () => {

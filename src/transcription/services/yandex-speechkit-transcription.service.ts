@@ -63,6 +63,11 @@ export class YandexSpeechKitTranscriptionService {
     this.run(job, file).catch(() => undefined);
   }
 
+  assertReadyForTranscription(): void {
+    this.getConfig('TRANSCRIPTION_CONFIG_MISSING');
+    this.objectStorage.assertReadyForUpload();
+  }
+
   async run(job: TranscriptionJob, file: Express.Multer.File): Promise<void> {
     const startedAt = Date.now();
     let cleanupKey = job.objectStorageKey?.trim() || null;
@@ -293,7 +298,10 @@ export class YandexSpeechKitTranscriptionService {
     throw new TranscriptionProviderError('TRANSCRIPTION_OPERATION_FAILED');
   }
 
-  private getConfig(): RecognitionConfig {
+  private getConfig(
+    missingConfigErrorCode: TranscriptionSafeErrorCode =
+    'TRANSCRIPTION_PROVIDER_UNAVAILABLE',
+  ): RecognitionConfig {
     if (process.env.TRANSCRIPTION_ENABLED !== 'true') {
       throw new TranscriptionProviderError('TRANSCRIPTION_DISABLED');
     }
@@ -301,7 +309,7 @@ export class YandexSpeechKitTranscriptionService {
     const apiKey = process.env.YANDEX_SPEECHKIT_API_KEY?.trim();
     const folderId = process.env.YANDEX_SPEECHKIT_FOLDER_ID?.trim();
     if (!apiKey || !folderId) {
-      throw new TranscriptionProviderError('TRANSCRIPTION_PROVIDER_UNAVAILABLE');
+      throw new TranscriptionProviderError(missingConfigErrorCode);
     }
 
     return {
