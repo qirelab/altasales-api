@@ -117,6 +117,24 @@ describe('KnowledgeIngestionService', () => {
     expect(job.stage).toBe(KnowledgeIndexStage.INDEXED);
   });
 
+  it('indexes already extracted URL blocks through the same embedding and vector path', async () => {
+    await service.runExtracted(document, job, {
+      blocks: [{ text: 'url extracted text', metadata: { sourceFormat: 'html' } }],
+    });
+
+    expect(extractionService.extract).not.toHaveBeenCalled();
+    expect(chunkingService.chunk).toHaveBeenCalledWith([
+      { text: 'url extracted text', metadata: { sourceFormat: 'html' } },
+    ]);
+    expect(embeddingProxy.embed).toHaveBeenCalledWith({
+      inputs: ['first chunk', 'second chunk'],
+      declaredDataClass: DataClass.RawPii,
+    });
+    expect(vectorStore.upsertChunks).toHaveBeenCalled();
+    expect(document.status).toBe(KnowledgeDocumentStatus.INDEXED);
+    expect(job.status).toBe(KnowledgeIndexJobStatus.SUCCEEDED);
+  });
+
   it('fails closed with safe metadata and cleans partial vector data', async () => {
     extractionService.extract.mockResolvedValueOnce({
       blocks: [{ text: 'secret raw text', metadata: {} }],

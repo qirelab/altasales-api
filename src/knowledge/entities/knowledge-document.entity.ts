@@ -37,6 +37,10 @@ export class KnowledgeDocument {
   @Column({ type: 'varchar', length: 255 })
   originalFileName: string;
 
+  @ApiPropertyOptional({ description: 'Normalized source URL', nullable: true })
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  sourceUrl: string | null;
+
   @ApiProperty({ description: 'MIME type' })
   @Column({ type: 'varchar', length: 150 })
   mimeType: string;

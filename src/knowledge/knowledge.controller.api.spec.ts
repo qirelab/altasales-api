@@ -10,6 +10,7 @@ import { ROLES_KEY } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
+import { CreateKnowledgeUrlDocumentDto } from './dto/create-knowledge-url-document.dto';
 import { ListKnowledgeDocumentsDto } from './dto/list-knowledge-documents.dto';
 import { SearchKnowledgeDto } from './dto/search-knowledge.dto';
 import { UpdateKnowledgeDocumentDto } from './dto/update-knowledge-document.dto';
@@ -28,6 +29,7 @@ const JOB_ID = '00000000-0000-4000-8000-000000000002';
 
 type DocumentsServiceMock = {
   createFromUpload: jest.Mock;
+  createFromUrl: jest.Mock;
   list: jest.Mock;
   findOne: jest.Mock;
   getChunks: jest.Mock;
@@ -44,6 +46,11 @@ describe('KnowledgeController API contract', () => {
   beforeEach(async () => {
     documentsService = {
       createFromUpload: jest.fn().mockResolvedValue({
+        documentId: DOCUMENT_ID,
+        jobId: JOB_ID,
+        status: KnowledgeDocumentStatus.PENDING,
+      }),
+      createFromUrl: jest.fn().mockResolvedValue({
         documentId: DOCUMENT_ID,
         jobId: JOB_ID,
         status: KnowledgeDocumentStatus.PENDING,
@@ -191,6 +198,52 @@ describe('KnowledgeController API contract', () => {
           'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       }),
     ).toBe(false);
+  });
+
+  it('creates a URL document and maps safe metadata fields to the service', async () => {
+    const dto = await validateBody(CreateKnowledgeUrlDocumentDto, {
+      url: 'https://example.com/page',
+      purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+      title: 'Page title',
+      metadata: { department: 'sales' },
+      tags: [' alpha ', 'beta', 'alpha'],
+    });
+
+    const result = await controller.createFromUrl(dto);
+
+    expect(result).toEqual({
+      documentId: DOCUMENT_ID,
+      jobId: JOB_ID,
+      status: KnowledgeDocumentStatus.PENDING,
+    });
+    expect(documentsService.createFromUrl).toHaveBeenCalledWith({
+      url: 'https://example.com/page',
+      purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+      title: 'Page title',
+      metadata: {
+        department: 'sales',
+        tags: ['alpha', 'beta'],
+      },
+    });
+  });
+
+  it('rejects invalid URL document bodies', async () => {
+    await expect(
+      validateBody(CreateKnowledgeUrlDocumentDto, {
+        url: 'ftp://example.com/file',
+        purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      validateBody(CreateKnowledgeUrlDocumentDto, {
+        url: 'https://example.com/page',
+        purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+        unexpected: true,
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(documentsService.createFromUrl).not.toHaveBeenCalled();
   });
 
   it('passes list filters to the service', async () => {

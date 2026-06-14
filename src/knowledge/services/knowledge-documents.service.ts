@@ -14,8 +14,16 @@ import {
 } from '../vector-store/knowledge-vector-store.interface';
 import type { KnowledgeVectorStore } from '../vector-store/knowledge-vector-store.interface';
 import { KnowledgeIngestionService } from './knowledge-ingestion.service';
+import { KnowledgeUrlSourceService } from './knowledge-url-source.service';
 
 export type CreateKnowledgeUploadInput = {
+  purpose: KnowledgeBasePurpose;
+  title?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CreateKnowledgeUrlInput = {
+  url: string;
   purpose: KnowledgeBasePurpose;
   title?: string;
   metadata?: Record<string, unknown>;
@@ -42,6 +50,7 @@ export class KnowledgeDocumentsService {
     @InjectRepository(KnowledgeChunk)
     private readonly chunkRepository: Repository<KnowledgeChunk>,
     private readonly ingestionService: KnowledgeIngestionService,
+    private readonly urlSourceService: KnowledgeUrlSourceService,
     @Inject(KNOWLEDGE_VECTOR_STORE)
     private readonly vectorStore: KnowledgeVectorStore,
   ) {}
@@ -60,6 +69,7 @@ export class KnowledgeDocumentsService {
         purpose: input.purpose,
         sourceType: KnowledgeSourceType.UPLOAD,
         originalFileName: file.originalname,
+        sourceUrl: null,
         mimeType: file.mimetype,
         size: file.size,
         status: KnowledgeDocumentStatus.PENDING,
@@ -86,6 +96,44 @@ export class KnowledgeDocumentsService {
     );
 
     this.ingestionService.runAsync(document, job, file);
+
+    return {
+      documentId: document.id,
+      jobId: job.id,
+      status: document.status,
+    };
+  }
+
+  async createFromUrl(
+    input: CreateKnowledgeUrlInput,
+  ): Promise<{
+    documentId: string;
+    jobId: string;
+    status: KnowledgeDocumentStatus;
+  }> {
+    const source = await this.urlSourceService.acquire(input.url);
+    const title = input.title?.trim() || source.title || this.titleFromUrl(source.sourceUrl);
+    const document = await this.documentRepository.save(
+      this.documentRepository.create({
+        title,
+        purpose: input.purpose,
+        sourceType: KnowledgeSourceType.URL,
+        originalFileName: this.displayNameFromUrl(source.sourceUrl),
+        sourceUrl: source.sourceUrl,
+        mimeType: source.mimeType,
+        size: source.size,
+        status: KnowledgeDocumentStatus.PENDING,
+        errorCode: null,
+        safeErrorMessage: null,
+        chunksCount: 0,
+        metadata: input.metadata ?? {},
+      }),
+    );
+
+    const job = await this.createPendingJob(document);
+    this.ingestionService.runExtractedAsync(document, job, {
+      blocks: source.blocks,
+    });
 
     return {
       documentId: document.id,
@@ -169,5 +217,34 @@ export class KnowledgeDocumentsService {
     return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
       ? metadata
       : {};
+  }
+
+  private async createPendingJob(
+    document: KnowledgeDocument,
+  ): Promise<KnowledgeIndexJob> {
+    return this.jobRepository.save(
+      this.jobRepository.create({
+        documentId: document.id,
+        document,
+        status: KnowledgeIndexJobStatus.PENDING,
+        stage: KnowledgeIndexStage.PENDING,
+        errorCode: null,
+        safeErrorMessage: null,
+        chunksTotal: 0,
+        chunksEmbedded: 0,
+        startedAt: null,
+        finishedAt: null,
+      }),
+    );
+  }
+
+  private titleFromUrl(sourceUrl: string): string {
+    return this.displayNameFromUrl(sourceUrl);
+  }
+
+  private displayNameFromUrl(sourceUrl: string): string {
+    const url = new URL(sourceUrl);
+    const displayName = `${url.hostname}${url.pathname}`.replace(/\/$/, '');
+    return (displayName || url.hostname).slice(0, 255);
   }
 }
