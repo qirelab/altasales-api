@@ -344,6 +344,7 @@ export class ServicesService {
       userId: dto.userId,
       contractorRatePerHour: dto.ratePerHour,
       contractorExperienceYears: dto.experienceYears,
+      contractorSpecialization: dto.specialization,
     });
 
     if (user.role !== UserRole.EXPERT) {
@@ -689,6 +690,7 @@ export class ServicesService {
     }
     if (dto.experienceYears !== undefined) contractor.contractorExperienceYears = dto.experienceYears;
     if (dto.skills !== undefined) contractor.skills = dto.skills;
+    if (dto.specialization !== undefined) contractor.contractorSpecialization = dto.specialization;
     if (dto.userId !== undefined && dto.userId !== contractor.userId) {
       const user = await this.userRepository.findOne({ where: { id: dto.userId } });
       if (!user) {

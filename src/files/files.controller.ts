@@ -157,6 +157,14 @@ export class FilesController {
     };
   }
 
+  @Get(':id/url')
+  @ApiOperation({ summary: 'Get presigned public URL for a file' })
+  @ApiResponse({ status: 200, description: 'Presigned download URL' })
+  async getPublicUrl(@Param('id', ParseUUIDPipe) id: string) {
+    const url = await this.filesService.getDownloadUrl(id);
+    return { url };
+  }
+
   @Get(':id/download')
   @ApiOperation({ summary: 'Get download URL for a file' })
   @ApiResponse({ status: 302, description: 'Redirect to presigned download URL' })

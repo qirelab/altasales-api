@@ -78,6 +78,10 @@ export class Service {
   @Column({ type: 'int', nullable: true })
   contractorExperienceYears: number | null;
 
+  @ApiPropertyOptional({ example: 'CRM-интегратор', description: 'Contractor specialization label' })
+  @Column({ type: 'varchar', nullable: true })
+  contractorSpecialization: string | null;
+
   @ApiPropertyOptional({ description: 'Associated user ID (for contractors)' })
   @Column({ type: 'uuid', nullable: true })
   userId: string | null;

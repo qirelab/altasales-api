@@ -31,6 +31,11 @@ export class CreateAdminContractorDto {
   @IsString()
   description: string;
 
+  @ApiProperty({ example: 'CRM-интегратор', description: 'Contractor specialization' })
+  @IsString()
+  @IsNotEmpty()
+  specialization: string;
+
   @ApiProperty({ description: 'Linked user id' })
   @IsUUID()
   userId: string;
