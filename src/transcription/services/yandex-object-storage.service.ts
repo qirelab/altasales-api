@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { extname, parse } from 'path';
 import {
@@ -7,6 +7,7 @@ import {
 } from './transcription-provider-error';
 
 type ObjectStorageClient = Pick<S3Client, 'send'>;
+export const YANDEX_OBJECT_STORAGE_CLIENT = Symbol('YANDEX_OBJECT_STORAGE_CLIENT');
 
 export type UploadedAudioObject = {
   key: string;
@@ -18,7 +19,11 @@ const STORAGE_ENDPOINT = 'https://storage.yandexcloud.net';
 
 @Injectable()
 export class YandexObjectStorageService {
-  constructor(private readonly client?: ObjectStorageClient) {}
+  constructor(
+    @Optional()
+    @Inject(YANDEX_OBJECT_STORAGE_CLIENT)
+    private readonly client?: ObjectStorageClient,
+  ) {}
 
   assertReadyForUpload(): void {
     this.getConfig(
