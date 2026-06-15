@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -50,5 +53,13 @@ export class FeedbackController {
     @Body() dto: UpdateFeedbackStatusDto,
   ) {
     return this.feedbackService.updateStatus(id, dto);
+  }
+
+  @Delete('admin/:id')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.feedbackService.remove(id);
   }
 }

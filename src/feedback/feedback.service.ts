@@ -128,6 +128,13 @@ export class FeedbackService {
     return this.feedbackRepository.save(feedback);
   }
 
+  async remove(id: string): Promise<void> {
+    const result = await this.feedbackRepository.delete({ id });
+    if (!result.affected) {
+      throw new NotFoundException(`Обращение ${id} не найдено`);
+    }
+  }
+
   private toDto(feedback: Feedback): FeedbackListItemDto {
     return {
       id: feedback.id,
