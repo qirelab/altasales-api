@@ -9,6 +9,9 @@ import {
 import { LlmMessage } from '../interfaces/llm-message.interface';
 
 const DEFAULT_CHAT_MODEL_ALIAS = 'chat-default';
+const DEFAULT_FALLBACK_CHAT_MODEL_ALIAS = 'chat-fallback';
+
+type OpenAICompatibleProviderRole = 'primary' | 'fallback';
 
 type OpenAICompatibleChatResponse = {
   choices?: Array<{
@@ -23,12 +26,25 @@ type OpenAICompatibleChatResponse = {
 };
 
 @Injectable()
-export class OpenAICompatibleChatProviderAdapter
-  implements LlmProviderAdapter
-{
+export class OpenAICompatibleChatProviderAdapter implements LlmProviderAdapter {
+  constructor(
+    private readonly role: OpenAICompatibleProviderRole = 'primary',
+  ) {}
+
   readonly providerId = LlmProvider.OpenAICompatible;
 
+  get providerRole(): OpenAICompatibleProviderRole {
+    return this.role;
+  }
+
   get modelId(): string {
+    if (this.role === 'fallback') {
+      return (
+        process.env.LLM_FALLBACK_MODEL_ALIAS ||
+        DEFAULT_FALLBACK_CHAT_MODEL_ALIAS
+      );
+    }
+
     return process.env.LLM_PRIMARY_MODEL_ALIAS || DEFAULT_CHAT_MODEL_ALIAS;
   }
 
@@ -77,13 +93,21 @@ export class OpenAICompatibleChatProviderAdapter
 
   private getConfig(): { baseUrl: string; apiKey: string; model: string } {
     const baseUrl = this.normalizeBaseUrl(
-      process.env.LLM_OPENAI_COMPATIBLE_BASE_URL,
+      this.role === 'fallback'
+        ? process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_BASE_URL
+        : process.env.LLM_OPENAI_COMPATIBLE_BASE_URL,
     );
-    const apiKey = process.env.LLM_OPENAI_COMPATIBLE_API_KEY;
-    const model = process.env.LLM_OPENAI_COMPATIBLE_CHAT_MODEL;
+    const apiKey =
+      this.role === 'fallback'
+        ? process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY
+        : process.env.LLM_OPENAI_COMPATIBLE_API_KEY;
+    const model =
+      this.role === 'fallback'
+        ? process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_CHAT_MODEL
+        : process.env.LLM_OPENAI_COMPATIBLE_CHAT_MODEL;
 
     if (!baseUrl || !apiKey || !model) {
-      throw this.safeProviderUnavailableError(true);
+      throw this.safeProviderConfigError();
     }
 
     return { baseUrl, apiKey, model };
@@ -103,5 +127,16 @@ export class OpenAICompatibleChatProviderAdapter
       retryable: false,
       fallbackEligible,
     });
+  }
+
+  private safeProviderConfigError(): AiError {
+    return new AiError(
+      'AI_PROVIDER_CONFIG_INVALID',
+      'provider_config_invalid',
+      {
+        retryable: false,
+        fallbackEligible: false,
+      },
+    );
   }
 }

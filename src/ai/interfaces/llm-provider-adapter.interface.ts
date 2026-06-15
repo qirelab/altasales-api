@@ -13,6 +13,7 @@ export interface LlmProviderRequestOptions {
 export interface LlmProviderAdapter {
   providerId: string;
   modelId: string;
+  providerRole?: 'primary' | 'fallback';
   isExternal?: boolean;
   chat(
     messages: LlmMessage[],

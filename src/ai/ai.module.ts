@@ -27,7 +27,11 @@ import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-com
       useFactory: (
         mockProvider: MockLlmProvider,
         openAICompatibleProvider: OpenAICompatibleChatProviderAdapter,
-      ) => [mockProvider, openAICompatibleProvider],
+      ) => [
+        mockProvider,
+        openAICompatibleProvider,
+        new OpenAICompatibleChatProviderAdapter('fallback'),
+      ],
       inject: [MockLlmProvider, OpenAICompatibleChatProviderAdapter],
     },
     {
