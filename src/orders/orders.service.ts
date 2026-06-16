@@ -178,6 +178,39 @@ export class OrdersService {
     }
   }
 
+  private async hydrateDeletedExpertOfferings(subItems: OrderItemSubItem[]): Promise<void> {
+    const offeringIds = [
+      ...new Set(
+        subItems
+          .filter((subItem) => subItem.expertPositionOfferingId && !subItem.expertPositionOffering)
+          .map((subItem) => subItem.expertPositionOfferingId!),
+      ),
+    ];
+    if (!offeringIds.length) {
+      return;
+    }
+
+    const offerings = await this.expertOfferingRepository.find({
+      where: { id: In(offeringIds) },
+      withDeleted: true,
+    });
+    const offeringById = new Map(offerings.map((offering) => [offering.id, offering]));
+
+    for (const subItem of subItems) {
+      if (subItem.expertPositionOfferingId && !subItem.expertPositionOffering) {
+        const offering = offeringById.get(subItem.expertPositionOfferingId);
+        if (offering) {
+          subItem.expertPositionOffering = offering;
+        }
+      }
+    }
+  }
+
+  private async hydrateDeletedExpertOfferingsForOrders(orders: Order[]): Promise<void> {
+    const subItems = orders.flatMap((order) => order.item?.subItems ?? []);
+    await this.hydrateDeletedExpertOfferings(subItems);
+  }
+
   private transformOrderFiles(order: Order): OrderDto {
     return {
       id: order.id,
@@ -541,6 +574,7 @@ export class OrdersService {
       skip: offset,
       take: limit,
     });
+    await this.hydrateDeletedExpertOfferingsForOrders(data);
     return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
@@ -596,6 +630,7 @@ export class OrdersService {
       order: { createdAt: 'DESC' },
     });
 
+    await this.hydrateDeletedExpertOfferingsForOrders(data);
     return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
@@ -698,6 +733,7 @@ export class OrdersService {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
 
+    await this.hydrateDeletedExpertOfferingsForOrders([order]);
     return this.transformOrderFiles(order);
   }
 
@@ -803,6 +839,8 @@ export class OrdersService {
       if (!subItem) {
         throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
       }
+
+      await this.hydrateDeletedExpertOfferings(item.subItems);
 
       await subItemRepo.update({ id: subItemId }, { status });
       subItem.status = status;
