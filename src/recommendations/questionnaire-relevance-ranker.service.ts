@@ -57,15 +57,14 @@ type SelectedComponent =
   | 'crm'
   | 'telephony'
   | 'messenger'
-  | 'chatbot'
-  | 'voiceRobot'
+  | 'voiceChatbot'
   | 'contactDatabase'
   | 'salesManager'
   | 'trainingSystem'
   | 'analytics'
   | 'scripts'
   | 'callAnalysis'
-  | 'businessTrainer'
+  | 'salesDocuments'
   | 'salesHead';
 
 type NormalizedQuestionnaireProfile = {
@@ -140,15 +139,14 @@ const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   crm: ['CRM'],
   telephony: ['Телефония'],
   messenger: ['Мессенджер'],
-  chatbot: ['Чат-бот', 'Робот', 'Автоматизация'],
-  voiceRobot: ['Робот', 'Автоматизация'],
+  voiceChatbot: ['Голосовой и чат бот', 'Чат-бот', 'Голосовой робот', 'Робот', 'Автоматизация'],
   contactDatabase: ['База контактов'],
   salesManager: ['Менеджер по продажам'],
   trainingSystem: ['Система обучения'],
   analytics: ['Аналитика'],
   scripts: ['Скрипты'],
   callAnalysis: ['Анализ звонков'],
-  businessTrainer: ['Бизнес тренер'],
+  salesDocuments: ['Документы ОП', 'Документы отдела продаж'],
   salesHead: ['РОП'],
 };
 
@@ -171,28 +169,16 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       reason: 'мессенджер выбран в анкете',
     },
   ],
-  chatbot: [
+  voiceChatbot: [
     {
       terms: ['робот'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'чат-бот/робот выбран в анкете',
+      reason: 'голосовой и чат бот выбран в анкете',
     },
     {
       terms: ['автоматизац'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'чат-бот/робот выбран в анкете',
-    },
-  ],
-  voiceRobot: [
-    {
-      terms: ['робот'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'голосовой робот выбран в анкете',
-    },
-    {
-      terms: ['автоматизац'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'голосовой робот выбран в анкете',
+      reason: 'голосовой и чат бот выбран в анкете',
     },
   ],
   contactDatabase: [
@@ -246,11 +232,11 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       reason: 'нужно оценивать звонки',
     },
   ],
-  businessTrainer: [
+  salesDocuments: [
     {
-      terms: ['тренинг'],
+      terms: ['документ'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'бизнес-тренер выбран в анкете',
+      reason: 'документы ОП выбраны в анкете',
     },
   ],
   salesHead: [

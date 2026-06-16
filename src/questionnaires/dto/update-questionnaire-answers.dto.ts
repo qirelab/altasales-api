@@ -44,15 +44,14 @@ class UpdateComponentsDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() crm?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() telephony?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() messenger?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() chatbot?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() voiceRobot?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() voiceChatbot?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() contactDatabase?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() salesManager?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() trainingSystem?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() analytics?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() scripts?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() callAnalysis?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() businessTrainer?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() salesDocuments?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() salesHead?: boolean;
 }
 
@@ -143,6 +142,13 @@ export class UpdateQuestionnaireAnswersDto {
   @IsObject()
   @Type(() => UpdateComponentsDto)
   components?: UpdateComponentsDto;
+
+  @ApiPropertyOptional({ type: UpdateComponentsDto })
+  @IsOptional()
+  @ValidateNested()
+  @IsObject()
+  @Type(() => UpdateComponentsDto)
+  componentsToAdd?: UpdateComponentsDto;
 
   @ApiPropertyOptional({ example: 5000000, description: 'Желаемая выручка (руб)' })
   @IsOptional()
