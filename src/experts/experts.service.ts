@@ -248,6 +248,7 @@ export class ExpertsService {
       id: position.id,
       name: position.name,
       description: position.description,
+      image: position.image ?? null,
       executorsCount: (position.members ?? []).filter((member) => !member.deletedAt).length,
       offeringsCount: (position.offerings ?? []).filter((offering) => !offering.deletedAt).length,
       minPrice: minPriceByPosition.get(position.id) ?? null,
