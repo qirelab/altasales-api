@@ -60,6 +60,14 @@ export class User {
   ropProjectId: string | null;
 
   @ApiPropertyOptional({
+    example: 12,
+    description: 'Years of professional experience (for expert role)',
+    nullable: true,
+  })
+  @Column({ type: 'int', nullable: true })
+  experienceYears: number | null;
+
+  @ApiPropertyOptional({
     description: 'When the user last viewed recommendation notifications',
   })
   @Column({ type: 'timestamptz', nullable: true })

@@ -327,11 +327,13 @@ export class ServicesService {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
     }
 
+    const expertCategoryId = await this.resolveExpertCategoryId();
+
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
       name: dto.name,
       description: dto.description,
-      categoryId: null,
+      categoryId: expertCategoryId,
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
@@ -360,6 +362,7 @@ export class ServicesService {
       this.serviceRepository
         .createQueryBuilder('service')
         .leftJoinAndSelect('service.user', 'u')
+        .leftJoinAndSelect('service.category', 'category')
         .where('service.type = :type', { type: ServiceType.Contractor }),
     );
 
@@ -374,6 +377,7 @@ export class ServicesService {
             })
             .orWhere('u.email ILIKE :search', { search: `%${search}%` })
             .orWhere('u."phoneNumber" ILIKE :search', { search: `%${search}%` })
+            .orWhere('category.name ILIKE :search', { search: `%${search}%` })
             .orWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([search]) });
         }),
       );
@@ -736,7 +740,7 @@ export class ServicesService {
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
     const contractor = await this.serviceRepository.findOne({
       where: { id, type: ServiceType.Contractor, ...activeServiceWhere() },
-      relations: ['user'],
+      relations: ['user', 'category'],
     });
     if (!contractor) {
       throw new NotFoundException(`Подрядчик с ID ${id} не найден`);
@@ -749,6 +753,14 @@ export class ServicesService {
     if (!category) {
       throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
     }
+  }
+
+  private async resolveExpertCategoryId(): Promise<string> {
+    const category = await this.categoryRepository.findOne({ where: { name: 'Эксперты' } });
+    if (!category) {
+      throw new NotFoundException('Категория «Эксперты» не найдена');
+    }
+    return category.id;
   }
 
   private async getCategoryContentForFilter(categoryIds: string[]): Promise<{

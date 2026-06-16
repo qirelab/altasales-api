@@ -58,7 +58,7 @@ export class RecommendationNotificationService {
       .get<string>('CLIENT_URI', 'http://localhost:3000')
       .split(',')[0]
       .trim();
-    const recommendationsUrl = `${clientUrl}/catalog`;
+    const recommendationsUrl = `${clientUrl}/profile?tab=3`;
 
     await this.mailService.sendRecommendationsReadyEmail(
       user.email,

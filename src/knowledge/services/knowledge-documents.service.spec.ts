@@ -17,12 +17,14 @@ describe('KnowledgeDocumentsService', () => {
       save: jest.fn(async (entity) => ({ id: 'job-1', ...entity })),
     };
     const ingestionService = { runAsync: jest.fn() };
+    const urlSourceService = { acquire: jest.fn() };
     const vectorStore = { deleteByDocumentId: jest.fn() };
     const service = new KnowledgeDocumentsService(
       documentRepository as never,
       jobRepository as never,
       {} as never,
       ingestionService as never,
+      urlSourceService as never,
       vectorStore as never,
     );
     const file = {
@@ -55,6 +57,66 @@ describe('KnowledgeDocumentsService', () => {
     expect(JSON.stringify(result)).not.toContain('hello');
   });
 
+  it('creates URL metadata and starts async indexing with extracted text', async () => {
+    const documentRepository = {
+      create: jest.fn((entity) => entity),
+      save: jest.fn(async (entity) => ({ id: 'doc-1', ...entity })),
+    };
+    const jobRepository = {
+      create: jest.fn((entity) => entity),
+      save: jest.fn(async (entity) => ({ id: 'job-1', ...entity })),
+    };
+    const ingestionService = { runExtractedAsync: jest.fn(), runAsync: jest.fn() };
+    const urlSourceService = {
+      acquire: jest.fn().mockResolvedValue({
+        sourceUrl: 'https://example.com/page',
+        title: 'Fetched page',
+        mimeType: 'text/html',
+        size: 42,
+        blocks: [{ text: 'Fetched useful text', metadata: { sourceFormat: 'html' } }],
+      }),
+    };
+    const service = new KnowledgeDocumentsService(
+      documentRepository as never,
+      jobRepository as never,
+      {} as never,
+      ingestionService as never,
+      urlSourceService as never,
+      { deleteByDocumentId: jest.fn() } as never,
+    );
+
+    const result = await service.createFromUrl({
+      url: 'https://example.com/page#section',
+      purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+      metadata: { tags: ['url'] },
+    });
+
+    expect(urlSourceService.acquire).toHaveBeenCalledWith(
+      'https://example.com/page#section',
+    );
+    expect(documentRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Fetched page',
+        purpose: KnowledgeBasePurpose.RECOMMENDATIONS,
+        sourceType: KnowledgeSourceType.URL,
+        sourceUrl: 'https://example.com/page',
+        originalFileName: 'example.com/page',
+        mimeType: 'text/html',
+        size: 42,
+        status: KnowledgeDocumentStatus.PENDING,
+      }),
+    );
+    expect(ingestionService.runExtractedAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'doc-1' }),
+      expect.objectContaining({ id: 'job-1' }),
+      {
+        blocks: [{ text: 'Fetched useful text', metadata: { sourceFormat: 'html' } }],
+      },
+    );
+    expect(ingestionService.runAsync).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('Fetched useful text');
+  });
+
   it('hard deletes vector points before database document data', async () => {
     const documentRepository = {
       create: jest.fn(),
@@ -69,6 +131,7 @@ describe('KnowledgeDocumentsService', () => {
       jobRepository as never,
       {} as never,
       { runAsync: jest.fn() } as never,
+      { acquire: jest.fn() } as never,
       vectorStore as never,
     );
 
@@ -93,6 +156,7 @@ describe('KnowledgeDocumentsService', () => {
       { create: jest.fn(), save: jest.fn() } as never,
       {} as never,
       { runAsync: jest.fn() } as never,
+      { acquire: jest.fn() } as never,
       vectorStore as never,
     );
 
@@ -138,6 +202,7 @@ describe('KnowledgeDocumentsService', () => {
       { create: jest.fn(), save: jest.fn() } as never,
       chunkRepository as never,
       { runAsync: jest.fn() } as never,
+      { acquire: jest.fn() } as never,
       vectorStore as never,
     );
 
@@ -175,6 +240,7 @@ describe('KnowledgeDocumentsService', () => {
       { create: jest.fn(), save: jest.fn() } as never,
       {} as never,
       { runAsync: jest.fn() } as never,
+      { acquire: jest.fn() } as never,
       { deleteByDocumentId: jest.fn() } as never,
     );
 
@@ -201,6 +267,7 @@ describe('KnowledgeDocumentsService', () => {
       { create: jest.fn(), save: jest.fn() } as never,
       {} as never,
       { runAsync: jest.fn() } as never,
+      { acquire: jest.fn() } as never,
       { deleteByDocumentId: jest.fn() } as never,
     );
 
