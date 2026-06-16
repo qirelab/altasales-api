@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserRecord } from 'firebase-admin/auth';
 import { DataSource, Repository } from 'typeorm';
@@ -14,6 +15,7 @@ import { VerifyTokenDto } from './dto/verify-token.dto';
 export class AuthService {
   constructor(
     private firebaseService: FirebaseService,
+    private readonly configService: ConfigService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
@@ -91,6 +93,7 @@ export class AuthService {
       const auth = this.firebaseService.getAuth();
 
       const user = await auth.getUserByEmail(loginDto.email);
+      await this.validateFirebasePassword(loginDto.email, loginDto.password);
 
       const dbUser = await this.userRepository.findOne({
         where: { firebaseUid: user.uid },
@@ -115,8 +118,49 @@ export class AuthService {
       if (error.code === 'auth/user-not-found') {
         throw new BadRequestException('User with this email not found');
       }
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new BadRequestException(error.message || 'Login error');
     }
+  }
+
+  private async validateFirebasePassword(email: string, password: string): Promise<void> {
+    const firebaseApiKey = this.configService.get<string>('FIREBASE_WEB_API_KEY')
+      || this.configService.get<string>('FIREBASE_API_KEY');
+    if (!firebaseApiKey) {
+      throw new BadRequestException('Login configuration error');
+    }
+
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseApiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          returnSecureToken: true,
+        }),
+      },
+    );
+
+    if (response.ok) {
+      return;
+    }
+
+    const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+    const firebaseError = payload?.error?.message;
+    if (firebaseError === 'INVALID_PASSWORD' || firebaseError === 'INVALID_LOGIN_CREDENTIALS') {
+      throw new BadRequestException('Invalid password');
+    }
+    if (firebaseError === 'EMAIL_NOT_FOUND') {
+      throw new BadRequestException('User with this email not found');
+    }
+
+    throw new BadRequestException('Login error');
   }
 
   async verifyToken(verifyTokenDto: VerifyTokenDto) {
