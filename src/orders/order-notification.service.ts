@@ -12,7 +12,7 @@ import { OrderStatus } from './entities/order-status.enum';
 export interface OrderPaidItem {
   orderId: string;
   name: string;
-  type: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет';
+  type: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет' | 'Услуги эксперта';
   amount: number;
 }
 
@@ -48,7 +48,13 @@ export class OrderNotificationService {
 
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
-      relations: ['user', 'item', 'item.service', 'item.package'],
+      relations: [
+        'user',
+        'item',
+        'item.service',
+        'item.package',
+        'item.executor',
+      ],
     });
 
     if (!orders.length) {
@@ -79,23 +85,9 @@ export class OrderNotificationService {
       0,
     );
 
-    const items: OrderPaidItem[] = orders.map((order) => {
-      const orderItem = order.item;
-      const isPackage = Boolean(orderItem?.package);
-      const name = orderItem?.package?.name ?? orderItem?.service?.name ?? '—';
-      let type: OrderPaidItem['type'] = 'Услуга';
-      if (isPackage) {
-        type = 'Пакет';
-      } else if (orderItem?.service?.type) {
-        type = orderItem.service.type as OrderPaidItem['type'];
-      }
-      return {
-        orderId: order.id,
-        name,
-        type,
-        amount: Number(order.amount),
-      };
-    });
+    const items: OrderPaidItem[] = orders.map((order) =>
+      this.buildOrderPaidItem(order),
+    );
 
     await this.sendClientEmail(client, items, totalAmount);
     await this.notifyAdmins(
@@ -105,6 +97,41 @@ export class OrderNotificationService {
       totalAmount,
       items,
     );
+  }
+
+  private buildOrderPaidItem(order: Order): OrderPaidItem {
+    const orderItem = order.item;
+    const isPackage = Boolean(orderItem?.package);
+    const isExpert = Boolean(orderItem?.expertPositionId);
+
+    if (isExpert) {
+      const executor = orderItem?.executor;
+      const fullName = executor
+        ? [executor.name, executor.lastName].filter(Boolean).join(' ').trim()
+        : '';
+      return {
+        orderId: order.id,
+        name: fullName ? `Услуги ${fullName}` : 'Услуги эксперта',
+        type: 'Услуги эксперта',
+        amount: Number(order.amount),
+      };
+    }
+
+    if (isPackage) {
+      return {
+        orderId: order.id,
+        name: orderItem?.package?.name ?? '—',
+        type: 'Пакет',
+        amount: Number(order.amount),
+      };
+    }
+
+    return {
+      orderId: order.id,
+      name: orderItem?.service?.name ?? '—',
+      type: (orderItem?.service?.type as OrderPaidItem['type']) ?? 'Услуга',
+      amount: Number(order.amount),
+    };
   }
 
   private async sendClientEmail(
