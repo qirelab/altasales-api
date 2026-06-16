@@ -291,7 +291,6 @@ export class OrdersService {
     try {
       const createdOrders: Order[] = [];
       let totalAmount = 0;
-      let giftEligibleAmount = 0;
       for (const checkoutItem of dto.items) {
         const productRefs = [
           checkoutItem.serviceId,
@@ -305,8 +304,6 @@ export class OrdersService {
         }
 
         let resolvedAmount = Number(checkoutItem.amount);
-        let resolvedService: Service | null = null;
-        let resolvedPackage: ServicePackage | null = null;
 
         if (checkoutItem.expertPositionId) {
           const quantity = checkoutItem.quantity ?? 1;
@@ -365,28 +362,21 @@ export class OrdersService {
         }
 
         if (checkoutItem.serviceId) {
-          resolvedService = await this.serviceRepository.findOne({
+          const service = await this.serviceRepository.findOne({
             where: { id: checkoutItem.serviceId, deletedAt: IsNull() },
           });
-          if (!resolvedService) {
+          if (!service) {
             throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
           }
         }
         if (checkoutItem.packageId) {
-          resolvedPackage = await this.packageRepository.findOne({
+          const servicePackage = await this.packageRepository.findOne({
             where: { id: checkoutItem.packageId, deletedAt: IsNull() },
-            relations: ['services'],
           });
-          if (!resolvedPackage) {
+          if (!servicePackage) {
             throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
           }
-          resolvedAmount = Number(resolvedPackage.price);
-        }
-
-        if (resolvedService?.giftEligible) {
-          giftEligibleAmount += resolvedAmount;
-        } else if (resolvedPackage?.giftEligible) {
-          giftEligibleAmount += resolvedAmount;
+          resolvedAmount = Number(servicePackage.price);
         }
 
         const order = this.orderRepository.create({
@@ -407,7 +397,11 @@ export class OrdersService {
         });
         await queryRunner.manager.save(OrderItem, item);
         if (checkoutItem.packageId) {
-          const packageServices = resolvedPackage?.services ?? [];
+          const servicePackage = await this.packageRepository.findOne({
+            where: { id: checkoutItem.packageId, deletedAt: IsNull() },
+            relations: ['services'],
+          });
+          const packageServices = servicePackage?.services ?? [];
           const subItems = packageServices.map((service) => this.orderItemSubItemRepository.create({
             orderItemId: item.id,
             serviceId: service.id,
@@ -445,9 +439,6 @@ export class OrdersService {
           {
             orderId: primaryOrderId,
             description: balancePaymentDescription,
-          },
-          {
-            maxGiftAmount: giftEligibleAmount,
           },
           queryRunner.manager,
         );

@@ -63,13 +63,6 @@ export class Service {
   @Column({ type: 'json', default: [] })
   skills: string[];
 
-  @ApiProperty({
-    example: false,
-    description: 'Whether the service can be paid with gift balance',
-  })
-  @Column({ type: 'boolean', default: false })
-  giftEligible: boolean;
-
   @ApiPropertyOptional({ example: 2500, description: 'Contractor hourly rate' })
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
   contractorRatePerHour: number | null;

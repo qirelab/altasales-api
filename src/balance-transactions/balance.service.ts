@@ -5,7 +5,7 @@ import { User } from '../users/entities/user.entity';
 import { BalanceTransaction } from './entities/balance-transaction.entity';
 import { BalanceTransactionType } from './entities/balance-transaction-type.enum';
 import { BalancePocket } from './entities/balance-pocket.enum';
-import { REGISTRATION_GIFT_RUB } from './balance.constants';
+import { ORDER_GIFT_MAX_SHARE, REGISTRATION_GIFT_RUB } from './balance.constants';
 
 export interface UserBalanceBreakdown {
   total: number;
@@ -21,9 +21,8 @@ export interface OrderPaymentSplit {
 export function computeOrderPaymentSplit(
   orderAmount: number,
   breakdown: UserBalanceBreakdown,
-  maxGiftAmount: number,
 ): OrderPaymentSplit {
-  const maxGiftDebit = Math.max(0, Math.min(orderAmount, maxGiftAmount));
+  const maxGiftDebit = orderAmount * ORDER_GIFT_MAX_SHARE;
   const fromGift = Math.min(breakdown.gift, maxGiftDebit);
   return {
     fromGift,
@@ -208,11 +207,7 @@ export class BalanceService {
     );
   }
 
-  assertSufficientBalanceForOrder(
-    amount: number,
-    breakdown: UserBalanceBreakdown,
-    maxGiftAmount: number,
-  ): void {
+  assertSufficientBalanceForOrder(amount: number, breakdown: UserBalanceBreakdown): void {
     if (amount <= 0) {
       throw new BadRequestException('Сумма оплаты должна быть больше нуля');
     }
@@ -222,12 +217,12 @@ export class BalanceService {
       );
     }
 
-    const maxGiftDebit = Math.max(0, Math.min(amount, maxGiftAmount));
-    const { fromMain } = computeOrderPaymentSplit(amount, breakdown, maxGiftDebit);
+    const { fromMain } = computeOrderPaymentSplit(amount, breakdown);
     if (breakdown.main < fromMain - 0.01) {
+      const maxGift = amount * ORDER_GIFT_MAX_SHARE;
       throw new BadRequestException(
-        `Недостаточно средств на основном балансе. С подарочного можно оплатить не более ${maxGiftDebit} ₽ `
-        + `(по gift-eligible позициям), с основного требуется ${fromMain} ₽, доступно ${breakdown.main} ₽`,
+        `Недостаточно средств на основном балансе. С подарочного можно оплатить не более ${maxGift} ₽ `
+        + `(50% от суммы заказа), с основного требуется ${fromMain} ₽, доступно ${breakdown.main} ₽`,
       );
     }
   }
@@ -236,17 +231,12 @@ export class BalanceService {
     userId: string,
     amount: number,
     meta: Pick<AddToBalanceMeta, 'orderId' | 'description'>,
-    options: { maxGiftAmount: number },
     manager?: EntityManager,
   ): Promise<BalanceTransaction[]> {
     const breakdown = await this.getBalanceBreakdown(userId, manager);
-    this.assertSufficientBalanceForOrder(amount, breakdown, options.maxGiftAmount);
+    this.assertSufficientBalanceForOrder(amount, breakdown);
 
-    const { fromGift, fromMain } = computeOrderPaymentSplit(
-      amount,
-      breakdown,
-      options.maxGiftAmount,
-    );
+    const { fromGift, fromMain } = computeOrderPaymentSplit(amount, breakdown);
     const transactions: BalanceTransaction[] = [];
 
     if (fromGift > 0) {
