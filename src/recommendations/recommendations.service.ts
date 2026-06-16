@@ -204,7 +204,7 @@ export class RecommendationsService implements OnModuleInit {
         ...rest,
         giftEligible: giftEligible == null
           ? null
-          : giftEligible === true,
+          : giftEligible === true || giftEligible === 'true' || giftEligible === 't',
       }),
     );
 
