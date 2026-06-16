@@ -4,10 +4,11 @@ import {
   IsArray,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
-import { CategoryFaqItemDto } from './category-faq-item.dto';
+import { UpdateCategoryFaqItemDto } from './update-category-faq-item.dto';
 
 export class UpdateAdminCategoryDto {
   @ApiPropertyOptional({ example: 'Интеграции', description: 'Category name' })
@@ -20,6 +21,7 @@ export class UpdateAdminCategoryDto {
   @IsOptional()
   @IsString()
   @MaxLength(120)
+  @Matches(/^[a-z0-9-]+$/, { message: 'Slug может содержать только строчные латинские буквы, цифры и дефис' })
   slug?: string;
 
   @ApiPropertyOptional({
@@ -31,12 +33,12 @@ export class UpdateAdminCategoryDto {
   description?: string | null;
 
   @ApiPropertyOptional({
-    type: [CategoryFaqItemDto],
+    type: [UpdateCategoryFaqItemDto],
     description: 'Full FAQ list for the category (replaces existing items)',
   })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CategoryFaqItemDto)
-  faqs?: CategoryFaqItemDto[];
+  @Type(() => UpdateCategoryFaqItemDto)
+  faqs?: UpdateCategoryFaqItemDto[];
 }

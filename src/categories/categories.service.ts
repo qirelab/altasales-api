@@ -7,11 +7,16 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, Repository } from 'typeorm';
 import { FAQ } from '../services/entities/faq.entity';
-import { CategoryFaqItemDto } from './dto/category-faq-item.dto';
 import { CreateAdminCategoryDto } from './dto/create-admin-category.dto';
 import { GetAdminCategoriesQueryDto } from './dto/get-admin-categories-query.dto';
 import { UpdateAdminCategoryDto } from './dto/update-admin-category.dto';
 import { Category } from './entities/category.entity';
+
+type AdminCategoryWithCounts = Category & {
+  servicesCount: number;
+  packagesCount: number;
+  faqsCount: number;
+};
 
 @Injectable()
 export class CategoriesService {
@@ -45,7 +50,7 @@ export class CategoriesService {
   }
 
   async findAllForAdmin(query: GetAdminCategoriesQueryDto): Promise<{
-    data: Category[];
+    data: AdminCategoryWithCounts[];
     total: number;
     offset: number;
     limit: number;
@@ -70,7 +75,9 @@ export class CategoriesService {
 
     const dataQb = this.categoryRepository
       .createQueryBuilder('c')
-      .leftJoinAndSelect('c.faqs', 'faq');
+      .loadRelationCountAndMap('c.servicesCount', 'c.services')
+      .loadRelationCountAndMap('c.packagesCount', 'c.packages')
+      .loadRelationCountAndMap('c.faqsCount', 'c.faqs');
 
     if (search) {
       dataQb.where(
@@ -89,20 +96,24 @@ export class CategoriesService {
       .take(limit)
       .getMany();
 
-    return { data: categories, total, offset, limit };
+    return { data: categories as AdminCategoryWithCounts[], total, offset, limit };
   }
 
-  async findOneForAdmin(id: string): Promise<Category> {
-    const category = await this.categoryRepository.findOne({
-      where: { id },
-      relations: ['faqs'],
-    });
+  async findOneForAdmin(id: string): Promise<AdminCategoryWithCounts> {
+    const category = await this.categoryRepository
+      .createQueryBuilder('c')
+      .leftJoinAndSelect('c.faqs', 'faq')
+      .loadRelationCountAndMap('c.servicesCount', 'c.services')
+      .loadRelationCountAndMap('c.packagesCount', 'c.packages')
+      .loadRelationCountAndMap('c.faqsCount', 'c.faqs')
+      .where('c.id = :id', { id })
+      .getOne();
 
     if (!category) {
       throw new NotFoundException(`Категория с ID ${id} не найдена`);
     }
 
-    return category;
+    return category as AdminCategoryWithCounts;
   }
 
   async createForAdmin(dto: CreateAdminCategoryDto): Promise<Category> {
@@ -219,7 +230,7 @@ export class CategoriesService {
 
   private async replaceFaqs(
     categoryId: string,
-    faqs: CategoryFaqItemDto[],
+    faqs: Array<{ id?: string; question: string; answer: string }>,
     faqRepo: Repository<FAQ>,
   ): Promise<void> {
     const existing = await faqRepo.find({ where: { categoryId } });

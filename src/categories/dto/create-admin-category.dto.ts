@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -21,6 +22,7 @@ export class CreateAdminCategoryDto {
   @IsString()
   @IsNotEmpty({ message: 'Введите slug категории' })
   @MaxLength(120)
+  @Matches(/^[a-z0-9-]+$/, { message: 'Slug может содержать только строчные латинские буквы, цифры и дефис' })
   slug: string;
 
   @ApiPropertyOptional({
