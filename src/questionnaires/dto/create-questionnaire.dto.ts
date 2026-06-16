@@ -44,15 +44,14 @@ class ComponentsDto {
   @IsBoolean() crm: boolean;
   @IsBoolean() telephony: boolean;
   @IsBoolean() messenger: boolean;
-  @IsBoolean() chatbot: boolean;
-  @IsBoolean() voiceRobot: boolean;
+  @IsBoolean() voiceChatbot: boolean;
   @IsBoolean() contactDatabase: boolean;
   @IsBoolean() salesManager: boolean;
   @IsBoolean() trainingSystem: boolean;
   @IsBoolean() analytics: boolean;
   @IsBoolean() scripts: boolean;
   @IsBoolean() callAnalysis: boolean;
-  @IsBoolean() businessTrainer: boolean;
+  @IsBoolean() salesDocuments: boolean;
   @IsBoolean() salesHead: boolean;
 }
 
@@ -131,6 +130,13 @@ export class CreateQuestionnaireDto implements QuestionnaireAnswers {
   @IsObject()
   @Type(() => ComponentsDto)
   components: ComponentsDto;
+
+  @ApiPropertyOptional({ type: ComponentsDto })
+  @IsOptional()
+  @ValidateNested()
+  @IsObject()
+  @Type(() => ComponentsDto)
+  componentsToAdd?: ComponentsDto;
 
   @ApiProperty({ example: 5000000, description: 'Желаемая выручка (руб)' })
   @IsNumber()
