@@ -17,6 +17,8 @@ import {
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { Service } from '../services/entities/service.entity';
+import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { AddExpertToGroupDto } from './dto/add-expert-to-group.dto';
@@ -269,17 +271,39 @@ export class ExpertsService {
       description: offering.description,
     }));
 
+    const activeMembers = (position.members ?? [])
+      .filter((member) => !member.deletedAt);
+    const executorUserIds = [...new Set(activeMembers.map((member) => member.userId))];
+    const executorUsers = executorUserIds.length > 0
+      ? await this.userRepository
+        .createQueryBuilder('u')
+        .select([
+          'u.id',
+          'u.name',
+          'u.lastName',
+          'u.experienceYears',
+          'u.role',
+        ])
+        .where('u.id IN (:...executorUserIds)', { executorUserIds })
+        .getMany()
+      : [];
+    const executorByUserId = new Map(executorUsers.map((user) => [user.id, user]));
+    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(executorUserIds);
+
     const executors = await Promise.all(
-      (position.members ?? [])
-        .filter((member) => !member.deletedAt && Boolean(member.user))
+      activeMembers
         .map(async (member) => {
+          const memberUser = executorByUserId.get(member.userId) ?? member.user;
+          if (!memberUser) return null;
           const prices = await this.getMemberOfferingPrices(member.id, positionOfferings);
-          if (member.user!.role !== UserRole.EXPERT) return null;
+          if (memberUser.role !== UserRole.EXPERT) return null;
           return {
-            id: member.user!.id,
-            name: member.user!.name,
-            lastName: member.user!.lastName,
-            experienceYears: member.user!.experienceYears ?? null,
+            id: memberUser.id,
+            name: memberUser.name,
+            lastName: memberUser.lastName,
+            experienceYears: memberUser.experienceYears
+              ?? fallbackExperienceByUserId.get(memberUser.id)
+              ?? null,
             offerings: prices,
           };
         }),
@@ -537,6 +561,7 @@ export class ExpertsService {
     const expertOrdersCountById = new Map(
       expertOrdersCountsRaw.map((row) => [row.executorUserId, Number(row.count)]),
     );
+    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(expertIds);
 
     const experts = expertMembers.map((member) => ({
       id: member.user!.id,
@@ -544,7 +569,9 @@ export class ExpertsService {
       lastName: member.user!.lastName,
       email: member.user!.email,
       phoneNumber: member.user!.phoneNumber,
-      experienceYears: member.user!.experienceYears ?? null,
+      experienceYears: member.user!.experienceYears
+        ?? fallbackExperienceByUserId.get(member.user!.id)
+        ?? null,
       ordersCount: expertOrdersCountById.get(member.user!.id) ?? 0,
     }));
 
@@ -761,6 +788,7 @@ export class ExpertsService {
       .offset(offset)
       .limit(limit)
       .getMany();
+    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(users.map((user) => user.id));
     const assignedByUserId = await this.loadAssignedGroupsByUserIds(users.map((user) => user.id));
 
     return {
@@ -770,7 +798,7 @@ export class ExpertsService {
         lastName: user.lastName,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        experienceYears: user.experienceYears ?? null,
+        experienceYears: user.experienceYears ?? fallbackExperienceByUserId.get(user.id) ?? null,
         assignedToGroupId: assignedByUserId.get(user.id) ?? null,
       })),
       total,
@@ -805,6 +833,7 @@ export class ExpertsService {
       .offset(offset)
       .limit(limit)
       .getMany();
+    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(users.map((user) => user.id));
     const assignedByUserId = await this.loadAssignedGroupsByUserIds(users.map((user) => user.id));
 
     return {
@@ -814,7 +843,7 @@ export class ExpertsService {
         lastName: user.lastName,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        experienceYears: user.experienceYears ?? null,
+        experienceYears: user.experienceYears ?? fallbackExperienceByUserId.get(user.id) ?? null,
         assignedToGroupId: assignedByUserId.get(user.id) ?? null,
       })),
       total,
@@ -927,6 +956,30 @@ export class ExpertsService {
       }
     }
     return assignedByUserId;
+  }
+
+  private async loadFallbackExperienceYearsByUserIds(userIds: string[]): Promise<Map<string, number>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const rows = await this.dataSource
+      .getRepository(Service)
+      .createQueryBuilder('service')
+      .select('service."userId"', 'userId')
+      .addSelect('MAX(service."contractorExperienceYears")', 'experienceYears')
+      .where('service."userId" IN (:...userIds)', { userIds })
+      .andWhere('service.type = :contractorType', { contractorType: ServiceType.Contractor })
+      .andWhere('service."deletedAt" IS NULL')
+      .andWhere('service."contractorExperienceYears" IS NOT NULL')
+      .groupBy('service."userId"')
+      .getRawMany<{ userId: string; experienceYears: string | null }>();
+
+    return new Map(
+      rows
+        .filter((row) => row.experienceYears !== null)
+        .map((row) => [row.userId, Number(row.experienceYears)]),
+    );
   }
 
   async removeExpertFromGroup(groupId: string, expertId: string): Promise<void> {
