@@ -204,7 +204,13 @@ export class ExpertsService {
       relations: ['offerings', 'members'],
     });
 
-    const positionIds = positions.map((p) => p.id);
+    const visiblePositions = positions.filter((position) => {
+      const activeOfferingsCount = (position.offerings ?? []).filter((offering) => !offering.deletedAt).length;
+      const activeExecutorsCount = (position.members ?? []).filter((member) => !member.deletedAt).length;
+      return activeOfferingsCount > 0 && activeExecutorsCount > 0;
+    });
+
+    const positionIds = visiblePositions.map((p) => p.id);
     const memberOfferings = positionIds.length > 0
       ? await this.expertServicePriceRepository
         .createQueryBuilder('esp')
@@ -236,13 +242,12 @@ export class ExpertsService {
       }
     }
 
-    return positions.map((position) => ({
+    return visiblePositions.map((position) => ({
       id: position.id,
       name: position.name,
       description: position.description,
-      image: position.image ?? null,
-      executorsCount: position.members?.length ?? 0,
-      offeringsCount: position.offerings?.length ?? 0,
+      executorsCount: (position.members ?? []).filter((member) => !member.deletedAt).length,
+      offeringsCount: (position.offerings ?? []).filter((offering) => !offering.deletedAt).length,
       minPrice: minPriceByPosition.get(position.id) ?? null,
     }));
   }
