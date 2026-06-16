@@ -101,13 +101,13 @@ export class RecommendationScoringService {
           {
             role: 'system',
             content:
-              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог. Обоснование пиши на русском. Верни только валидный JSON.',
+              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог. Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава, рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией. Обоснование пиши на русском. Верни только валидный JSON.',
           },
           {
             role: 'user',
             content: JSON.stringify({
               instruction:
-                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}. Возвращай только реально релевантные рекомендации.',
+                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}. Возвращай только реально релевантные рекомендации. Не возвращай отдельные услуги, если выбранный пакет уже содержит или логически покрывает их результат.',
               clientProfile: dto.clientProfile ?? {},
               diagnostics: dto.diagnostics ?? [],
               catalog: catalogSlice.map((service) => ({

@@ -268,9 +268,7 @@ describe('RecommendationsService', () => {
     });
 
     const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
-    expect(
-      candidates.map((item) => item.packageId ?? item.serviceId),
-    ).toEqual(
+    expect(candidates.map((item) => item.packageId ?? item.serviceId)).toEqual(
       expect.arrayContaining([
         'real-package-id',
         'legacy-package-service-id',
@@ -321,6 +319,62 @@ describe('RecommendationsService', () => {
     );
     expect(packageCandidate.description).toContain(
       'Аудит, воронки, роботы и статусы отказа',
+    );
+  });
+
+  it('adds logical duplicate services to package coverage', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'tech-spec-service-id',
+        name: 'Подготовка технического задания',
+        description: 'Детальный план настройки CRM',
+        type: ServiceType.Document,
+        price: 20000,
+        skills: ['crm', 'техническое задание'],
+        category: { name: 'CRM система' },
+        deletedAt: null,
+      },
+    ]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'crm-silver-package-id',
+        name: 'CRM Серебро',
+        description: 'Расширенная настройка CRM',
+        packageType: 'silver',
+        price: 100000,
+        tags: ['crm'],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'inner-tz-service-id',
+            name: 'Подготовка ТЗ',
+            description: 'ТЗ для настройки CRM',
+            deletedAt: null,
+            skills: ['тз'],
+            category: { name: 'CRM система' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    const packageCandidate = candidates.find(
+      (item) => item.packageId === 'crm-silver-package-id',
+    );
+    expect(packageCandidate.coveredServiceIds).toEqual(
+      expect.arrayContaining(['inner-tz-service-id', 'tech-spec-service-id']),
     );
   });
 
@@ -607,6 +661,44 @@ describe('RecommendationsService', () => {
 
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
       'package-id',
+    ]);
+  });
+
+  it('removes a service recommendation when a selected package covers it semantically', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'crm-silver-package-id',
+        serviceName: 'CRM Серебро',
+        priority: 'urgent',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['catalog_semantic:crm_technical_spec'],
+      },
+      {
+        serviceId: 'tech-spec-service-id',
+        packageId: null,
+        serviceName: 'Подготовка технического задания',
+        priority: 'medium',
+        rationale: 'service fit',
+        diagnosticSignals: [],
+        score: 8,
+        coveredServiceIds: [
+          'tech-spec-service-id',
+          'catalog_semantic:crm_technical_spec',
+        ],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'crm-silver-package-id',
     ]);
   });
 
