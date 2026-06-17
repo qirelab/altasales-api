@@ -134,6 +134,7 @@ const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
 const URGENT_RANKER_SCORE = 70;
 const MEDIUM_RANKER_SCORE = 12;
 const EXPLICIT_COMPONENT_POINTS = 60;
+const STRONG_REFERENCE_EXTRA_SCORE = 90;
 
 const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   crm: ['CRM'],
@@ -464,6 +465,7 @@ export class QuestionnaireRelevanceRankerService {
           serviceText,
           stage,
           desiredText,
+          normalizedProfile.leadTypeText,
           normalizedProfile.desiredPeriod,
         )
       ) {
@@ -486,6 +488,12 @@ export class QuestionnaireRelevanceRankerService {
       const base = fromRanked?.item ?? fallback;
       const score = Number(base.score || 0) + rulePoints + llmBonus;
       const reasons = matchedRules.map((rule) => rule.reason);
+      if (
+        idealReference &&
+        !this.isStrongReferenceExtraCandidate(base, score)
+      ) {
+        continue;
+      }
 
       rankedCandidates.push({
         ...base,
@@ -640,7 +648,11 @@ export class QuestionnaireRelevanceRankerService {
       if (selected.length >= limit) break;
     }
 
-    return selected;
+    return selected.sort(
+      (a, b) =>
+        Number(b.score || 0) - Number(a.score || 0) ||
+        this.scorePriority(b.priority) - this.scorePriority(a.priority),
+    );
   }
 
   private getRecommendationAliases(
@@ -884,6 +896,7 @@ export class QuestionnaireRelevanceRankerService {
     serviceText: string,
     stage: QuestionnaireStage,
     desiredText: string,
+    leadTypeText: string,
     desiredPeriod: string,
   ): string | null {
     if (
@@ -897,6 +910,15 @@ export class QuestionnaireRelevanceRankerService {
       ])
     ) {
       return 'срок услуги не соответствует цели на 1 месяц';
+    }
+
+    if (leadTypeText.includes('inbound') || leadTypeText.includes('вход')) {
+      if (
+        this.includesAny(serviceText, ['база контактов']) &&
+        !this.includesAny(desiredText, ['база контактов'])
+      ) {
+        return 'база контактов не требуется для входящей лидогенерации';
+      }
     }
 
     if (
@@ -946,12 +968,24 @@ export class QuestionnaireRelevanceRankerService {
 
     if (
       stage === 'basic_department' &&
+      !this.includesAny(desiredText, ['роп', 'руководител']) &&
+      this.includesAny(serviceText, [
+        'ии роп',
+        'роп-фокус',
+        'руководитель отдела продаж',
+        'управление действующим оп',
+      ])
+    ) {
+      return 'РОП не выбран в анкете базового отдела';
+    }
+
+    if (
+      stage === 'basic_department' &&
       this.includesAny(serviceText, [
         'отдел продаж с нуля',
         'базовая настройка работы отдела продаж',
         'crm серебро',
         'crm золото',
-        'ии роп',
         'топ-фокус',
         'коммерческий директор',
         'финансовый директор',
@@ -981,6 +1015,16 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return null;
+  }
+
+  private isStrongReferenceExtraCandidate(
+    item: GeneratedRecommendationItem,
+    score: number,
+  ): boolean {
+    return (
+      item.diagnosticSignals?.includes('ai_generated') ||
+      score >= STRONG_REFERENCE_EXTRA_SCORE
+    );
   }
 
   private applyDiversity(
@@ -1091,13 +1135,19 @@ export class QuestionnaireRelevanceRankerService {
     return RecommendationPriority.Low;
   }
 
+  private scorePriority(priority: RecommendationPriority): number {
+    if (priority === RecommendationPriority.Urgent) return 3;
+    if (priority === RecommendationPriority.Medium) return 2;
+    return 1;
+  }
+
   private getServiceGroup(item: GeneratedRecommendationItem): ServiceGroup {
-    const text = this.normalize(
-      `${item.serviceName} ${item.diagnosticSignals.join(' ')}`,
-    );
+    const text = this.normalize(item.serviceName);
 
     if (text.includes('crm')) return 'crm';
-    if (this.includesAny(text, ['телефони', 'мессенджер', 'звонк'])) {
+    if (
+      this.includesAny(text, ['телефони', 'мессенджер', 'звонк', 'разговор'])
+    ) {
       return 'communications';
     }
     if (
