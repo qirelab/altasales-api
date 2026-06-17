@@ -74,7 +74,6 @@ type NormalizedQuestionnaireProfile = {
   leadTypeText: string;
   desiredPeriod: string;
   selectedComponents: SelectedComponent[];
-  existingComponents: SelectedComponent[];
   managersCount: number;
   targetRevenue: number;
 };
@@ -155,31 +154,6 @@ const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   callAnalysis: ['Анализ звонков'],
   salesDocuments: ['Документы ОП', 'Документы отдела продаж'],
   salesHead: ['РОП'],
-};
-
-const EXISTING_COMPONENT_SERVICE_TERMS: Partial<
-  Record<SelectedComponent, string[]>
-> = {
-  crm: ['crm старт', 'crm бронза', 'базовая настройка работы отдела продаж'],
-  telephony: ['интеграция телефонии'],
-  messenger: ['интеграция мессенджера'],
-  voiceChatbot: ['настройка роботов', 'голосовой робот', 'чат-бот'],
-  contactDatabase: ['база контактов'],
-  salesManager: ['подбор под ключ', 'профиль вакансии', 'портрет соискателя'],
-  trainingSystem: ['план тренингов', 'пакет обучения'],
-  analytics: ['дашборд оп'],
-  scripts: ['скрипт продаж'],
-  callAnalysis: [
-    'отчет по звонкам',
-    'отчет с оценкой прослушанных разговоров',
-    'на контроле',
-  ],
-  salesDocuments: ['пакет документов отдела продаж'],
-  salesHead: [
-    'руководитель отдела продаж',
-    'управление действующим оп',
-    'роп-фокус',
-  ],
 };
 
 const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
@@ -687,7 +661,9 @@ export class QuestionnaireRelevanceRankerService {
       );
       if (!service) continue;
       const serviceText = this.normalizeCandidateText(service);
-      if (this.shouldSkipCandidateByAntiFilters(serviceText, profile, stage)) {
+      if (
+        this.shouldSkipCandidateByAntiFilters(serviceText, profile, stage)
+      ) {
         continue;
       }
 
@@ -855,14 +831,8 @@ export class QuestionnaireRelevanceRankerService {
     profile: Record<string, unknown>,
   ): NormalizedQuestionnaireProfile {
     const desiredSalesDepartment = this.toArray(profile.desiredSalesDepartment);
-    const usesNewExistingProductFlow =
-      this.normalize(String(profile.productStage ?? '')).includes('existing') &&
-      this.isPlainObject(profile.componentsToAdd);
-    const existingComponents = usesNewExistingProductFlow
-      ? this.getSelectedComponents(profile.components, [])
-      : [];
     const selectedComponents = this.getSelectedComponents(
-      usesNewExistingProductFlow ? profile.componentsToAdd : profile.components,
+      profile.components,
       desiredSalesDepartment,
     );
     const componentTerms = selectedComponents.flatMap(
@@ -899,7 +869,6 @@ export class QuestionnaireRelevanceRankerService {
       leadTypeText: this.normalize(JSON.stringify(leadGenerationTypes)),
       desiredPeriod: this.getDesiredPeriod(profile),
       selectedComponents,
-      existingComponents,
       managersCount: Math.max(
         this.toNumber(profile.calculatedManagersCount),
         this.inferManagersCount(profile),
@@ -975,28 +944,10 @@ export class QuestionnaireRelevanceRankerService {
   private getAntiRecommendationReason(
     serviceText: string,
     stage: QuestionnaireStage,
-    profile: NormalizedQuestionnaireProfile,
+    desiredText: string,
+    leadTypeText: string,
+    desiredPeriod: string,
   ): string | null {
-    const {
-      desiredText,
-      leadTypeText,
-      desiredPeriod,
-      existingComponents,
-      selectedComponents,
-    } = profile;
-
-    const duplicatedExistingComponent = existingComponents.find(
-      (component) =>
-        !selectedComponents.includes(component) &&
-        this.includesAny(
-          serviceText,
-          EXISTING_COMPONENT_SERVICE_TERMS[component] ?? [],
-        ),
-    );
-    if (duplicatedExistingComponent) {
-      return `${COMPONENT_LABELS[duplicatedExistingComponent][0]} уже есть и добавление компонента не выбрано в анкете`;
-    }
-
     if (
       desiredPeriod === '1m' &&
       this.includesAny(serviceText, [
@@ -1122,7 +1073,13 @@ export class QuestionnaireRelevanceRankerService {
     stage: QuestionnaireStage,
   ): boolean {
     return Boolean(
-      this.getAntiRecommendationReason(serviceText, stage, profile),
+      this.getAntiRecommendationReason(
+        serviceText,
+        stage,
+        profile.desiredText,
+        profile.leadTypeText,
+        profile.desiredPeriod,
+      ),
     );
   }
 
