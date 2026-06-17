@@ -693,6 +693,21 @@ export class QuestionnaireRelevanceRankerService {
     );
   }
 
+  private getRecommendationAliases(
+    recommendation: IdealRecommendationReference['recommendations'][number],
+  ): string[] {
+    return this.uniqueStrings([
+      recommendation.referenceName,
+      ...recommendation.aliases,
+    ]);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter(Boolean)),
+    );
+  }
+
   private findCandidateByAliases(
     services: ServiceCandidate[],
     aliases: string[],

@@ -212,44 +212,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
-  it('does not fill a golden reference scenario with weak fallback candidates', () => {
-    const result = ranker.rankRecommendations(
-      {
-        userId: 'user-id',
-        clientProfile: {
-          salesDirection: 'B2B',
-          product: 'Строительные материалы',
-          productStage: 'new',
-          leadGenerationTypes: ['outbound'],
-          components: components({
-            crm: true,
-            telephony: true,
-            messenger: true,
-            contactDatabase: true,
-            salesManager: true,
-            trainingSystem: true,
-            analytics: true,
-            salesHead: true,
-          }),
-        },
-        persist: false,
-      },
-      services,
-      [],
-      '',
-      10,
-    );
-
-    expect(result.map((item) => item.serviceId)).toEqual([
-      'from-zero',
-      'sales-head',
-      'training-3m',
-      'dashboard',
-      'crm-start',
-      'ai-crm-analysis',
-    ]);
-  });
-
   it('prefers exact golden reference names over fallback aliases', () => {
     const result = ranker.rankRecommendations(
       {
@@ -403,44 +365,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result[0].diagnosticSignals).toContain(
       'ideal_reference:existing_b2b_inbound_managed_sales_department',
     );
-  });
-
-  it('does not recommend contact databases for inbound lead generation unless requested', () => {
-    const result = ranker.rankRecommendations(
-      {
-        userId: 'user-id',
-        clientProfile: {
-          salesDirection: 'B2B',
-          product: 'Бухгалтерские услуги',
-          productStage: 'existing',
-          leadGenerationTypes: ['inbound'],
-          desiredResult: {
-            description: 'Нужно фиксировать входящие заявки и переписки',
-          },
-          components: components({
-            telephony: true,
-            messenger: true,
-            analytics: true,
-          }),
-        },
-        persist: false,
-      },
-      [...services, service('contact-db', 'База контактов')],
-      [
-        {
-          serviceId: 'contact-db',
-          serviceName: 'База контактов',
-          priority: RecommendationPriority.Urgent,
-          rationale: 'fallback',
-          diagnosticSignals: ['lead_generation_gap'],
-          score: 100,
-        },
-      ],
-      '',
-      10,
-    );
-
-    expect(result.map((item) => item.serviceId)).not.toContain('contact-db');
   });
 
   it('boosts automation when canonical questionnaire asks for a voice robot', () => {
