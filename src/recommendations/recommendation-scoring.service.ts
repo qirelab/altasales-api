@@ -170,7 +170,11 @@ export class RecommendationScoringService {
         const aiOnlyCandidate = fallback.score <= 0;
         if (
           aiOnlyCandidate &&
-          !this.hasAiOnlyRecommendationEvidence(service, context, item)
+          !this.hasAiOnlyRecommendationEvidence(
+            service,
+            context,
+            item.rationale,
+          )
         ) {
           continue;
         }
@@ -373,9 +377,9 @@ export class RecommendationScoringService {
   private hasAiOnlyRecommendationEvidence(
     service: ServiceCandidate,
     context: string,
-    item: AiRecommendationCandidate,
+    aiRationale: string | undefined,
   ): boolean {
-    if (!this.hasRussianText(item.rationale)) return false;
+    if (!this.hasRussianText(aiRationale)) return false;
 
     const serviceTokens = this.getMeaningfulEvidenceTokens(
       this.normalizeText(
@@ -388,9 +392,7 @@ export class RecommendationScoringService {
       ),
     );
     const evidenceTokens = this.getMeaningfulEvidenceTokens(
-      this.normalizeText(
-        [context, item.rationale, ...(item.diagnosticSignals ?? [])].join(' '),
-      ),
+      this.normalizeText(context),
     );
 
     return serviceTokens.some((serviceToken) =>

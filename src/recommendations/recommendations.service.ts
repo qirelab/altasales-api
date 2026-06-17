@@ -565,7 +565,9 @@ export class RecommendationsService implements OnModuleInit {
     );
 
     if (dto.persist === false) {
-      return ranked;
+      return ranked.map((item) =>
+        this.toPublicGeneratedRecommendationItem(item),
+      );
     }
 
     const persisted: GeneratedRecommendationItem[] = [];
@@ -575,7 +577,9 @@ export class RecommendationsService implements OnModuleInit {
         dto.userId,
         item,
       );
-      persisted.push({ ...item, recommendation });
+      persisted.push(
+        this.toPublicGeneratedRecommendationItem({ ...item, recommendation }),
+      );
     }
 
     await this.pruneStaleGeneratedRecommendations(dto.userId, ranked);
@@ -1155,6 +1159,25 @@ export class RecommendationsService implements OnModuleInit {
     return item.serviceId ? [item.serviceId] : [];
   }
 
+  private toPublicGeneratedRecommendationItem(
+    item: GeneratedRecommendationItem,
+  ): GeneratedRecommendationItem {
+    return {
+      ...item,
+      coveredServiceIds: this.toPublicCoveredServiceIds(
+        item.coveredServiceIds ?? [],
+      ),
+    };
+  }
+
+  private toPublicCoveredServiceIds(coveredServiceIds: string[]): string[] {
+    return coveredServiceIds.filter((id) => !this.isInternalCoverageKey(id));
+  }
+
+  private isInternalCoverageKey(id: string): boolean {
+    return id.startsWith('catalog_name:') || id.startsWith('catalog_semantic:');
+  }
+
   private getRecommendationTargetId(
     recommendation: Recommendation,
   ): string | null {
@@ -1266,7 +1289,9 @@ export class RecommendationsService implements OnModuleInit {
       rationale: item.rationale,
       diagnosticSignals: item.diagnosticSignals,
       score: item.score,
-      coveredServiceIds: item.coveredServiceIds ?? [],
+      coveredServiceIds: this.toPublicCoveredServiceIds(
+        item.coveredServiceIds ?? [],
+      ),
       recommendationId: item.recommendation?.id,
     }));
   }
