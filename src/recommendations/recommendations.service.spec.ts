@@ -772,6 +772,7 @@ describe('RecommendationsService', () => {
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
       'crm-silver-package-id',
     ]);
+    expect(result[0].coveredServiceIds).toEqual([]);
   });
 
   it('keeps the same existing package but skips separate services already covered by it', async () => {

@@ -208,7 +208,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'ai-crm-analysis',
     ]);
     expect(result[0].diagnosticSignals).toContain(
-      'ideal_reference:new_b2b_outbound_full_sales_department',
+      'ideal_reference:new_outbound_full_sales_department',
     );
   });
 
@@ -248,6 +248,39 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'crm-start',
       'ai-crm-analysis',
     ]);
+  });
+
+  it('applies anti-filters to golden reference recommendations', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          productStage: 'new',
+          desiredResult: {
+            period: '1m',
+          },
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      6,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('training-3m');
   });
 
   it('prefers exact golden reference names over fallback aliases', () => {
@@ -310,7 +343,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
 
     expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
-      'ideal_reference:new_b2b_outbound_full_sales_department',
+      'ideal_reference:new_outbound_full_sales_department',
     );
   });
 
@@ -362,7 +395,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'custom-growth-audit',
     );
     expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
-      'ideal_reference:new_b2b_outbound_full_sales_department',
+      'ideal_reference:new_outbound_full_sales_department',
     );
   });
 
@@ -401,7 +434,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'sales-head',
     ]);
     expect(result[0].diagnosticSignals).toContain(
-      'ideal_reference:existing_b2b_inbound_managed_sales_department',
+      'ideal_reference:existing_inbound_managed_sales_department',
     );
   });
 

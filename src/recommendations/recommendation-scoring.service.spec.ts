@@ -123,10 +123,15 @@ describe('RecommendationScoringService', () => {
     const result = await service.generateAiRecommendations(
       {
         userId: 'user-id',
-        diagnostics: ['client needs a bespoke implementation path'],
+        diagnostics: [
+          'client needs a bespoke implementation path внедренческая настройка',
+        ],
       },
       [candidate],
-      'client needs a bespoke implementation path',
+      [
+        'client needs a bespoke implementation path',
+        'внедренческая настройка',
+      ].join(' '),
     );
 
     expect(result[0]).toMatchObject({

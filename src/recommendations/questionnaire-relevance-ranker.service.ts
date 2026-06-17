@@ -284,9 +284,12 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
   ],
 };
 
+// These references are intentionally sales-direction agnostic. The client
+// examples were B2B, but the same questionnaire shape should get the same
+// baseline recommendations for similar non-B2B cases.
 const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
   {
-    id: 'new_b2b_outbound_full_sales_department',
+    id: 'new_outbound_full_sales_department',
     match: {
       productStageAny: ['новый', 'new'],
       leadTypeAny: ['исход', 'outbound'],
@@ -346,7 +349,7 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
     ],
   },
   {
-    id: 'existing_b2b_inbound_managed_sales_department',
+    id: 'existing_inbound_managed_sales_department',
     match: {
       productStageAny: ['уже продаю', 'existing'],
       leadTypeAny: ['вход', 'inbound'],
@@ -432,10 +435,12 @@ export class QuestionnaireRelevanceRankerService {
     const maxItems = limit ?? Number.POSITIVE_INFINITY;
     const profile = dto.clientProfile ?? {};
     const normalizedProfile = this.normalizeProfile(profile);
-    const stage = this.detectStage(normalizedProfile);
-    const rules = this.buildRules(normalizedProfile, stage);
-    const desiredText = normalizedProfile.desiredText;
     const idealReference = this.findIdealReference(normalizedProfile);
+    const stage = this.resolveStageForRanking(
+      this.detectStage(normalizedProfile),
+      idealReference,
+    );
+    const rules = this.buildRules(normalizedProfile, stage);
     const rankedById = new Map(
       ranked.map((item, index) => [
         this.getItemTargetId(item),
@@ -451,6 +456,8 @@ export class QuestionnaireRelevanceRankerService {
         services,
         rankedById,
         context,
+        normalizedProfile,
+        stage,
         maxItems,
       );
     } else if (stage === 'new_department') {
@@ -458,6 +465,8 @@ export class QuestionnaireRelevanceRankerService {
         services,
         rankedById,
         context,
+        normalizedProfile,
+        stage,
         maxItems,
       );
 
@@ -482,12 +491,10 @@ export class QuestionnaireRelevanceRankerService {
 
       const serviceText = this.normalizeCandidateText(service);
       if (
-        this.getAntiRecommendationReason(
+        this.shouldSkipCandidateByAntiFilters(
           serviceText,
+          normalizedProfile,
           stage,
-          desiredText,
-          normalizedProfile.leadTypeText,
-          normalizedProfile.desiredPeriod,
         )
       ) {
         continue;
@@ -564,6 +571,17 @@ export class QuestionnaireRelevanceRankerService {
     return 'basic_department';
   }
 
+  private resolveStageForRanking(
+    detectedStage: QuestionnaireStage,
+    idealReference: IdealRecommendationReference | null,
+  ): QuestionnaireStage {
+    if (idealReference?.id === 'new_outbound_full_sales_department') {
+      return 'new_department';
+    }
+
+    return detectedStage;
+  }
+
   private findIdealReference(
     profile: NormalizedQuestionnaireProfile,
   ): IdealRecommendationReference | null {
@@ -628,6 +646,8 @@ export class QuestionnaireRelevanceRankerService {
       { item: GeneratedRecommendationItem; index: number }
     >,
     context: string,
+    profile: NormalizedQuestionnaireProfile,
+    stage: QuestionnaireStage,
     limit: number,
   ): GeneratedRecommendationItem[] {
     const selected: GeneratedRecommendationItem[] = [];
@@ -640,6 +660,12 @@ export class QuestionnaireRelevanceRankerService {
         usedTargetIds,
       );
       if (!service) continue;
+      const serviceText = this.normalizeCandidateText(service);
+      if (
+        this.shouldSkipCandidateByAntiFilters(serviceText, profile, stage)
+      ) {
+        continue;
+      }
 
       const targetId = this.getCandidateTargetId(service);
       usedTargetIds.add(targetId);
@@ -950,7 +976,6 @@ export class QuestionnaireRelevanceRankerService {
         'ии роп',
         'роп-фокус',
         'топ-фокус',
-        'руководитель отдела продаж',
         'коммерческий директор',
         'финансовый директор',
         'эксперт-фокус',
@@ -965,7 +990,6 @@ export class QuestionnaireRelevanceRankerService {
         'аналитический отчёт по отказным сделкам',
         'настройка отчета',
         'настройка отчёта',
-        'дашборд оп',
         'на контроле',
         'crm серебро',
         'crm золото',
@@ -978,13 +1002,16 @@ export class QuestionnaireRelevanceRankerService {
 
     if (
       stage === 'advanced_department' &&
-      this.includesAny(serviceText, [
+      (this.includesAny(serviceText, [
         'отдел продаж с нуля',
-        'crm старт',
-        'crm бронза',
-        'базовая настройка работы отдела продаж',
         'пакет обучения на месяц',
-      ])
+      ]) ||
+        (this.includesAny(desiredText, ['crm']) &&
+          this.includesAny(serviceText, [
+            'crm старт',
+            'crm бронза',
+            'базовая настройка работы отдела продаж',
+          ])))
     ) {
       return 'услуга слишком базовая для развитого отдела продаж';
     }
@@ -1040,6 +1067,22 @@ export class QuestionnaireRelevanceRankerService {
     return null;
   }
 
+  private shouldSkipCandidateByAntiFilters(
+    serviceText: string,
+    profile: NormalizedQuestionnaireProfile,
+    stage: QuestionnaireStage,
+  ): boolean {
+    return Boolean(
+      this.getAntiRecommendationReason(
+        serviceText,
+        stage,
+        profile.desiredText,
+        profile.leadTypeText,
+        profile.desiredPeriod,
+      ),
+    );
+  }
+
   private isStrongReferenceExtraCandidate(
     item: GeneratedRecommendationItem,
     score: number,
@@ -1093,6 +1136,8 @@ export class QuestionnaireRelevanceRankerService {
       { item: GeneratedRecommendationItem; index: number }
     >,
     context: string,
+    profile: NormalizedQuestionnaireProfile,
+    stage: QuestionnaireStage,
     limit: number,
   ): GeneratedRecommendationItem[] {
     const selected: GeneratedRecommendationItem[] = [];
@@ -1103,6 +1148,11 @@ export class QuestionnaireRelevanceRankerService {
         if (usedTargetIds.has(this.getCandidateTargetId(candidate)))
           return false;
         const serviceText = this.normalizeCandidateText(candidate);
+        if (
+          this.shouldSkipCandidateByAntiFilters(serviceText, profile, stage)
+        ) {
+          return false;
+        }
         return rule.terms.every((term) =>
           serviceText.includes(this.normalize(term)),
         );
