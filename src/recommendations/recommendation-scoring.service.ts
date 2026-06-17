@@ -39,6 +39,32 @@ type AiRecommendationCandidate = {
 const MAX_CATALOG_FOR_LLM = 50;
 const AI_RECOMMENDATION_CACHE_TTL_MS = 60 * 60 * 1000;
 const AI_SEMANTIC_RECOMMENDATION_SCORE = 6;
+const MIN_AI_EVIDENCE_TOKEN_LENGTH = 4;
+const AI_EVIDENCE_STOP_WORDS = new Set([
+  'услуга',
+  'услуги',
+  'услуг',
+  'подходит',
+  'клиент',
+  'клиента',
+  'клиентом',
+  'сценарий',
+  'описанный',
+  'формат',
+  'работа',
+  'работы',
+  'решение',
+  'решения',
+  'документ',
+  'документы',
+  'пакет',
+  'настройка',
+  'настройки',
+  'business',
+  'client',
+  'service',
+  'solution',
+]);
 
 @Injectable()
 export class RecommendationScoringService {
@@ -142,7 +168,12 @@ export class RecommendationScoringService {
         usedTargetIds.add(targetId);
         const fallback = this.scoreService(service, context);
         const aiOnlyCandidate = fallback.score <= 0;
-        if (aiOnlyCandidate && !this.hasRussianText(item.rationale)) continue;
+        if (
+          aiOnlyCandidate &&
+          !this.hasAiOnlyRecommendationEvidence(service, context, item)
+        ) {
+          continue;
+        }
 
         const priority =
           this.normalizePriority(item.priority) ?? fallback.priority;
@@ -337,6 +368,57 @@ export class RecommendationScoringService {
 
   private hasRussianText(value: string | undefined): boolean {
     return Boolean(value?.trim() && /[а-яё]/i.test(value));
+  }
+
+  private hasAiOnlyRecommendationEvidence(
+    service: ServiceCandidate,
+    context: string,
+    item: AiRecommendationCandidate,
+  ): boolean {
+    if (!this.hasRussianText(item.rationale)) return false;
+
+    const serviceTokens = this.getMeaningfulEvidenceTokens(
+      this.normalizeText(
+        [
+          service.name,
+          service.description,
+          service.category?.name,
+          ...(service.skills ?? []),
+        ].join(' '),
+      ),
+    );
+    const evidenceTokens = this.getMeaningfulEvidenceTokens(
+      this.normalizeText(
+        [context, item.rationale, ...(item.diagnosticSignals ?? [])].join(' '),
+      ),
+    );
+
+    return serviceTokens.some((serviceToken) =>
+      evidenceTokens.some((evidenceToken) =>
+        this.isSameEvidenceToken(serviceToken, evidenceToken),
+      ),
+    );
+  }
+
+  private getMeaningfulEvidenceTokens(normalizedText: string): string[] {
+    return normalizedText
+      .split(' ')
+      .filter(
+        (token) =>
+          token.length >= MIN_AI_EVIDENCE_TOKEN_LENGTH &&
+          !AI_EVIDENCE_STOP_WORDS.has(token),
+      );
+  }
+
+  private isSameEvidenceToken(left: string, right: string): boolean {
+    if (left === right) return true;
+    if (
+      left.length >= MIN_AI_EVIDENCE_TOKEN_LENGTH + 2 &&
+      right.length >= MIN_AI_EVIDENCE_TOKEN_LENGTH + 2
+    ) {
+      return left.startsWith(right) || right.startsWith(left);
+    }
+    return false;
   }
 
   private getSignalLabel(signal: string): string {
