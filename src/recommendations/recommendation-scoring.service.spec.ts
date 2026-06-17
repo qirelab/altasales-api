@@ -106,6 +106,36 @@ describe('RecommendationScoringService', () => {
     expect(result[0].rationale).toMatch(/[а-яё]/i);
   });
 
+  it('keeps a valid AI-only semantic recommendation with Russian rationale', async () => {
+    const candidate = {
+      id: 'semantic-service-id',
+      name: 'Сложная внедренческая услуга',
+      description: 'Индивидуальный формат без ключевых слов диагностики',
+      type: ServiceType.Service,
+      skills: [],
+      category: null,
+    } as any;
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"semantic-service-id","priority":"medium","rationale":"Подходит, потому что закрывает описанный клиентом сценарий.","diagnosticSignals":["custom_fit"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['client needs a bespoke implementation path'],
+      },
+      [candidate],
+      'client needs a bespoke implementation path',
+    );
+
+    expect(result[0]).toMatchObject({
+      serviceId: 'semantic-service-id',
+      score: 6,
+      diagnosticSignals: ['ai_generated', 'ai_semantic_match', 'custom_fit'],
+    });
+  });
+
   it('resolves AI recommendation output to packageId for package candidates', async () => {
     const candidate = {
       id: 'package-id',

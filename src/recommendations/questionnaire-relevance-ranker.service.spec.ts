@@ -28,6 +28,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('crm-bronze', 'CRM Бронза'),
     service('crm-silver', 'CRM Серебро'),
     service('crm-gold', 'CRM Золото'),
+    service('ai-crm-analysis', 'ИИ анализ CRM'),
     service('crm-audit', 'Аудит CRM'),
     service('crm-funnels', 'Настройка воронок сделок (до 3 шт)'),
     service('crm-tech-spec', 'Подготовка технического задания'),
@@ -204,7 +205,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'training-3m',
       'dashboard',
       'crm-start',
-      'crm-audit',
+      'ai-crm-analysis',
     ]);
     expect(result[0].diagnosticSignals).toContain(
       'ideal_reference:new_b2b_outbound_full_sales_department',
@@ -241,7 +242,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'training-3m',
       'dashboard',
       'crm-audit',
-      'ai-rop',
+      'ai-crm-analysis',
       'document-request',
       'sales-head',
     ]);

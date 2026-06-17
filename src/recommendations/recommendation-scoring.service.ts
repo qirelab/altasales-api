@@ -38,6 +38,7 @@ type AiRecommendationCandidate = {
 
 const MAX_CATALOG_FOR_LLM = 50;
 const AI_RECOMMENDATION_CACHE_TTL_MS = 60 * 60 * 1000;
+const AI_SEMANTIC_RECOMMENDATION_SCORE = 6;
 
 @Injectable()
 export class RecommendationScoringService {
@@ -140,14 +141,19 @@ export class RecommendationScoringService {
 
         usedTargetIds.add(targetId);
         const fallback = this.scoreService(service, context);
-        if (fallback.score <= 0) continue;
+        const aiOnlyCandidate = fallback.score <= 0;
+        if (aiOnlyCandidate && !this.hasRussianText(item.rationale)) continue;
 
         const priority =
           this.normalizePriority(item.priority) ?? fallback.priority;
         const diagnosticSignals = this.normalizeSignals([
           'ai_generated',
+          ...(aiOnlyCandidate ? ['ai_semantic_match'] : []),
           ...(item.diagnosticSignals ?? fallback.diagnosticSignals),
         ]);
+        const score = aiOnlyCandidate
+          ? AI_SEMANTIC_RECOMMENDATION_SCORE
+          : fallback.score;
 
         result.push({
           serviceId: fallback.serviceId,
@@ -160,7 +166,7 @@ export class RecommendationScoringService {
             service.name,
           ),
           diagnosticSignals,
-          score: fallback.score,
+          score,
           coveredServiceIds: fallback.coveredServiceIds,
         });
       }
@@ -327,6 +333,10 @@ export class RecommendationScoringService {
     return (
       fallbackRationale || `${serviceName} подходит по результатам диагностики.`
     );
+  }
+
+  private hasRussianText(value: string | undefined): boolean {
+    return Boolean(value?.trim() && /[а-яё]/i.test(value));
   }
 
   private getSignalLabel(signal: string): string {

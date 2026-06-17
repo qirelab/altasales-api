@@ -73,7 +73,7 @@ const LOGICAL_COVERAGE_RULES: LogicalCoverageRule[] = [
     key: 'turnkey_hiring',
     variants: ['подбор под ключ'],
     terms: ['профиль вакансии', 'портрет', 'скрининг', 'интервью'],
-    minTerms: 3,
+    minTerms: 4,
   },
   {
     key: 'crm_technical_spec',
