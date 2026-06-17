@@ -3,9 +3,19 @@ import { KnowledgeExtractionService } from './knowledge-extraction.service';
 
 describe('KnowledgeExtractionService', () => {
   let service: KnowledgeExtractionService;
+  let ocrService: {
+    recognizeImage: jest.Mock;
+    recognizePdf: jest.Mock;
+    shouldFallbackToOcr: jest.Mock;
+  };
 
   beforeEach(() => {
-    service = new KnowledgeExtractionService();
+    ocrService = {
+      recognizeImage: jest.fn(),
+      recognizePdf: jest.fn(),
+      shouldFallbackToOcr: jest.fn().mockReturnValue(false),
+    };
+    service = new KnowledgeExtractionService(ocrService as never);
   });
 
   it('extracts plain text without storing unsafe metadata', async () => {
@@ -56,6 +66,66 @@ describe('KnowledgeExtractionService', () => {
     await expect(
       service.extract(file('empty.txt', 'text/plain', '   ')),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('routes PNG images through OCR extraction', async () => {
+    ocrService.recognizeImage.mockResolvedValueOnce({
+      blocks: [{ text: 'OCR extracted scan text', metadata: { sourceFormat: 'ocr' } }],
+    });
+
+    const result = await service.extract(
+      file('scan.png', 'image/png', 'fake-image-bytes'),
+    );
+
+    expect(ocrService.recognizeImage).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      { extension: '.png', mimeType: 'image/png' },
+    );
+    expect(result.blocks[0].text).toBe('OCR extracted scan text');
+  });
+
+  it('fails safely when OCR is disabled for images', async () => {
+    ocrService.recognizeImage.mockRejectedValueOnce(
+      new BadRequestException('Knowledge OCR is disabled'),
+    );
+
+    await expect(
+      service.extract(file('scan.jpg', 'image/jpeg', 'fake-image-bytes')),
+    ).rejects.toThrow('Knowledge OCR is disabled');
+  });
+
+  it('uses embedded PDF text when it is long enough', async () => {
+    jest
+      .spyOn(service as unknown as { extractPdf: () => Promise<string> }, 'extractPdf')
+      .mockResolvedValueOnce('Long enough embedded text from a searchable PDF document.');
+    ocrService.shouldFallbackToOcr.mockReturnValueOnce(false);
+
+    const result = await service.extract(
+      file('guide.pdf', 'application/pdf', 'fake-pdf'),
+    );
+
+    expect(ocrService.recognizePdf).not.toHaveBeenCalled();
+    expect(result.blocks[0].text).toContain('Long enough embedded text');
+  });
+
+  it('falls back to OCR when PDF embedded text is too short', async () => {
+    jest
+      .spyOn(service as unknown as { extractPdf: () => Promise<string> }, 'extractPdf')
+      .mockResolvedValueOnce(' ');
+    ocrService.shouldFallbackToOcr.mockReturnValueOnce(true);
+    ocrService.recognizePdf.mockResolvedValueOnce({
+      blocks: [{ text: 'OCR text from rendered PDF page', metadata: { pageNumber: 1 } }],
+    });
+
+    const result = await service.extract(
+      file('scan.pdf', 'application/pdf', 'fake-pdf'),
+    );
+
+    expect(ocrService.recognizePdf).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(result.blocks[0]).toEqual({
+      text: 'OCR text from rendered PDF page',
+      metadata: { pageNumber: 1 },
+    });
   });
 
   function file(

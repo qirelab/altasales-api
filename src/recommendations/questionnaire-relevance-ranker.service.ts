@@ -37,6 +37,20 @@ type DefaultServiceRule = {
   reason: string;
 };
 
+type SelectedComponent =
+  | 'crm'
+  | 'telephony'
+  | 'messenger'
+  | 'voiceChatbot'
+  | 'contactDatabase'
+  | 'salesManager'
+  | 'trainingSystem'
+  | 'analytics'
+  | 'scripts'
+  | 'callAnalysis'
+  | 'salesDocuments'
+  | 'salesHead';
+
 type IdealRecommendationReference = {
   id: string;
   match: {
@@ -52,21 +66,6 @@ type IdealRecommendationReference = {
     reason: string;
   }>;
 };
-
-type SelectedComponent =
-  | 'crm'
-  | 'telephony'
-  | 'messenger'
-  | 'chatbot'
-  | 'voiceRobot'
-  | 'contactDatabase'
-  | 'salesManager'
-  | 'trainingSystem'
-  | 'analytics'
-  | 'scripts'
-  | 'callAnalysis'
-  | 'businessTrainer'
-  | 'salesHead';
 
 type NormalizedQuestionnaireProfile = {
   rawText: string;
@@ -139,22 +138,35 @@ const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   crm: ['CRM'],
   telephony: ['Телефония'],
   messenger: ['Мессенджер'],
-  chatbot: ['Чат-бот', 'Робот', 'Автоматизация'],
-  voiceRobot: ['Робот', 'Автоматизация'],
+  voiceChatbot: [
+    'Голосовой и чат бот',
+    'Чат-бот',
+    'Голосовой робот',
+    'Робот',
+    'Автоматизация',
+  ],
   contactDatabase: ['База контактов'],
   salesManager: ['Менеджер по продажам'],
   trainingSystem: ['Система обучения'],
   analytics: ['Аналитика'],
   scripts: ['Скрипты'],
   callAnalysis: ['Анализ звонков'],
-  businessTrainer: ['Бизнес тренер'],
+  salesDocuments: ['Документы ОП', 'Документы отдела продаж'],
   salesHead: ['РОП'],
 };
 
 const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
   crm: [
-    { terms: ['crm'], points: EXPLICIT_COMPONENT_POINTS, reason: 'CRM выбрана в анкете' },
-    { terms: ['технического задания'], points: 6, reason: 'CRM выбрана в анкете' },
+    {
+      terms: ['crm'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'CRM выбрана в анкете',
+    },
+    {
+      terms: ['технического задания'],
+      points: 6,
+      reason: 'CRM выбрана в анкете',
+    },
   ],
   telephony: [
     {
@@ -170,28 +182,16 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       reason: 'мессенджер выбран в анкете',
     },
   ],
-  chatbot: [
+  voiceChatbot: [
     {
       terms: ['робот'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'чат-бот/робот выбран в анкете',
+      reason: 'голосовой и чат бот выбран в анкете',
     },
     {
       terms: ['автоматизац'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'чат-бот/робот выбран в анкете',
-    },
-  ],
-  voiceRobot: [
-    {
-      terms: ['робот'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'голосовой робот выбран в анкете',
-    },
-    {
-      terms: ['автоматизац'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'голосовой робот выбран в анкете',
+      reason: 'голосовой и чат бот выбран в анкете',
     },
   ],
   contactDatabase: [
@@ -207,7 +207,11 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен менеджер по продажам',
     },
-    { terms: ['профиль вакансии'], points: 8, reason: 'нужно описать профиль кандидата' },
+    {
+      terms: ['профиль вакансии'],
+      points: 8,
+      reason: 'нужно описать профиль кандидата',
+    },
   ],
   trainingSystem: [
     {
@@ -215,8 +219,16 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'система обучения выбрана в анкете',
     },
-    { terms: ['тренинг'], points: 10, reason: 'нужно развивать навыки менеджеров' },
-    { terms: ['адаптации моп'], points: 8, reason: 'нужна адаптация менеджеров' },
+    {
+      terms: ['тренинг'],
+      points: 10,
+      reason: 'нужно развивать навыки менеджеров',
+    },
+    {
+      terms: ['адаптации моп'],
+      points: 8,
+      reason: 'нужна адаптация менеджеров',
+    },
   ],
   analytics: [
     {
@@ -245,15 +257,19 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       reason: 'нужно оценивать звонки',
     },
   ],
-  businessTrainer: [
+  salesDocuments: [
     {
-      terms: ['тренинг'],
+      terms: ['документ'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'бизнес-тренер выбран в анкете',
+      reason: 'документы ОП выбраны в анкете',
     },
   ],
   salesHead: [
-    { terms: ['роп-фокус'], points: EXPLICIT_COMPONENT_POINTS, reason: 'РОП выбран в анкете' },
+    {
+      terms: ['роп-фокус'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'РОП выбран в анкете',
+    },
     {
       terms: ['руководитель отдела продаж'],
       points: EXPLICIT_COMPONENT_POINTS,
@@ -288,7 +304,8 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
         referenceName: 'Пакет ОП с нуля',
         aliases: ['отдел продаж с нуля'],
         score: 130,
-        reason: 'золотой сценарий: новый B2B-продукт и исходящие продажи требуют запуска ОП',
+        reason:
+          'золотой сценарий: новый B2B-продукт и исходящие продажи требуют запуска ОП',
       },
       {
         referenceName: 'Сопровождение создания ОП с нуля РОП',
@@ -340,7 +357,8 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
         referenceName: 'Пакет CRM Старт',
         aliases: ['crm старт'],
         score: 130,
-        reason: 'золотой сценарий: входящие обращения нужно сразу фиксировать в CRM',
+        reason:
+          'золотой сценарий: входящие обращения нужно сразу фиксировать в CRM',
       },
       {
         referenceName: 'Пакет обучения на 3 месяца',
@@ -376,7 +394,8 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
         referenceName: 'Управление действующим ОП РОП',
         aliases: ['руководитель отдела продаж', 'роп на аутсорсинге'],
         score: 106,
-        reason: 'золотой сценарий: нужен управленческий контур для действующего ОП',
+        reason:
+          'золотой сценарий: нужен управленческий контур для действующего ОП',
       },
     ],
   },
@@ -435,7 +454,9 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     const defaultTargetIds = new Set(
-      [...idealItems, ...defaultItems].map((item) => this.getItemTargetId(item)),
+      [...idealItems, ...defaultItems].map((item) =>
+        this.getItemTargetId(item),
+      ),
     );
     const rankedCandidates: GeneratedRecommendationItem[] = [
       ...idealItems,
@@ -569,7 +590,9 @@ export class QuestionnaireRelevanceRankerService {
 
     if (
       match.componentsAny?.length &&
-      !match.componentsAny.some((component) => selectedComponents.has(component))
+      !match.componentsAny.some((component) =>
+        selectedComponents.has(component),
+      )
     ) {
       return false;
     }

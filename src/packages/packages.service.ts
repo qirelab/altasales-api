@@ -20,6 +20,8 @@ export interface AdminPackageListItem {
   tags: string[];
   packageType: string;
   price: number;
+  giftEligible: boolean;
+  image: string | null;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   services: { id: string; name: string }[];
@@ -62,6 +64,7 @@ export class PackagesService {
     const servicePackage = this.packageRepository.create({
       ...createPackageDto,
       tags: createPackageDto.tags ?? [],
+      image: createPackageDto.image ?? null,
       services,
     });
 
@@ -274,6 +277,8 @@ export class PackagesService {
       tags: pkg.tags ?? [],
       packageType: pkg.packageType,
       price: Number(pkg.price),
+      giftEligible: pkg.giftEligible,
+      image: pkg.image,
       categoryId: pkg.categoryId,
       category: pkg.category
         ? { id: pkg.category.id, name: pkg.category.name, slug: pkg.category.slug }

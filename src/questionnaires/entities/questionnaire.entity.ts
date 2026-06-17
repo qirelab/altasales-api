@@ -16,15 +16,14 @@ export interface QuestionnaireComponents {
   crm: boolean;
   telephony: boolean;
   messenger: boolean;
-  chatbot: boolean;
-  voiceRobot: boolean;
+  voiceChatbot: boolean;
   contactDatabase: boolean;
   salesManager: boolean;
   trainingSystem: boolean;
   analytics: boolean;
   scripts: boolean;
   callAnalysis: boolean;
-  businessTrainer: boolean;
+  salesDocuments: boolean;
   salesHead: boolean;
 }
 
@@ -45,6 +44,7 @@ export interface QuestionnaireAnswers {
   };
   productStage: 'new' | 'existing';
   components: QuestionnaireComponents;
+  componentsToAdd?: QuestionnaireComponents;
   targetRevenue: number;
   averageCheck: number;
   conversionRate?: number;

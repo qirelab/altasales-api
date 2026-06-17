@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class CreatePackageDto {
   @ApiProperty({ example: 'CRM Start Pack', description: 'Package name' })
@@ -28,6 +28,22 @@ export class CreatePackageDto {
   @IsNumber()
   @Min(0)
   price: number;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Можно ли оплачивать пакет подарочным балансом',
+  })
+  @IsOptional()
+  @IsBoolean()
+  giftEligible?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg',
+    description: 'Package image URL',
+  })
+  @IsOptional()
+  @IsString()
+  image?: string | null;
 
   @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',

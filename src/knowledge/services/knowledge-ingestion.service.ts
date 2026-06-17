@@ -14,7 +14,10 @@ import {
 } from '../vector-store/knowledge-vector-store.interface';
 import type { KnowledgeVectorStore } from '../vector-store/knowledge-vector-store.interface';
 import { KnowledgeChunkingService } from './knowledge-chunking.service';
-import { KnowledgeExtractionService } from './knowledge-extraction.service';
+import {
+  KnowledgeExtractionResult,
+  KnowledgeExtractionService,
+} from './knowledge-extraction.service';
 
 const DEFAULT_EMBEDDING_BATCH_SIZE = 32;
 
@@ -44,17 +47,43 @@ export class KnowledgeIngestionService {
     this.run(document, job, file).catch(() => undefined);
   }
 
+  runExtractedAsync(
+    document: KnowledgeDocument,
+    job: KnowledgeIndexJob,
+    extraction: KnowledgeExtractionResult,
+  ): void {
+    this.runExtracted(document, job, extraction).catch(() => undefined);
+  }
+
   async run(
     document: KnowledgeDocument,
     job: KnowledgeIndexJob,
     file: Express.Multer.File,
+  ): Promise<void> {
+    await this.runWithExtraction(document, job, () =>
+      this.extractionService.extract(file),
+    );
+  }
+
+  async runExtracted(
+    document: KnowledgeDocument,
+    job: KnowledgeIndexJob,
+    extraction: KnowledgeExtractionResult,
+  ): Promise<void> {
+    await this.runWithExtraction(document, job, async () => extraction);
+  }
+
+  private async runWithExtraction(
+    document: KnowledgeDocument,
+    job: KnowledgeIndexJob,
+    extract: () => Promise<KnowledgeExtractionResult>,
   ): Promise<void> {
     const startedAt = Date.now();
 
     try {
       job.startedAt = new Date();
       await this.setStage(document, job, KnowledgeIndexStage.EXTRACTING);
-      const extraction = await this.extractionService.extract(file);
+      const extraction = await extract();
 
       await this.setStage(document, job, KnowledgeIndexStage.CHUNKING);
       const preparedChunks = this.chunkingService.chunk(extraction.blocks);

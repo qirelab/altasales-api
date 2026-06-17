@@ -58,7 +58,28 @@ jobs:
           source .env
           set +a
           npm run build
-        continue-on-error: true
+
+      - name: Verify build artifacts
+        run: |
+          echo "=== dist tree (top level) ==="
+          ls -la dist/ || echo "dist/ does not exist!"
+          echo ""
+          echo "=== entity files in dist (sorted) ==="
+          find dist -name '*.entity.js' | sort
+          echo ""
+          echo "=== entity files count ==="
+          find dist -name '*.entity.js' | wc -l
+          echo ""
+          echo "=== critical files check ==="
+          test -f dist/main.js \
+            && echo "✓ dist/main.js EXISTS" \
+            || { echo "✗ dist/main.js MISSING"; exit 1; }
+          test -f dist/config/data-source.js \
+            && echo "✓ dist/config/data-source.js EXISTS" \
+            || { echo "✗ dist/config/data-source.js MISSING"; exit 1; }
+          test -f dist/knowledge/entities/knowledge-document.entity.js \
+            && echo "✓ dist/knowledge/entities/knowledge-document.entity.js EXISTS" \
+            || { echo "✗ dist/knowledge/entities/knowledge-document.entity.js MISSING"; exit 1; }
 
       - name: Prepare deployment archive
         run: |
@@ -95,6 +116,10 @@ jobs:
           ls -lh deploy/
           echo "Verifying .env in archive:"
           tar -tzf deploy/$ARCHIVE_NAME | grep "\.env"
+          echo "=== entity files inside archive ==="
+          tar -tzf deploy/$ARCHIVE_NAME | grep '\.entity\.js$' | sort
+          echo "=== entity files count inside archive ==="
+          tar -tzf deploy/$ARCHIVE_NAME | grep -c '\.entity\.js$' || true
 
       - name: Copy archive to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -157,6 +182,15 @@ jobs:
             ls -la .env
             echo "Content check:"
             head -n 3 .env
+
+            # Verify dist/ contents after extraction
+            echo "=== entity files on server ==="
+            find dist -name '*.entity.js' | sort
+            echo "=== entity files count on server ==="
+            find dist -name '*.entity.js' | wc -l
+            test -f dist/knowledge/entities/knowledge-document.entity.js \
+              && echo "✓ knowledge-document.entity.js EXISTS on server" \
+              || echo "✗ knowledge-document.entity.js MISSING on server"
 
             # Load environment variables
             echo "Loading environment variables from .env..."

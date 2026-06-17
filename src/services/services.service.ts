@@ -151,6 +151,7 @@ export class ServicesService {
       skills: string[];
       createdAt: Date;
       userId: string | null;
+      giftEligible: boolean;
       contractorRatePerHour: number | null;
       contractorExperienceYears: number | null;
       ordersCount: number;
@@ -197,6 +198,7 @@ export class ServicesService {
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s.skills', 'skills')
+      .addSelect('s."giftEligible"', 'giftEligible')
       .addSelect('s."createdAt"', 'createdAt')
       .addSelect('s."userId"', 'userId')
       .addSelect('COUNT(oi.id)', 'ordersCount')
@@ -217,6 +219,7 @@ export class ServicesService {
         skills: string[] | string;
         createdAt: Date;
         userId: string | null;
+        giftEligible: boolean;
         ordersCount: string;
       }>();
 
@@ -233,6 +236,7 @@ export class ServicesService {
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
+        giftEligible: row.giftEligible,
         contractorRatePerHour: null,
         contractorExperienceYears: null,
         ordersCount: Number(row.ordersCount),
@@ -327,11 +331,13 @@ export class ServicesService {
       throw new ConflictException('Для этого пользователя уже создан подрядчик');
     }
 
+    const expertCategoryId = await this.resolveExpertCategoryId();
+
     const contractor = this.serviceRepository.create({
       type: ServiceType.Contractor,
       name: dto.name,
       description: dto.description,
-      categoryId: null,
+      categoryId: expertCategoryId,
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
@@ -360,6 +366,7 @@ export class ServicesService {
       this.serviceRepository
         .createQueryBuilder('service')
         .leftJoinAndSelect('service.user', 'u')
+        .leftJoinAndSelect('service.category', 'category')
         .where('service.type = :type', { type: ServiceType.Contractor }),
     );
 
@@ -374,6 +381,7 @@ export class ServicesService {
             })
             .orWhere('u.email ILIKE :search', { search: `%${search}%` })
             .orWhere('u."phoneNumber" ILIKE :search', { search: `%${search}%` })
+            .orWhere('category.name ILIKE :search', { search: `%${search}%` })
             .orWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([search]) });
         }),
       );
@@ -577,6 +585,7 @@ export class ServicesService {
       price: number;
       image: string | null;
       skills: string[];
+      giftEligible: boolean;
       createdAt: Date;
     };
     stats: {
@@ -651,6 +660,7 @@ export class ServicesService {
         price: Number(service.price),
         image: service.image,
         skills: service.skills,
+        giftEligible: service.giftEligible,
         createdAt: service.createdAt,
       },
       stats: {
@@ -736,7 +746,7 @@ export class ServicesService {
   private async findOneContractorEntityForAdmin(id: string): Promise<Service> {
     const contractor = await this.serviceRepository.findOne({
       where: { id, type: ServiceType.Contractor, ...activeServiceWhere() },
-      relations: ['user'],
+      relations: ['user', 'category'],
     });
     if (!contractor) {
       throw new NotFoundException(`Подрядчик с ID ${id} не найден`);
@@ -749,6 +759,14 @@ export class ServicesService {
     if (!category) {
       throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
     }
+  }
+
+  private async resolveExpertCategoryId(): Promise<string> {
+    const category = await this.categoryRepository.findOne({ where: { name: 'Эксперты' } });
+    if (!category) {
+      throw new NotFoundException('Категория «Эксперты» не найдена');
+    }
+    return category.id;
   }
 
   private async getCategoryContentForFilter(categoryIds: string[]): Promise<{

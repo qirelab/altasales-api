@@ -3,6 +3,7 @@ import { extname } from 'path';
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
+import { KnowledgeOcrService } from './knowledge-ocr.service';
 
 export type KnowledgeExtractedTextBlock = {
   text: string;
@@ -23,9 +24,13 @@ const JSON_MIME = 'application/json';
 const PDF_MIME = 'application/pdf';
 const TEXT_MIME = 'text/plain';
 const CSV_MIME = 'text/csv';
+const PNG_MIME = 'image/png';
+const JPEG_MIME = 'image/jpeg';
 
 @Injectable()
 export class KnowledgeExtractionService {
+  constructor(private readonly ocrService: KnowledgeOcrService) {}
+
   async extract(file: Express.Multer.File): Promise<KnowledgeExtractionResult> {
     const extension = extname(file.originalname).toLowerCase();
     const blocks = await this.extractBlocks(file, extension);
@@ -56,7 +61,7 @@ export class KnowledgeExtractionService {
     }
 
     if (file.mimetype === PDF_MIME || extension === '.pdf') {
-      return [{ text: await this.extractPdf(file.buffer) }];
+      return this.extractPdfBlocks(file.buffer);
     }
 
     if (file.mimetype === DOCX_MIME || extension === '.docx') {
@@ -71,6 +76,14 @@ export class KnowledgeExtractionService {
       throw new BadRequestException(
         'PPTX extraction is not supported in this release',
       );
+    }
+
+    if (this.isOcrImage(file.mimetype, extension)) {
+      const result = await this.ocrService.recognizeImage(file.buffer, {
+        extension,
+        mimeType: file.mimetype,
+      });
+      return result.blocks;
     }
 
     throw new BadRequestException('Unsupported knowledge document type');
@@ -104,6 +117,18 @@ export class KnowledgeExtractionService {
     } finally {
       await parser.destroy();
     }
+  }
+
+  private async extractPdfBlocks(
+    buffer: Buffer,
+  ): Promise<KnowledgeExtractedTextBlock[]> {
+    const text = await this.extractPdf(buffer);
+    if (this.ocrService.shouldFallbackToOcr(text)) {
+      const result = await this.ocrService.recognizePdf(buffer);
+      return result.blocks;
+    }
+
+    return [{ text }];
   }
 
   private async extractDocx(buffer: Buffer): Promise<string> {
@@ -184,5 +209,12 @@ export class KnowledgeExtractionService {
 
   private normalizeText(text: string): string {
     return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  }
+
+  private isOcrImage(mimeType: string, extension: string): boolean {
+    return (
+      (mimeType === PNG_MIME && extension === '.png') ||
+      (mimeType === JPEG_MIME && ['.jpg', '.jpeg'].includes(extension))
+    );
   }
 }
