@@ -304,7 +304,7 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
       },
       {
         referenceName: 'ИИ анализ дашборда',
-        aliases: ['дашборд оп', 'ии роп'],
+        aliases: ['ии анализ дашборда', 'анализ дашборда', 'дашборд оп'],
         score: 118,
         reason: 'золотой сценарий: нужна управленческая аналитика отдела',
       },
@@ -316,7 +316,12 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
       },
       {
         referenceName: 'ИИ анализ CRM',
-        aliases: ['аудит crm', 'отчет по ведению сделок в crm', 'ии роп'],
+        aliases: [
+          'ии анализ crm',
+          'анализ crm',
+          'аудит crm',
+          'отчет по ведению сделок в crm',
+        ],
         score: 110,
         reason: 'золотой сценарий: нужен анализ качества CRM-процесса',
       },
@@ -350,7 +355,7 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
       },
       {
         referenceName: 'ИИ анализ дашборда',
-        aliases: ['дашборд оп', 'ии роп'],
+        aliases: ['ии анализ дашборда', 'анализ дашборда', 'дашборд оп'],
         score: 122,
         reason: 'золотой сценарий: нужна аналитика текущего отдела',
       },
@@ -362,13 +367,24 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
       },
       {
         referenceName: 'ИИ анализ CRM',
-        aliases: ['ии роп', 'на контроле'],
+        aliases: [
+          'ии анализ crm',
+          'анализ crm',
+          'аудит crm',
+          'отчет по ведению сделок в crm',
+          'на контроле',
+        ],
         score: 114,
         reason: 'золотой сценарий: нужен анализ CRM и коммуникаций',
       },
       {
         referenceName: 'ИИ анализ документов',
-        aliases: ['документ под запрос', 'пакет документов отдела продаж'],
+        aliases: [
+          'ии анализ документов',
+          'анализ документов',
+          'документ под запрос',
+          'пакет документов отдела продаж',
+        ],
         score: 110,
         reason: 'золотой сценарий: нужно проверить документы и регламенты',
       },

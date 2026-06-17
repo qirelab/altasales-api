@@ -378,6 +378,78 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('does not treat an incomplete hiring bundle as turnkey hiring coverage', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'turnkey-hiring-service-id',
+        name: 'Подбор под ключ',
+        description: 'Полный цикл найма менеджера по продажам',
+        type: ServiceType.Service,
+        price: 90000,
+        skills: ['подбор'],
+        category: { name: 'HR' },
+        deletedAt: null,
+      },
+    ]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'partial-hiring-package-id',
+        name: 'РОП-Фокус',
+        description: 'Профиль вакансии, портрет соискателя и скрининг',
+        packageType: 'hr',
+        price: 120000,
+        tags: ['профиль вакансии', 'портрет соискателя', 'скрининг'],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'profile-service-id',
+            name: 'Профиль вакансии',
+            description: '',
+            deletedAt: null,
+            skills: [],
+            category: { name: 'HR' },
+          },
+          {
+            id: 'portrait-service-id',
+            name: 'Портрет соискателя',
+            description: '',
+            deletedAt: null,
+            skills: [],
+            category: { name: 'HR' },
+          },
+          {
+            id: 'screening-service-id',
+            name: 'Скрининг',
+            description: '',
+            deletedAt: null,
+            skills: [],
+            category: { name: 'HR' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    const packageCandidate = candidates.find(
+      (item) => item.packageId === 'partial-hiring-package-id',
+    );
+    expect(packageCandidate.coveredServiceIds).not.toContain(
+      'turnkey-hiring-service-id',
+    );
+  });
+
   it('skips empty placeholder legacy package-category services', async () => {
     const { service, serviceRepository, relevanceRanker } = createService();
     const qb = createQueryBuilder();
