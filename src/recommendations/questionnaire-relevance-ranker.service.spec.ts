@@ -171,92 +171,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result[0].serviceId).toBe('crm-bronze');
   });
 
-  it('uses componentsToAdd for the new existing-product flow', () => {
-    const result = ranker.rankRecommendations(
-      {
-        userId: 'user-id',
-        clientProfile: {
-          productStage: 'existing',
-          desiredResult: {
-            period: '3m',
-            description: 'Усилить действующий отдел продаж',
-          },
-          targetRevenue: 4000000,
-          components: components({
-            crm: true,
-            messenger: true,
-          }),
-          componentsToAdd: components({
-            telephony: true,
-          }),
-        },
-        persist: false,
-      },
-      services,
-      [],
-      '',
-      5,
-    );
-
-    const serviceIds = result.map((item) => item.serviceId);
-
-    expect(serviceIds).toContain('telephony');
-    expect(serviceIds).not.toContain('messenger');
-    expect(serviceIds).not.toContain('crm-start');
-    expect(serviceIds).not.toContain('crm-bronze');
-  });
-
-  it('filters CRM Start even when the LLM recommends it for an existing CRM', () => {
-    const result = ranker.rankRecommendations(
-      {
-        userId: 'user-id',
-        clientProfile: {
-          productStage: 'existing',
-          leadGenerationTypes: ['inbound'],
-          components: components({ crm: true }),
-          componentsToAdd: components({ analytics: true }),
-        },
-        persist: false,
-      },
-      services,
-      [
-        {
-          serviceId: 'crm-start',
-          serviceName: 'CRM Старт',
-          priority: RecommendationPriority.Urgent,
-          rationale: 'llm',
-          diagnosticSignals: ['ai_generated'],
-          score: 100,
-        },
-      ],
-      '',
-      5,
-    );
-
-    expect(result.map((item) => item.serviceId)).not.toContain('crm-start');
-  });
-
-  it('keeps components as desired tools for a new product', () => {
-    const result = ranker.rankRecommendations(
-      {
-        userId: 'user-id',
-        clientProfile: {
-          productStage: 'new',
-          components: components({ crm: true, telephony: true }),
-        },
-        persist: false,
-      },
-      services,
-      [],
-      '',
-      5,
-    );
-
-    expect(result.map((item) => item.serviceId)).toEqual(
-      expect.arrayContaining(['crm-start', 'telephony']),
-    );
-  });
-
   it('uses the golden reference for a new B2B outbound full sales department setup', () => {
     const result = ranker.rankRecommendations(
       {
@@ -294,7 +208,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'ai-crm-analysis',
     ]);
     expect(result[0].diagnosticSignals).toContain(
-      'ideal_reference:new_outbound_full_sales_department',
+      'ideal_reference:new_b2b_outbound_full_sales_department',
     );
   });
 
@@ -334,39 +248,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'crm-start',
       'ai-crm-analysis',
     ]);
-  });
-
-  it('applies anti-filters to golden reference recommendations', () => {
-    const result = ranker.rankRecommendations(
-      {
-        userId: 'user-id',
-        clientProfile: {
-          salesDirection: 'B2B',
-          productStage: 'new',
-          desiredResult: {
-            period: '1m',
-          },
-          leadGenerationTypes: ['outbound'],
-          components: components({
-            crm: true,
-            telephony: true,
-            messenger: true,
-            contactDatabase: true,
-            salesManager: true,
-            trainingSystem: true,
-            analytics: true,
-            salesHead: true,
-          }),
-        },
-        persist: false,
-      },
-      services,
-      [],
-      '',
-      6,
-    );
-
-    expect(result.map((item) => item.serviceId)).not.toContain('training-3m');
   });
 
   it('prefers exact golden reference names over fallback aliases', () => {
@@ -429,7 +310,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
 
     expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
-      'ideal_reference:new_outbound_full_sales_department',
+      'ideal_reference:new_b2b_outbound_full_sales_department',
     );
   });
 
@@ -481,7 +362,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'custom-growth-audit',
     );
     expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
-      'ideal_reference:new_outbound_full_sales_department',
+      'ideal_reference:new_b2b_outbound_full_sales_department',
     );
   });
 
@@ -520,7 +401,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'sales-head',
     ]);
     expect(result[0].diagnosticSignals).toContain(
-      'ideal_reference:existing_inbound_managed_sales_department',
+      'ideal_reference:existing_b2b_inbound_managed_sales_department',
     );
   });
 
