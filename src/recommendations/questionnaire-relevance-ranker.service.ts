@@ -118,7 +118,7 @@ const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
 ];
 
 const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
-  crm: 2,
+  crm: 3,
   communications: 2,
   documents: 1,
   hiring: 1,
@@ -261,7 +261,7 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
     },
     {
       terms: ['ии роп'],
-      points: EXPLICIT_COMPONENT_POINTS,
+      points: 24,
       reason: 'нужно управлять отделом по данным',
     },
   ],
@@ -433,10 +433,6 @@ export class QuestionnaireRelevanceRankerService {
         context,
         maxItems,
       );
-
-      if (idealItems.length >= maxItems) {
-        return idealItems.slice(0, maxItems);
-      }
     } else if (stage === 'new_department') {
       defaultItems = this.buildNewDepartmentDefaultRecommendations(
         services,
@@ -609,7 +605,7 @@ export class QuestionnaireRelevanceRankerService {
     for (const recommendation of reference.recommendations) {
       const service = this.findCandidateByAliases(
         services,
-        recommendation.aliases,
+        this.getRecommendationAliases(recommendation),
         usedTargetIds,
       );
       if (!service) continue;
@@ -645,6 +641,21 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return selected;
+  }
+
+  private getRecommendationAliases(
+    recommendation: IdealRecommendationReference['recommendations'][number],
+  ): string[] {
+    return this.uniqueStrings([
+      recommendation.referenceName,
+      ...recommendation.aliases,
+    ]);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter(Boolean)),
+    );
   }
 
   private findCandidateByAliases(

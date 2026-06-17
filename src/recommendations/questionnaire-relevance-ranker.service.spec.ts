@@ -213,6 +213,122 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
+  it('prefers exact golden reference names over fallback aliases', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      [service('exact-from-zero', 'Пакет ОП с нуля'), ...services],
+      [],
+      '',
+      6,
+    );
+
+    expect(result[0].serviceId).toBe('exact-from-zero');
+  });
+
+  it('applies the golden reference to similar non-B2B questionnaires', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2C',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      6,
+    );
+
+    expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
+      'ideal_reference:new_b2b_outbound_full_sales_department',
+    );
+  });
+
+  it('lets LLM-ranked catalog candidates compete with golden references', () => {
+    const customCandidate = service(
+      'custom-growth-audit',
+      'Индивидуальный аудит роста продаж',
+    );
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          desiredResult: {
+            description: 'Дополнительно нужен аудит роста продаж',
+          },
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      [...services, customCandidate],
+      [
+        {
+          serviceId: 'custom-growth-audit',
+          serviceName: 'Индивидуальный аудит роста продаж',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'LLM found a custom fit from questionnaire text',
+          diagnosticSignals: ['ai_generated', 'custom_growth_fit'],
+          score: 125,
+        },
+      ],
+      '',
+      10,
+    );
+
+    expect(result.map((item) => item.serviceId)).toContain(
+      'custom-growth-audit',
+    );
+    expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
+      'ideal_reference:new_b2b_outbound_full_sales_department',
+    );
+  });
+
   it('uses the golden reference for an existing B2B inbound managed sales department', () => {
     const result = ranker.rankRecommendations(
       {

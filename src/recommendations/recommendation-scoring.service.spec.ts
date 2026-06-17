@@ -117,7 +117,7 @@ describe('RecommendationScoringService', () => {
     } as any;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"semantic-service-id","priority":"medium","rationale":"Подходит, потому что закрывает описанный клиентом сценарий.","diagnosticSignals":["custom_fit"]}]}',
+        '{"recommendations":[{"serviceId":"semantic-service-id","priority":"medium","rationale":"Подходит, потому что нужна внедренческая настройка под клиента.","diagnosticSignals":["custom_fit"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -134,6 +134,32 @@ describe('RecommendationScoringService', () => {
       score: 6,
       diagnosticSignals: ['ai_generated', 'ai_semantic_match', 'custom_fit'],
     });
+  });
+
+  it('rejects AI-only semantic recommendations without service-specific evidence', async () => {
+    const candidate = {
+      id: 'unrelated-service-id',
+      name: 'Юридический документ',
+      description: 'Договор и правовая проверка',
+      type: ServiceType.Document,
+      skills: ['legal'],
+      category: null,
+    } as any;
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"unrelated-service-id","priority":"medium","rationale":"Подходит, потому что закрывает описанный клиентом сценарий.","diagnosticSignals":["custom_fit"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['client needs CRM implementation'],
+      },
+      [candidate],
+      'client needs CRM implementation',
+    );
+
+    expect(result).toEqual([]);
   });
 
   it('resolves AI recommendation output to packageId for package candidates', async () => {
