@@ -171,6 +171,92 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result[0].serviceId).toBe('crm-bronze');
   });
 
+  it('uses componentsToAdd for the new existing-product flow', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: {
+            period: '3m',
+            description: 'Усилить действующий отдел продаж',
+          },
+          targetRevenue: 4000000,
+          components: components({
+            crm: true,
+            messenger: true,
+          }),
+          componentsToAdd: components({
+            telephony: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    const serviceIds = result.map((item) => item.serviceId);
+
+    expect(serviceIds).toContain('telephony');
+    expect(serviceIds).not.toContain('messenger');
+    expect(serviceIds).not.toContain('crm-start');
+    expect(serviceIds).not.toContain('crm-bronze');
+  });
+
+  it('filters CRM Start even when the LLM recommends it for an existing CRM', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          leadGenerationTypes: ['inbound'],
+          components: components({ crm: true }),
+          componentsToAdd: components({ analytics: true }),
+        },
+        persist: false,
+      },
+      services,
+      [
+        {
+          serviceId: 'crm-start',
+          serviceName: 'CRM Старт',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+      ],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('crm-start');
+  });
+
+  it('keeps components as desired tools for a new product', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'new',
+          components: components({ crm: true, telephony: true }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(
+      expect.arrayContaining(['crm-start', 'telephony']),
+    );
+  });
+
   it('uses the golden reference for a new B2B outbound full sales department setup', () => {
     const result = ranker.rankRecommendations(
       {
