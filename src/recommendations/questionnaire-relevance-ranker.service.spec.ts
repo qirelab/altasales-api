@@ -46,6 +46,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('ai-rop', 'ИИ РОП'),
     service('quality', 'На Контроле + Рубичат'),
     service('sales-head', 'Руководитель отдела продаж'),
+    service('document-request', 'Документ под запрос'),
     service('financial-director', 'Финансовый директор'),
   ];
 
@@ -168,6 +169,86 @@ describe('QuestionnaireRelevanceRankerService', () => {
       expect.arrayContaining(['crm-bronze', 'telephony', 'messenger']),
     );
     expect(result[0].serviceId).toBe('crm-bronze');
+  });
+
+  it('uses the golden reference for a new B2B outbound full sales department setup', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      6,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'from-zero',
+      'sales-head',
+      'training-3m',
+      'dashboard',
+      'crm-start',
+      'crm-audit',
+    ]);
+    expect(result[0].diagnosticSignals).toContain(
+      'ideal_reference:new_b2b_outbound_full_sales_department',
+    );
+  });
+
+  it('uses the golden reference for an existing B2B inbound managed sales department', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Бухгалтерские услуги',
+          productStage: 'existing',
+          leadGenerationTypes: ['inbound'],
+          components: components({
+            telephony: true,
+            messenger: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      7,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'crm-start',
+      'training-3m',
+      'dashboard',
+      'crm-audit',
+      'ai-rop',
+      'document-request',
+      'sales-head',
+    ]);
+    expect(result[0].diagnosticSignals).toContain(
+      'ideal_reference:existing_b2b_inbound_managed_sales_department',
+    );
   });
 
   it('boosts automation when canonical questionnaire asks for a voice robot', () => {

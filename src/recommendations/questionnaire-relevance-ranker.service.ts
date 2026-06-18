@@ -37,6 +37,22 @@ type DefaultServiceRule = {
   reason: string;
 };
 
+type IdealRecommendationReference = {
+  id: string;
+  match: {
+    productStageAny?: string[];
+    leadTypeAny?: string[];
+    componentsAll?: SelectedComponent[];
+    componentsAny?: SelectedComponent[];
+  };
+  recommendations: Array<{
+    referenceName: string;
+    aliases: string[];
+    score: number;
+    reason: string;
+  }>;
+};
+
 type SelectedComponent =
   | 'crm'
   | 'telephony'
@@ -251,6 +267,121 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
   ],
 };
 
+const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
+  {
+    id: 'new_b2b_outbound_full_sales_department',
+    match: {
+      productStageAny: ['новый', 'new'],
+      leadTypeAny: ['исход', 'outbound'],
+      componentsAll: [
+        'crm',
+        'telephony',
+        'messenger',
+        'trainingSystem',
+        'analytics',
+        'salesHead',
+      ],
+      componentsAny: ['salesManager', 'contactDatabase'],
+    },
+    recommendations: [
+      {
+        referenceName: 'Пакет ОП с нуля',
+        aliases: ['отдел продаж с нуля'],
+        score: 130,
+        reason: 'золотой сценарий: новый B2B-продукт и исходящие продажи требуют запуска ОП',
+      },
+      {
+        referenceName: 'Сопровождение создания ОП с нуля РОП',
+        aliases: ['руководитель отдела продаж', 'роп на аутсорсинге'],
+        score: 126,
+        reason: 'золотой сценарий: нужен РОП-контур для создания отдела',
+      },
+      {
+        referenceName: 'Пакет обучения на 3 месяца',
+        aliases: ['пакет обучения на 3 месяца'],
+        score: 122,
+        reason: 'золотой сценарий: нужна системная подготовка команды',
+      },
+      {
+        referenceName: 'ИИ анализ дашборда',
+        aliases: ['дашборд оп', 'ии роп'],
+        score: 118,
+        reason: 'золотой сценарий: нужна управленческая аналитика отдела',
+      },
+      {
+        referenceName: 'Интеграция с CRM',
+        aliases: ['crm старт', 'базовая настройка работы отдела продаж'],
+        score: 114,
+        reason: 'золотой сценарий: нужен CRM-контур для фиксации продаж',
+      },
+      {
+        referenceName: 'ИИ анализ CRM',
+        aliases: ['аудит crm', 'отчет по ведению сделок в crm', 'ии роп'],
+        score: 110,
+        reason: 'золотой сценарий: нужен анализ качества CRM-процесса',
+      },
+    ],
+  },
+  {
+    id: 'existing_b2b_inbound_managed_sales_department',
+    match: {
+      productStageAny: ['уже продаю', 'existing'],
+      leadTypeAny: ['вход', 'inbound'],
+      componentsAll: [
+        'telephony',
+        'messenger',
+        'trainingSystem',
+        'analytics',
+        'salesHead',
+      ],
+    },
+    recommendations: [
+      {
+        referenceName: 'Пакет CRM Старт',
+        aliases: ['crm старт'],
+        score: 130,
+        reason: 'золотой сценарий: входящие обращения нужно сразу фиксировать в CRM',
+      },
+      {
+        referenceName: 'Пакет обучения на 3 месяца',
+        aliases: ['пакет обучения на 3 месяца'],
+        score: 126,
+        reason: 'золотой сценарий: нужна системная подготовка менеджеров',
+      },
+      {
+        referenceName: 'ИИ анализ дашборда',
+        aliases: ['дашборд оп', 'ии роп'],
+        score: 122,
+        reason: 'золотой сценарий: нужна аналитика текущего отдела',
+      },
+      {
+        referenceName: 'Интеграция с CRM',
+        aliases: ['аудит crm', 'отчет по ведению сделок в crm'],
+        score: 118,
+        reason: 'золотой сценарий: нужно проверить и связать CRM-процесс',
+      },
+      {
+        referenceName: 'ИИ анализ CRM',
+        aliases: ['ии роп', 'на контроле'],
+        score: 114,
+        reason: 'золотой сценарий: нужен анализ CRM и коммуникаций',
+      },
+      {
+        referenceName: 'ИИ анализ документов',
+        aliases: ['документ под запрос', 'пакет документов отдела продаж'],
+        score: 110,
+        reason: 'золотой сценарий: нужно проверить документы и регламенты',
+      },
+      {
+        referenceName: 'Управление действующим ОП РОП',
+        aliases: ['руководитель отдела продаж', 'роп на аутсорсинге'],
+        score: 106,
+        reason: 'золотой сценарий: нужен управленческий контур для действующего ОП',
+      },
+    ],
+  },
+];
+
 @Injectable()
 export class QuestionnaireRelevanceRankerService {
   constructor(private readonly scoringService: RecommendationScoringService) {}
@@ -268,6 +399,7 @@ export class QuestionnaireRelevanceRankerService {
     const stage = this.detectStage(normalizedProfile);
     const rules = this.buildRules(normalizedProfile, stage);
     const desiredText = normalizedProfile.desiredText;
+    const idealReference = this.findIdealReference(normalizedProfile);
     const rankedById = new Map(
       ranked.map((item, index) => [
         this.getItemTargetId(item),
@@ -275,8 +407,21 @@ export class QuestionnaireRelevanceRankerService {
       ]),
     );
     let defaultItems: GeneratedRecommendationItem[] = [];
+    let idealItems: GeneratedRecommendationItem[] = [];
 
-    if (stage === 'new_department') {
+    if (idealReference) {
+      idealItems = this.buildIdealReferenceRecommendations(
+        idealReference,
+        services,
+        rankedById,
+        context,
+        maxItems,
+      );
+
+      if (idealItems.length >= maxItems) {
+        return idealItems.slice(0, maxItems);
+      }
+    } else if (stage === 'new_department') {
       defaultItems = this.buildNewDepartmentDefaultRecommendations(
         services,
         rankedById,
@@ -290,9 +435,12 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     const defaultTargetIds = new Set(
-      defaultItems.map((item) => this.getItemTargetId(item)),
+      [...idealItems, ...defaultItems].map((item) => this.getItemTargetId(item)),
     );
-    const rankedCandidates: GeneratedRecommendationItem[] = [...defaultItems];
+    const rankedCandidates: GeneratedRecommendationItem[] = [
+      ...idealItems,
+      ...defaultItems,
+    ];
 
     for (const service of services) {
       const targetId = this.getCandidateTargetId(service);
@@ -373,6 +521,143 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return 'basic_department';
+  }
+
+  private findIdealReference(
+    profile: NormalizedQuestionnaireProfile,
+  ): IdealRecommendationReference | null {
+    return (
+      IDEAL_RECOMMENDATION_REFERENCES.find((reference) =>
+        this.matchesIdealReference(profile, reference),
+      ) ?? null
+    );
+  }
+
+  private matchesIdealReference(
+    profile: NormalizedQuestionnaireProfile,
+    reference: IdealRecommendationReference,
+  ): boolean {
+    const { match } = reference;
+    const selectedComponents = new Set(profile.selectedComponents);
+
+    if (
+      match.productStageAny?.length &&
+      !match.productStageAny.some((term) =>
+        profile.productStageText.includes(this.normalize(term)),
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      match.leadTypeAny?.length &&
+      !match.leadTypeAny.some((term) =>
+        profile.leadTypeText.includes(this.normalize(term)),
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      match.componentsAll?.length &&
+      !match.componentsAll.every((component) =>
+        selectedComponents.has(component),
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      match.componentsAny?.length &&
+      !match.componentsAny.some((component) => selectedComponents.has(component))
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private buildIdealReferenceRecommendations(
+    reference: IdealRecommendationReference,
+    services: ServiceCandidate[],
+    rankedById: Map<
+      string,
+      { item: GeneratedRecommendationItem; index: number }
+    >,
+    context: string,
+    limit: number,
+  ): GeneratedRecommendationItem[] {
+    const selected: GeneratedRecommendationItem[] = [];
+    const usedTargetIds = new Set<string>();
+
+    for (const recommendation of reference.recommendations) {
+      const service = this.findCandidateByAliases(
+        services,
+        recommendation.aliases,
+        usedTargetIds,
+      );
+      if (!service) continue;
+
+      const targetId = this.getCandidateTargetId(service);
+      usedTargetIds.add(targetId);
+      const base =
+        rankedById.get(targetId)?.item ??
+        this.scoringService.scoreService(service, context);
+      const score = Math.max(Number(base.score || 0), recommendation.score);
+
+      selected.push({
+        ...base,
+        serviceId: base.serviceId,
+        packageId: base.packageId,
+        serviceName: service.name,
+        priority: this.resolveBoostedPriority(score, base.priority),
+        rationale: this.buildRationale(service.name, [
+          recommendation.reason,
+          `референс: ${recommendation.referenceName}`,
+        ]),
+        diagnosticSignals: this.scoringService.normalizeSignals([
+          ...(base.diagnosticSignals ?? []),
+          `ideal_reference:${reference.id}`,
+          recommendation.referenceName,
+          recommendation.reason,
+        ]),
+        score,
+        coveredServiceIds: base.coveredServiceIds,
+      });
+
+      if (selected.length >= limit) break;
+    }
+
+    return selected;
+  }
+
+  private findCandidateByAliases(
+    services: ServiceCandidate[],
+    aliases: string[],
+    usedTargetIds: Set<string>,
+  ): ServiceCandidate | null {
+    for (const alias of aliases) {
+      const normalizedAlias = this.normalize(alias);
+      const exactMatch = services.find((service) => {
+        const targetId = this.getCandidateTargetId(service);
+        return (
+          !usedTargetIds.has(targetId) &&
+          this.normalize(service.name) === normalizedAlias
+        );
+      });
+      if (exactMatch) return exactMatch;
+
+      const textMatch = services.find((service) => {
+        const targetId = this.getCandidateTargetId(service);
+        return (
+          !usedTargetIds.has(targetId) &&
+          this.normalizeCandidateText(service).includes(normalizedAlias)
+        );
+      });
+      if (textMatch) return textMatch;
+    }
+
+    return null;
   }
 
   private buildRules(

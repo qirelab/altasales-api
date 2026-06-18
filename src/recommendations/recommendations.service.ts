@@ -31,7 +31,6 @@ import {
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
 import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
-import { RecommendationSource } from './entities/recommendation-source.enum';
 import {
   RecommendationScoringService,
   type GeneratedRecommendationItem,
@@ -44,6 +43,66 @@ import {
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
 const MIN_RECOMMENDATION_RANKING_SCORE = 5;
+
+type LogicalCoverageRule = {
+  key: string;
+  variants?: string[];
+  terms?: string[];
+  minTerms?: number;
+};
+
+const LOGICAL_COVERAGE_RULES: LogicalCoverageRule[] = [
+  {
+    key: 'vacancy_profile',
+    variants: ['профиль вакансии'],
+  },
+  {
+    key: 'candidate_portrait',
+    variants: ['портрет соискателя', 'портрет кандидата'],
+  },
+  {
+    key: 'candidate_screening',
+    variants: ['скрининг', 'скрининг резюме'],
+  },
+  {
+    key: 'candidate_interview',
+    variants: ['интервью', 'собеседование'],
+  },
+  {
+    key: 'turnkey_hiring',
+    variants: ['подбор под ключ'],
+    terms: ['профиль вакансии', 'портрет', 'скрининг', 'интервью'],
+    minTerms: 3,
+  },
+  {
+    key: 'crm_technical_spec',
+    variants: [
+      'подготовка тз',
+      'подготовка технического задания',
+      'техническое задание',
+    ],
+  },
+  {
+    key: 'sales_department_documents',
+    variants: ['пакет документов отдела продаж', 'документы отдела продаж'],
+    terms: ['документы', 'отдел продаж'],
+  },
+  {
+    key: 'crm_telephony_integration',
+    variants: ['интеграция телефонии'],
+    terms: ['интеграция', 'телефони'],
+  },
+  {
+    key: 'crm_messenger_integration',
+    variants: ['интеграция мессенджера'],
+    terms: ['интеграция', 'мессенджер'],
+  },
+  {
+    key: 'crm_mail_integration',
+    variants: ['почтовый сервис', 'интеграция почты'],
+    terms: ['интеграция', 'почт'],
+  },
+];
 
 export type PackageInnerServiceItem = {
   id: string;
@@ -92,16 +151,12 @@ export type AdminRecommendationListItem = {
   id: string;
   serviceId: string | null;
   packageId: string | null;
-  name: string;
   category: string;
   status: RecommendationStatus;
-  source: RecommendationSource;
   priority: RecommendationPriority;
   price: number;
   rationale: string | null;
   dependencyIds: string[];
-  diagnosticSignals: string[];
-  createdAt: Date;
 };
 
 interface ExistingRecommendationCoverage {
@@ -276,38 +331,19 @@ export class RecommendationsService implements OnModuleInit {
     return result;
   }
 
-  async findAssignedToUserForAdmin(userId: string): Promise<AdminRecommendationListItem[]> {
-    const rows = await this.recommendationRepository
+  async findAssignedToUserForAdmin(userId: string): Promise<Recommendation[]> {
+    return this.recommendationRepository
       .createQueryBuilder('recommendation')
-      .leftJoin('recommendation.service', 'service')
-      .leftJoin('service.category', 'serviceCategory')
-      .leftJoin('recommendation.package', 'package')
-      .leftJoin('package.category', 'packageCategory')
-      .select('recommendation.id', 'id')
-      .addSelect('recommendation."serviceId"', 'serviceId')
-      .addSelect('recommendation."packageId"', 'packageId')
-      .addSelect('COALESCE(service.name, package.name)', 'name')
-      .addSelect("COALESCE(serviceCategory.name, packageCategory.name, '')", 'category')
-      .addSelect('COALESCE(service.price, package.price)', 'price')
-      .addSelect('recommendation.status', 'status')
-      .addSelect('recommendation.source', 'source')
-      .addSelect('recommendation.priority', 'priority')
-      .addSelect('recommendation.rationale', 'rationale')
-      .addSelect('recommendation."dependencyIds"', 'dependencyIds')
-      .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
-      .addSelect('recommendation."createdAt"', 'createdAt')
+      .leftJoinAndSelect('recommendation.service', 'service')
+      .leftJoinAndSelect('service.category', 'serviceCategory')
+      .leftJoinAndSelect('recommendation.package', 'package')
+      .leftJoinAndSelect('package.category', 'packageCategory')
+      .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
-      .getRawMany<AdminRecommendationListItem>();
-
-    return rows.map((row) => ({
-      ...row,
-      price: Number(row.price),
-      dependencyIds: row.dependencyIds ?? [],
-      diagnosticSignals: row.diagnosticSignals ?? [],
-    }));
+      .getMany();
   }
 
   // ── Admin CRUD (merged from develop) ──────────────────────────────
@@ -346,7 +382,6 @@ export class RecommendationsService implements OnModuleInit {
         dto.diagnosticSignals ?? [],
       ),
       generatedAt: null,
-      source: RecommendationSource.Manual,
       orderId: null,
     });
 
@@ -624,6 +659,11 @@ export class RecommendationsService implements OnModuleInit {
         const activeServices = filterActiveServices(servicePackage.services);
         if (activeServices.length === 0) return null;
         if (this.isPlaceholderPackageCandidate(servicePackage)) return null;
+        const coverageIds = this.getPackageCoverageIds(
+          servicePackage,
+          activeServices,
+          services,
+        );
 
         return {
           id: servicePackage.id,
@@ -660,7 +700,7 @@ export class RecommendationsService implements OnModuleInit {
           packages: [],
           createdAt: servicePackage.createdAt,
           deletedAt: servicePackage.deletedAt,
-          coveredServiceIds: activeServices.map((service) => service.id),
+          coveredServiceIds: coverageIds,
         } as unknown as ServiceCandidate;
       })
       .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
@@ -674,7 +714,10 @@ export class RecommendationsService implements OnModuleInit {
         ...service,
         serviceId: service.id,
         packageId: null,
-        coveredServiceIds: [service.id],
+        coveredServiceIds: this.uniqueIds([
+          service.id,
+          ...this.getServiceCoverageKeys(service),
+        ]),
       })) as ServiceCandidate[];
 
     return [...packageCandidates, ...serviceCandidates];
@@ -689,11 +732,132 @@ export class RecommendationsService implements OnModuleInit {
     const serviceName = this.normalizeCatalogName(service.name);
     return packageCandidates.some((candidate) => {
       const candidateName = this.normalizeCatalogName(candidate.name);
+      const serviceCoverageKeys = this.getServiceCoverageKeys(service);
       return (
         candidateName === serviceName ||
-        Boolean(candidate.coveredServiceIds?.includes(service.id))
+        Boolean(candidate.coveredServiceIds?.includes(service.id)) ||
+        serviceCoverageKeys.some((coverageKey) =>
+          candidate.coveredServiceIds?.includes(coverageKey),
+        )
       );
     });
+  }
+
+  private getPackageCoverageIds(
+    servicePackage: ServicePackage,
+    activeServices: Service[],
+    services: Service[],
+  ): string[] {
+    const coverageIds = new Set<string>();
+
+    activeServices.forEach((service) => {
+      coverageIds.add(service.id);
+      this.getServiceCoverageKeys(service).forEach((key) =>
+        coverageIds.add(key),
+      );
+    });
+
+    this.getPackageCoverageKeys(servicePackage, activeServices).forEach((key) =>
+      coverageIds.add(key),
+    );
+
+    const packageCoverageKeys = new Set(coverageIds);
+    services.forEach((service) => {
+      if (!this.hasRecommendableServiceContent(service)) return;
+      if (service.deletedAt) return;
+
+      const serviceCoverageKeys = this.getServiceCoverageKeys(service);
+      if (serviceCoverageKeys.some((key) => packageCoverageKeys.has(key))) {
+        coverageIds.add(service.id);
+      }
+    });
+
+    return Array.from(coverageIds);
+  }
+
+  private getPackageCoverageKeys(
+    servicePackage: ServicePackage,
+    activeServices: Service[],
+  ): string[] {
+    return this.getLogicalCoverageKeys(
+      [
+        servicePackage.name,
+        servicePackage.description,
+        servicePackage.packageType,
+        servicePackage.category?.name,
+        ...(servicePackage.tags ?? []),
+        ...activeServices.flatMap((service) => [
+          service.name,
+          service.description,
+          service.category?.name,
+          ...(service.skills ?? []),
+        ]),
+      ],
+      [servicePackage.name, ...activeServices.map((service) => service.name)],
+    );
+  }
+
+  private getServiceCoverageKeys(service: Service): string[] {
+    return this.getLogicalCoverageKeys(
+      [
+        service.name,
+        service.description,
+        service.category?.name,
+        ...(service.skills ?? []),
+      ],
+      [service.name],
+    );
+  }
+
+  private getLogicalCoverageKeys(
+    parts: Array<string | null | undefined>,
+    exactNameParts: Array<string | null | undefined> = [],
+  ): string[] {
+    const normalizedParts = parts
+      .filter((part): part is string => Boolean(part))
+      .map((part) => this.normalizeCatalogName(part));
+    const normalizedExactNameParts = exactNameParts
+      .filter((part): part is string => Boolean(part))
+      .map((part) => this.normalizeCatalogName(part));
+    const normalizedText = normalizedParts.join(' ');
+    const keys = new Set<string>();
+
+    normalizedExactNameParts.forEach((part) => {
+      if (part && part.length >= 4) {
+        keys.add(`catalog_name:${part}`);
+      }
+    });
+
+    LOGICAL_COVERAGE_RULES.forEach((rule) => {
+      if (this.matchesLogicalCoverageRule(normalizedText, rule)) {
+        keys.add(`catalog_semantic:${rule.key}`);
+      }
+    });
+
+    return Array.from(keys);
+  }
+
+  private matchesLogicalCoverageRule(
+    normalizedText: string,
+    rule: LogicalCoverageRule,
+  ): boolean {
+    const variants = rule.variants ?? [];
+    if (
+      variants.some((variant) =>
+        normalizedText.includes(this.normalizeCatalogName(variant)),
+      )
+    ) {
+      return true;
+    }
+
+    const terms = rule.terms ?? [];
+    if (terms.length === 0) return false;
+
+    const matchedTerms = terms.filter((term) =>
+      normalizedText.includes(this.normalizeCatalogName(term)),
+    ).length;
+
+    return matchedTerms >= (rule.minTerms ?? terms.length);
   }
 
   private hasRecommendableServiceContent(service: Service): boolean {
@@ -815,7 +979,14 @@ export class RecommendationsService implements OnModuleInit {
   ): Promise<ExistingRecommendationCoverage[]> {
     const recommendations = await this.recommendationRepository.find({
       where: { userId },
-      relations: ['package', 'package.services'],
+      relations: [
+        'service',
+        'service.category',
+        'package',
+        'package.category',
+        'package.services',
+        'package.services.category',
+      ],
     });
     const coverage: ExistingRecommendationCoverage[] = [];
 
@@ -993,12 +1164,24 @@ export class RecommendationsService implements OnModuleInit {
   private getRecommendationCoveredServiceIds(
     recommendation: Recommendation,
   ): string[] {
-    if (recommendation.packageId) {
-      return filterActiveServices(recommendation.package?.services).map(
-        (service) => service.id,
+    if (recommendation.packageId && recommendation.package) {
+      return this.uniqueIds(
+        this.getPackageCoverageIds(
+          recommendation.package,
+          filterActiveServices(recommendation.package?.services),
+          [],
+        ),
       );
     }
-    return recommendation.serviceId ? [recommendation.serviceId] : [];
+
+    if (!recommendation.serviceId) return [];
+
+    return this.uniqueIds([
+      recommendation.serviceId,
+      ...(recommendation.service
+        ? this.getServiceCoverageKeys(recommendation.service)
+        : []),
+    ]);
   }
 
   private async upsertGeneratedRecommendation(
@@ -1021,13 +1204,9 @@ export class RecommendationsService implements OnModuleInit {
     });
 
     if (existing) {
-      if (existing.source === RecommendationSource.Manual) {
-        return existing;
-      }
       existing.priority = item.priority;
       existing.rationale = item.rationale;
       existing.diagnosticSignals = item.diagnosticSignals;
-      existing.source = RecommendationSource.AI;
       existing.generatedAt = new Date();
       return this.recommendationRepository.save(existing);
     }
@@ -1042,7 +1221,6 @@ export class RecommendationsService implements OnModuleInit {
       dependencyIds: [],
       diagnosticSignals: item.diagnosticSignals,
       generatedAt: new Date(),
-      source: RecommendationSource.AI,
       orderId: null,
     });
 
@@ -1059,7 +1237,6 @@ export class RecommendationsService implements OnModuleInit {
       retryExisting.priority = item.priority;
       retryExisting.rationale = item.rationale;
       retryExisting.diagnosticSignals = item.diagnosticSignals;
-      retryExisting.source = RecommendationSource.AI;
       retryExisting.generatedAt = new Date();
       return this.recommendationRepository.save(retryExisting);
     }
