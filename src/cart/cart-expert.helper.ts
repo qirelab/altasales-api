@@ -30,18 +30,20 @@ export function mapCartExpertItem(
   const executor = position.executors.find((e) => e.id === item.executorUserId);
   if (!executor) return null;
 
-  const offerings: CartExpertOfferingDto[] = (item.offerings ?? []).map((entry) => {
-    const offeringDef = position.offerings.find((o) => o.id === entry.expertPositionOfferingId);
-    const priceEntry = executor.offerings.find((po) => po.offeringId === entry.expertPositionOfferingId);
-    return {
-      cartItemOfferingId: entry.id,
-      offeringId: entry.expertPositionOfferingId,
-      name: offeringDef?.name ?? '—',
-      description: offeringDef?.description ?? null,
-      price: priceEntry?.price ?? null,
-      quantity: entry.quantity,
-    };
-  });
+  const offerings: CartExpertOfferingDto[] = [...(item.offerings ?? [])]
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))
+    .map((entry) => {
+      const offeringDef = position.offerings.find((o) => o.id === entry.expertPositionOfferingId);
+      const priceEntry = executor.offerings.find((po) => po.offeringId === entry.expertPositionOfferingId);
+      return {
+        cartItemOfferingId: entry.id,
+        offeringId: entry.expertPositionOfferingId,
+        name: offeringDef?.name ?? '—',
+        description: offeringDef?.description ?? null,
+        price: priceEntry?.price ?? null,
+        quantity: entry.quantity,
+      };
+    });
 
   if (offerings.length === 0) return null;
   if (offerings.some((o) => o.price == null)) return null;
