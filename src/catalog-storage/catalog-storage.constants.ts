@@ -21,7 +21,7 @@ export const CATALOG_IMAGE_EXTENSIONS = new Set([
 
 export const CATALOG_IMAGE_FORMATS_LABEL = 'JPEG, PNG, WebP, HEIC, HEIF';
 
-export const CATALOG_STORAGE_FOLDERS = ['services', 'packages', 'expert-groups'] as const;
+export const CATALOG_STORAGE_FOLDERS = ['services', 'packages', 'expert-groups', 'experts'] as const;
 
 export type CatalogStorageFolder = (typeof CATALOG_STORAGE_FOLDERS)[number];
 

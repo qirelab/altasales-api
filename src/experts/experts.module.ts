@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminExpertGroupsController } from './admin-expert-groups.controller';
+import { AdminExpertsController } from './admin-experts.controller';
+import { ExpertProfile } from './entities/expert-profile.entity';
 import { ExpertPosition } from './entities/expert-position.entity';
 import { ExpertPositionMember } from './entities/expert-position-member.entity';
 import { ExpertPositionOffering } from './entities/expert-position-offering.entity';
@@ -20,12 +22,13 @@ import { AuthModule } from '../auth/auth.module';
       ExpertPositionOffering,
       ExpertPositionMember,
       ExpertServicePrice,
+      ExpertProfile,
       User,
       OrderItem,
       OrderItemSubItem,
     ]),
   ],
-  controllers: [ExpertsController, AdminExpertGroupsController],
+  controllers: [ExpertsController, AdminExpertGroupsController, AdminExpertsController],
   providers: [ExpertsService],
   exports: [ExpertsService],
 })
