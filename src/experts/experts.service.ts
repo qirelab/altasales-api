@@ -80,6 +80,7 @@ export interface ExpertExecutorDto {
   id: string;
   name: string;
   lastName: string;
+  image: string | null;
   experienceYears: number | null;
   offerings: ExpertExecutorOfferingPrice[];
 }
@@ -368,6 +369,11 @@ export class ExpertsService {
       : [];
     const executorByUserId = new Map(executorUsers.map((user) => [user.id, user]));
     const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(executorUserIds);
+    const storedProfiles = executorUserIds.length > 0
+      ? await this.expertProfileRepository.find({ where: { userId: In(executorUserIds) } })
+      : [];
+    const profileByUserId = new Map(storedProfiles.map((profile) => [profile.userId, profile]));
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(executorUserIds);
 
     const executors = await Promise.all(
       activeMembers
@@ -376,11 +382,17 @@ export class ExpertsService {
           if (!memberUser) return null;
           const prices = await this.getMemberOfferingPrices(member.id, positionOfferings);
           if (memberUser.role !== UserRole.EXPERT) return null;
+          const resolvedProfile = this.resolveExpertProfile(
+            profileByUserId.get(memberUser.id),
+            fallbackProfileByUserId.get(memberUser.id),
+            memberUser.experienceYears,
+          );
           return {
             id: memberUser.id,
             name: memberUser.name,
             lastName: memberUser.lastName,
-            experienceYears: memberUser.experienceYears
+            image: resolvedProfile.image,
+            experienceYears: resolvedProfile.experienceYears
               ?? fallbackExperienceByUserId.get(memberUser.id)
               ?? null,
             offerings: prices,
