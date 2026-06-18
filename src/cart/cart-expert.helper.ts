@@ -7,6 +7,7 @@ export interface CartExpertOfferingDto {
   name: string;
   description: string | null;
   price: number | null;
+  quantity: number;
 }
 
 export interface CartExpertItemDto {
@@ -38,13 +39,14 @@ export function mapCartExpertItem(
       name: offeringDef?.name ?? '—',
       description: offeringDef?.description ?? null,
       price: priceEntry?.price ?? null,
+      quantity: entry.quantity,
     };
   });
 
   if (offerings.length === 0) return null;
   if (offerings.some((o) => o.price == null)) return null;
 
-  const amount = offerings.reduce((sum, o) => sum + (o.price ?? 0), 0);
+  const amount = offerings.reduce((sum, o) => sum + ((o.price ?? 0) * o.quantity), 0);
 
   return {
     id: item.id,
