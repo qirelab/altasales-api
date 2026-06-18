@@ -134,7 +134,7 @@ export class RecommendationScoringService {
             role: 'user',
             content: JSON.stringify({
               instruction:
-                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}. Возвращай только реально релевантные рекомендации. Не возвращай отдельные услуги, если выбранный пакет уже содержит или логически покрывает их результат.',
+                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}. Возвращай только реально релевантные рекомендации. Для productStage=existing поле components описывает, что уже есть, а componentsToAdd — что нужно добавить; не предлагай стартовое внедрение того, что уже есть. Не возвращай отдельные услуги, если выбранный пакет уже содержит или логически покрывает их результат.',
               clientProfile: dto.clientProfile ?? {},
               diagnostics: dto.diagnostics ?? [],
               catalog: catalogSlice.map((service) => ({
