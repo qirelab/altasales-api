@@ -28,6 +28,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('crm-bronze', 'CRM Бронза'),
     service('crm-silver', 'CRM Серебро'),
     service('crm-gold', 'CRM Золото'),
+    service('ai-crm-analysis', 'ИИ анализ CRM'),
     service('crm-audit', 'Аудит CRM'),
     service('crm-funnels', 'Настройка воронок сделок (до 3 шт)'),
     service('crm-tech-spec', 'Подготовка технического задания'),
@@ -205,10 +206,197 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'training-3m',
       'dashboard',
       'crm-start',
-      'crm-audit',
+      'ai-crm-analysis',
     ]);
     expect(result[0].diagnosticSignals).toContain(
-      'ideal_reference:new_b2b_outbound_full_sales_department',
+      'ideal_reference:new_outbound_full_sales_department',
+    );
+  });
+
+  it('does not fill a golden reference scenario with weak fallback candidates', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      10,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'from-zero',
+      'sales-head',
+      'training-3m',
+      'dashboard',
+      'crm-start',
+      'ai-crm-analysis',
+    ]);
+  });
+
+  it('applies anti-filters to golden reference recommendations', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          productStage: 'new',
+          desiredResult: {
+            period: '1m',
+          },
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      6,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('training-3m');
+  });
+
+  it('prefers exact golden reference names over fallback aliases', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      [service('exact-from-zero', 'Пакет ОП с нуля'), ...services],
+      [],
+      '',
+      6,
+    );
+
+    expect(result[0].serviceId).toBe('exact-from-zero');
+  });
+
+  it('applies the golden reference to similar non-B2B questionnaires', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2C',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+      6,
+    );
+
+    expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
+      'ideal_reference:new_outbound_full_sales_department',
+    );
+  });
+
+  it('lets LLM-ranked catalog candidates compete with golden references', () => {
+    const customCandidate = service(
+      'custom-growth-audit',
+      'Индивидуальный аудит роста продаж',
+    );
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Строительные материалы',
+          productStage: 'new',
+          leadGenerationTypes: ['outbound'],
+          desiredResult: {
+            description: 'Дополнительно нужен аудит роста продаж',
+          },
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            contactDatabase: true,
+            salesManager: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      [...services, customCandidate],
+      [
+        {
+          serviceId: 'custom-growth-audit',
+          serviceName: 'Индивидуальный аудит роста продаж',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'LLM found a custom fit from questionnaire text',
+          diagnosticSignals: ['ai_generated', 'custom_growth_fit'],
+          score: 125,
+        },
+      ],
+      '',
+      10,
+    );
+
+    expect(result.map((item) => item.serviceId)).toContain(
+      'custom-growth-audit',
+    );
+    expect(result.flatMap((item) => item.diagnosticSignals)).toContain(
+      'ideal_reference:new_outbound_full_sales_department',
     );
   });
 
@@ -242,13 +430,51 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'training-3m',
       'dashboard',
       'crm-audit',
-      'ai-rop',
+      'ai-crm-analysis',
       'document-request',
       'sales-head',
     ]);
     expect(result[0].diagnosticSignals).toContain(
-      'ideal_reference:existing_b2b_inbound_managed_sales_department',
+      'ideal_reference:existing_inbound_managed_sales_department',
     );
+  });
+
+  it('does not recommend contact databases for inbound lead generation unless requested', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          salesDirection: 'B2B',
+          product: 'Бухгалтерские услуги',
+          productStage: 'existing',
+          leadGenerationTypes: ['inbound'],
+          desiredResult: {
+            description: 'Нужно фиксировать входящие заявки и переписки',
+          },
+          components: components({
+            telephony: true,
+            messenger: true,
+            analytics: true,
+          }),
+        },
+        persist: false,
+      },
+      [...services, service('contact-db', 'База контактов')],
+      [
+        {
+          serviceId: 'contact-db',
+          serviceName: 'База контактов',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'fallback',
+          diagnosticSignals: ['lead_generation_gap'],
+          score: 100,
+        },
+      ],
+      '',
+      10,
+    );
+
+    expect(result.map((item) => item.serviceId)).not.toContain('contact-db');
   });
 
   it('boosts automation when canonical questionnaire asks for a voice robot', () => {
