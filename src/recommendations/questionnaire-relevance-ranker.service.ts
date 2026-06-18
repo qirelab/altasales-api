@@ -41,16 +41,31 @@ type SelectedComponent =
   | 'crm'
   | 'telephony'
   | 'messenger'
-  | 'chatbot'
-  | 'voiceRobot'
+  | 'voiceChatbot'
   | 'contactDatabase'
   | 'salesManager'
   | 'trainingSystem'
   | 'analytics'
   | 'scripts'
   | 'callAnalysis'
-  | 'businessTrainer'
+  | 'salesDocuments'
   | 'salesHead';
+
+type IdealRecommendationReference = {
+  id: string;
+  match: {
+    productStageAny?: string[];
+    leadTypeAny?: string[];
+    componentsAll?: SelectedComponent[];
+    componentsAny?: SelectedComponent[];
+  };
+  recommendations: Array<{
+    referenceName: string;
+    aliases: string[];
+    score: number;
+    reason: string;
+  }>;
+};
 
 type NormalizedQuestionnaireProfile = {
   rawText: string;
@@ -59,6 +74,7 @@ type NormalizedQuestionnaireProfile = {
   leadTypeText: string;
   desiredPeriod: string;
   selectedComponents: SelectedComponent[];
+  existingComponents: SelectedComponent[];
   managersCount: number;
   targetRevenue: number;
 };
@@ -102,7 +118,7 @@ const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
 ];
 
 const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
-  crm: 2,
+  crm: 3,
   communications: 2,
   documents: 1,
   hiring: 1,
@@ -118,27 +134,66 @@ const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
 const URGENT_RANKER_SCORE = 70;
 const MEDIUM_RANKER_SCORE = 12;
 const EXPLICIT_COMPONENT_POINTS = 60;
+const STRONG_REFERENCE_EXTRA_SCORE = 90;
 
 const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   crm: ['CRM'],
   telephony: ['Телефония'],
   messenger: ['Мессенджер'],
-  chatbot: ['Чат-бот', 'Робот', 'Автоматизация'],
-  voiceRobot: ['Робот', 'Автоматизация'],
+  voiceChatbot: [
+    'Голосовой и чат бот',
+    'Чат-бот',
+    'Голосовой робот',
+    'Робот',
+    'Автоматизация',
+  ],
   contactDatabase: ['База контактов'],
   salesManager: ['Менеджер по продажам'],
   trainingSystem: ['Система обучения'],
   analytics: ['Аналитика'],
   scripts: ['Скрипты'],
   callAnalysis: ['Анализ звонков'],
-  businessTrainer: ['Бизнес тренер'],
+  salesDocuments: ['Документы ОП', 'Документы отдела продаж'],
   salesHead: ['РОП'],
+};
+
+const EXISTING_COMPONENT_SERVICE_TERMS: Partial<
+  Record<SelectedComponent, string[]>
+> = {
+  crm: ['crm старт', 'crm бронза', 'базовая настройка работы отдела продаж'],
+  telephony: ['интеграция телефонии'],
+  messenger: ['интеграция мессенджера'],
+  voiceChatbot: ['настройка роботов', 'голосовой робот', 'чат-бот'],
+  contactDatabase: ['база контактов'],
+  salesManager: ['подбор под ключ', 'профиль вакансии', 'портрет соискателя'],
+  trainingSystem: ['план тренингов', 'пакет обучения'],
+  analytics: ['дашборд оп'],
+  scripts: ['скрипт продаж'],
+  callAnalysis: [
+    'отчет по звонкам',
+    'отчет с оценкой прослушанных разговоров',
+    'на контроле',
+  ],
+  salesDocuments: ['пакет документов отдела продаж'],
+  salesHead: [
+    'руководитель отдела продаж',
+    'управление действующим оп',
+    'роп-фокус',
+  ],
 };
 
 const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
   crm: [
-    { terms: ['crm'], points: EXPLICIT_COMPONENT_POINTS, reason: 'CRM выбрана в анкете' },
-    { terms: ['технического задания'], points: 6, reason: 'CRM выбрана в анкете' },
+    {
+      terms: ['crm'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'CRM выбрана в анкете',
+    },
+    {
+      terms: ['технического задания'],
+      points: 6,
+      reason: 'CRM выбрана в анкете',
+    },
   ],
   telephony: [
     {
@@ -154,28 +209,16 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       reason: 'мессенджер выбран в анкете',
     },
   ],
-  chatbot: [
+  voiceChatbot: [
     {
       terms: ['робот'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'чат-бот/робот выбран в анкете',
+      reason: 'голосовой и чат бот выбран в анкете',
     },
     {
       terms: ['автоматизац'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'чат-бот/робот выбран в анкете',
-    },
-  ],
-  voiceRobot: [
-    {
-      terms: ['робот'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'голосовой робот выбран в анкете',
-    },
-    {
-      terms: ['автоматизац'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'голосовой робот выбран в анкете',
+      reason: 'голосовой и чат бот выбран в анкете',
     },
   ],
   contactDatabase: [
@@ -191,7 +234,11 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен менеджер по продажам',
     },
-    { terms: ['профиль вакансии'], points: 8, reason: 'нужно описать профиль кандидата' },
+    {
+      terms: ['профиль вакансии'],
+      points: 8,
+      reason: 'нужно описать профиль кандидата',
+    },
   ],
   trainingSystem: [
     {
@@ -199,8 +246,16 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'система обучения выбрана в анкете',
     },
-    { terms: ['тренинг'], points: 10, reason: 'нужно развивать навыки менеджеров' },
-    { terms: ['адаптации моп'], points: 8, reason: 'нужна адаптация менеджеров' },
+    {
+      terms: ['тренинг'],
+      points: 10,
+      reason: 'нужно развивать навыки менеджеров',
+    },
+    {
+      terms: ['адаптации моп'],
+      points: 8,
+      reason: 'нужна адаптация менеджеров',
+    },
   ],
   analytics: [
     {
@@ -229,15 +284,19 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       reason: 'нужно оценивать звонки',
     },
   ],
-  businessTrainer: [
+  salesDocuments: [
     {
-      terms: ['тренинг'],
+      terms: ['документ'],
       points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'бизнес-тренер выбран в анкете',
+      reason: 'документы ОП выбраны в анкете',
     },
   ],
   salesHead: [
-    { terms: ['роп-фокус'], points: EXPLICIT_COMPONENT_POINTS, reason: 'РОП выбран в анкете' },
+    {
+      terms: ['роп-фокус'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'РОП выбран в анкете',
+    },
     {
       terms: ['руководитель отдела продаж'],
       points: EXPLICIT_COMPONENT_POINTS,
@@ -245,11 +304,148 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
     },
     {
       terms: ['ии роп'],
-      points: EXPLICIT_COMPONENT_POINTS,
+      points: 24,
       reason: 'нужно управлять отделом по данным',
     },
   ],
 };
+
+// These references are intentionally sales-direction agnostic. The client
+// examples were B2B, but the same questionnaire shape should get the same
+// baseline recommendations for similar non-B2B cases.
+const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
+  {
+    id: 'new_outbound_full_sales_department',
+    match: {
+      productStageAny: ['новый', 'new'],
+      leadTypeAny: ['исход', 'outbound'],
+      componentsAll: [
+        'crm',
+        'telephony',
+        'messenger',
+        'trainingSystem',
+        'analytics',
+        'salesHead',
+      ],
+      componentsAny: ['salesManager', 'contactDatabase'],
+    },
+    recommendations: [
+      {
+        referenceName: 'Пакет ОП с нуля',
+        aliases: ['отдел продаж с нуля'],
+        score: 130,
+        reason:
+          'золотой сценарий: новый B2B-продукт и исходящие продажи требуют запуска ОП',
+      },
+      {
+        referenceName: 'Сопровождение создания ОП с нуля РОП',
+        aliases: ['руководитель отдела продаж', 'роп на аутсорсинге'],
+        score: 126,
+        reason: 'золотой сценарий: нужен РОП-контур для создания отдела',
+      },
+      {
+        referenceName: 'Пакет обучения на 3 месяца',
+        aliases: ['пакет обучения на 3 месяца'],
+        score: 122,
+        reason: 'золотой сценарий: нужна системная подготовка команды',
+      },
+      {
+        referenceName: 'ИИ анализ дашборда',
+        aliases: ['ии анализ дашборда', 'анализ дашборда', 'дашборд оп'],
+        score: 118,
+        reason: 'золотой сценарий: нужна управленческая аналитика отдела',
+      },
+      {
+        referenceName: 'Интеграция с CRM',
+        aliases: ['crm старт', 'базовая настройка работы отдела продаж'],
+        score: 114,
+        reason: 'золотой сценарий: нужен CRM-контур для фиксации продаж',
+      },
+      {
+        referenceName: 'ИИ анализ CRM',
+        aliases: [
+          'ии анализ crm',
+          'анализ crm',
+          'аудит crm',
+          'отчет по ведению сделок в crm',
+        ],
+        score: 110,
+        reason: 'золотой сценарий: нужен анализ качества CRM-процесса',
+      },
+    ],
+  },
+  {
+    id: 'existing_inbound_managed_sales_department',
+    match: {
+      productStageAny: ['уже продаю', 'existing'],
+      leadTypeAny: ['вход', 'inbound'],
+      componentsAll: [
+        'telephony',
+        'messenger',
+        'trainingSystem',
+        'analytics',
+        'salesHead',
+      ],
+    },
+    recommendations: [
+      {
+        referenceName: 'Пакет CRM Старт',
+        aliases: ['crm старт'],
+        score: 130,
+        reason:
+          'золотой сценарий: входящие обращения нужно сразу фиксировать в CRM',
+      },
+      {
+        referenceName: 'Пакет обучения на 3 месяца',
+        aliases: ['пакет обучения на 3 месяца'],
+        score: 126,
+        reason: 'золотой сценарий: нужна системная подготовка менеджеров',
+      },
+      {
+        referenceName: 'ИИ анализ дашборда',
+        aliases: ['ии анализ дашборда', 'анализ дашборда', 'дашборд оп'],
+        score: 122,
+        reason: 'золотой сценарий: нужна аналитика текущего отдела',
+      },
+      {
+        referenceName: 'Интеграция с CRM',
+        aliases: ['аудит crm', 'отчет по ведению сделок в crm'],
+        score: 118,
+        reason: 'золотой сценарий: нужно проверить и связать CRM-процесс',
+      },
+      {
+        referenceName: 'ИИ анализ CRM',
+        aliases: [
+          'ии анализ crm',
+          'анализ crm',
+          'аудит crm',
+          'отчет по ведению сделок в crm',
+          'на контроле',
+        ],
+        score: 114,
+        reason: 'золотой сценарий: нужен анализ CRM и коммуникаций',
+      },
+      {
+        referenceName: 'ИИ анализ документов',
+        aliases: [
+          'ии анализ документов',
+          'анализ документов',
+          'документ под запрос',
+          'пакет документов отдела продаж',
+        ],
+        score: 110,
+        reason: 'золотой сценарий: нужно проверить документы и регламенты',
+      },
+      {
+        referenceName: 'Управление действующим ОП РОП',
+        aliases: ['руководитель отдела продаж', 'роп на аутсорсинге'],
+        score: 106,
+        reason:
+          'золотой сценарий: нужен управленческий контур для действующего ОП',
+      },
+    ],
+  },
+];
 
 @Injectable()
 export class QuestionnaireRelevanceRankerService {
@@ -265,9 +461,12 @@ export class QuestionnaireRelevanceRankerService {
     const maxItems = limit ?? Number.POSITIVE_INFINITY;
     const profile = dto.clientProfile ?? {};
     const normalizedProfile = this.normalizeProfile(profile);
-    const stage = this.detectStage(normalizedProfile);
+    const idealReference = this.findIdealReference(normalizedProfile);
+    const stage = this.resolveStageForRanking(
+      this.detectStage(normalizedProfile),
+      idealReference,
+    );
     const rules = this.buildRules(normalizedProfile, stage);
-    const desiredText = normalizedProfile.desiredText;
     const rankedById = new Map(
       ranked.map((item, index) => [
         this.getItemTargetId(item),
@@ -275,12 +474,25 @@ export class QuestionnaireRelevanceRankerService {
       ]),
     );
     let defaultItems: GeneratedRecommendationItem[] = [];
+    let idealItems: GeneratedRecommendationItem[] = [];
 
-    if (stage === 'new_department') {
+    if (idealReference) {
+      idealItems = this.buildIdealReferenceRecommendations(
+        idealReference,
+        services,
+        rankedById,
+        context,
+        normalizedProfile,
+        stage,
+        maxItems,
+      );
+    } else if (stage === 'new_department') {
       defaultItems = this.buildNewDepartmentDefaultRecommendations(
         services,
         rankedById,
         context,
+        normalizedProfile,
+        stage,
         maxItems,
       );
 
@@ -290,9 +502,14 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     const defaultTargetIds = new Set(
-      defaultItems.map((item) => this.getItemTargetId(item)),
+      [...idealItems, ...defaultItems].map((item) =>
+        this.getItemTargetId(item),
+      ),
     );
-    const rankedCandidates: GeneratedRecommendationItem[] = [...defaultItems];
+    const rankedCandidates: GeneratedRecommendationItem[] = [
+      ...idealItems,
+      ...defaultItems,
+    ];
 
     for (const service of services) {
       const targetId = this.getCandidateTargetId(service);
@@ -300,11 +517,10 @@ export class QuestionnaireRelevanceRankerService {
 
       const serviceText = this.normalizeCandidateText(service);
       if (
-        this.getAntiRecommendationReason(
+        this.shouldSkipCandidateByAntiFilters(
           serviceText,
+          normalizedProfile,
           stage,
-          desiredText,
-          normalizedProfile.desiredPeriod,
         )
       ) {
         continue;
@@ -326,6 +542,12 @@ export class QuestionnaireRelevanceRankerService {
       const base = fromRanked?.item ?? fallback;
       const score = Number(base.score || 0) + rulePoints + llmBonus;
       const reasons = matchedRules.map((rule) => rule.reason);
+      if (
+        idealReference &&
+        !this.isStrongReferenceExtraCandidate(base, score)
+      ) {
+        continue;
+      }
 
       rankedCandidates.push({
         ...base,
@@ -373,6 +595,181 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return 'basic_department';
+  }
+
+  private resolveStageForRanking(
+    detectedStage: QuestionnaireStage,
+    idealReference: IdealRecommendationReference | null,
+  ): QuestionnaireStage {
+    if (idealReference?.id === 'new_outbound_full_sales_department') {
+      return 'new_department';
+    }
+
+    return detectedStage;
+  }
+
+  private findIdealReference(
+    profile: NormalizedQuestionnaireProfile,
+  ): IdealRecommendationReference | null {
+    return (
+      IDEAL_RECOMMENDATION_REFERENCES.find((reference) =>
+        this.matchesIdealReference(profile, reference),
+      ) ?? null
+    );
+  }
+
+  private matchesIdealReference(
+    profile: NormalizedQuestionnaireProfile,
+    reference: IdealRecommendationReference,
+  ): boolean {
+    const { match } = reference;
+    const selectedComponents = new Set(profile.selectedComponents);
+
+    if (
+      match.productStageAny?.length &&
+      !match.productStageAny.some((term) =>
+        profile.productStageText.includes(this.normalize(term)),
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      match.leadTypeAny?.length &&
+      !match.leadTypeAny.some((term) =>
+        profile.leadTypeText.includes(this.normalize(term)),
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      match.componentsAll?.length &&
+      !match.componentsAll.every((component) =>
+        selectedComponents.has(component),
+      )
+    ) {
+      return false;
+    }
+
+    if (
+      match.componentsAny?.length &&
+      !match.componentsAny.some((component) =>
+        selectedComponents.has(component),
+      )
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private buildIdealReferenceRecommendations(
+    reference: IdealRecommendationReference,
+    services: ServiceCandidate[],
+    rankedById: Map<
+      string,
+      { item: GeneratedRecommendationItem; index: number }
+    >,
+    context: string,
+    profile: NormalizedQuestionnaireProfile,
+    stage: QuestionnaireStage,
+    limit: number,
+  ): GeneratedRecommendationItem[] {
+    const selected: GeneratedRecommendationItem[] = [];
+    const usedTargetIds = new Set<string>();
+
+    for (const recommendation of reference.recommendations) {
+      const service = this.findCandidateByAliases(
+        services,
+        this.getRecommendationAliases(recommendation),
+        usedTargetIds,
+      );
+      if (!service) continue;
+      const serviceText = this.normalizeCandidateText(service);
+      if (this.shouldSkipCandidateByAntiFilters(serviceText, profile, stage)) {
+        continue;
+      }
+
+      const targetId = this.getCandidateTargetId(service);
+      usedTargetIds.add(targetId);
+      const base =
+        rankedById.get(targetId)?.item ??
+        this.scoringService.scoreService(service, context);
+      const score = Math.max(Number(base.score || 0), recommendation.score);
+
+      selected.push({
+        ...base,
+        serviceId: base.serviceId,
+        packageId: base.packageId,
+        serviceName: service.name,
+        priority: this.resolveBoostedPriority(score, base.priority),
+        rationale: this.buildRationale(service.name, [
+          recommendation.reason,
+          `референс: ${recommendation.referenceName}`,
+        ]),
+        diagnosticSignals: this.scoringService.normalizeSignals([
+          ...(base.diagnosticSignals ?? []),
+          `ideal_reference:${reference.id}`,
+          recommendation.referenceName,
+          recommendation.reason,
+        ]),
+        score,
+        coveredServiceIds: base.coveredServiceIds,
+      });
+
+      if (selected.length >= limit) break;
+    }
+
+    return selected.sort(
+      (a, b) =>
+        Number(b.score || 0) - Number(a.score || 0) ||
+        this.scorePriority(b.priority) - this.scorePriority(a.priority),
+    );
+  }
+
+  private getRecommendationAliases(
+    recommendation: IdealRecommendationReference['recommendations'][number],
+  ): string[] {
+    return this.uniqueStrings([
+      recommendation.referenceName,
+      ...recommendation.aliases,
+    ]);
+  }
+
+  private uniqueStrings(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter(Boolean)),
+    );
+  }
+
+  private findCandidateByAliases(
+    services: ServiceCandidate[],
+    aliases: string[],
+    usedTargetIds: Set<string>,
+  ): ServiceCandidate | null {
+    for (const alias of aliases) {
+      const normalizedAlias = this.normalize(alias);
+      const exactMatch = services.find((service) => {
+        const targetId = this.getCandidateTargetId(service);
+        return (
+          !usedTargetIds.has(targetId) &&
+          this.normalize(service.name) === normalizedAlias
+        );
+      });
+      if (exactMatch) return exactMatch;
+
+      const textMatch = services.find((service) => {
+        const targetId = this.getCandidateTargetId(service);
+        return (
+          !usedTargetIds.has(targetId) &&
+          this.normalizeCandidateText(service).includes(normalizedAlias)
+        );
+      });
+      if (textMatch) return textMatch;
+    }
+
+    return null;
   }
 
   private buildRules(
@@ -458,8 +855,14 @@ export class QuestionnaireRelevanceRankerService {
     profile: Record<string, unknown>,
   ): NormalizedQuestionnaireProfile {
     const desiredSalesDepartment = this.toArray(profile.desiredSalesDepartment);
+    const usesNewExistingProductFlow =
+      this.normalize(String(profile.productStage ?? '')).includes('existing') &&
+      this.isPlainObject(profile.componentsToAdd);
+    const existingComponents = usesNewExistingProductFlow
+      ? this.getSelectedComponents(profile.components, [])
+      : [];
     const selectedComponents = this.getSelectedComponents(
-      profile.components,
+      usesNewExistingProductFlow ? profile.componentsToAdd : profile.components,
       desiredSalesDepartment,
     );
     const componentTerms = selectedComponents.flatMap(
@@ -496,6 +899,7 @@ export class QuestionnaireRelevanceRankerService {
       leadTypeText: this.normalize(JSON.stringify(leadGenerationTypes)),
       desiredPeriod: this.getDesiredPeriod(profile),
       selectedComponents,
+      existingComponents,
       managersCount: Math.max(
         this.toNumber(profile.calculatedManagersCount),
         this.inferManagersCount(profile),
@@ -571,9 +975,28 @@ export class QuestionnaireRelevanceRankerService {
   private getAntiRecommendationReason(
     serviceText: string,
     stage: QuestionnaireStage,
-    desiredText: string,
-    desiredPeriod: string,
+    profile: NormalizedQuestionnaireProfile,
   ): string | null {
+    const {
+      desiredText,
+      leadTypeText,
+      desiredPeriod,
+      existingComponents,
+      selectedComponents,
+    } = profile;
+
+    const duplicatedExistingComponent = existingComponents.find(
+      (component) =>
+        !selectedComponents.includes(component) &&
+        this.includesAny(
+          serviceText,
+          EXISTING_COMPONENT_SERVICE_TERMS[component] ?? [],
+        ),
+    );
+    if (duplicatedExistingComponent) {
+      return `${COMPONENT_LABELS[duplicatedExistingComponent][0]} уже есть и добавление компонента не выбрано в анкете`;
+    }
+
     if (
       desiredPeriod === '1m' &&
       this.includesAny(serviceText, [
@@ -587,13 +1010,21 @@ export class QuestionnaireRelevanceRankerService {
       return 'срок услуги не соответствует цели на 1 месяц';
     }
 
+    if (leadTypeText.includes('inbound') || leadTypeText.includes('вход')) {
+      if (
+        this.includesAny(serviceText, ['база контактов']) &&
+        !this.includesAny(desiredText, ['база контактов'])
+      ) {
+        return 'база контактов не требуется для входящей лидогенерации';
+      }
+    }
+
     if (
       stage === 'new_department' &&
       this.includesAny(serviceText, [
         'ии роп',
         'роп-фокус',
         'топ-фокус',
-        'руководитель отдела продаж',
         'коммерческий директор',
         'финансовый директор',
         'эксперт-фокус',
@@ -608,7 +1039,6 @@ export class QuestionnaireRelevanceRankerService {
         'аналитический отчёт по отказным сделкам',
         'настройка отчета',
         'настройка отчёта',
-        'дашборд оп',
         'на контроле',
         'crm серебро',
         'crm золото',
@@ -621,15 +1051,31 @@ export class QuestionnaireRelevanceRankerService {
 
     if (
       stage === 'advanced_department' &&
-      this.includesAny(serviceText, [
+      (this.includesAny(serviceText, [
         'отдел продаж с нуля',
-        'crm старт',
-        'crm бронза',
-        'базовая настройка работы отдела продаж',
         'пакет обучения на месяц',
-      ])
+      ]) ||
+        (this.includesAny(desiredText, ['crm']) &&
+          this.includesAny(serviceText, [
+            'crm старт',
+            'crm бронза',
+            'базовая настройка работы отдела продаж',
+          ])))
     ) {
       return 'услуга слишком базовая для развитого отдела продаж';
+    }
+
+    if (
+      stage === 'basic_department' &&
+      !this.includesAny(desiredText, ['роп', 'руководител']) &&
+      this.includesAny(serviceText, [
+        'ии роп',
+        'роп-фокус',
+        'руководитель отдела продаж',
+        'управление действующим оп',
+      ])
+    ) {
+      return 'РОП не выбран в анкете базового отдела';
     }
 
     if (
@@ -639,7 +1085,6 @@ export class QuestionnaireRelevanceRankerService {
         'базовая настройка работы отдела продаж',
         'crm серебро',
         'crm золото',
-        'ии роп',
         'топ-фокус',
         'коммерческий директор',
         'финансовый директор',
@@ -669,6 +1114,26 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return null;
+  }
+
+  private shouldSkipCandidateByAntiFilters(
+    serviceText: string,
+    profile: NormalizedQuestionnaireProfile,
+    stage: QuestionnaireStage,
+  ): boolean {
+    return Boolean(
+      this.getAntiRecommendationReason(serviceText, stage, profile),
+    );
+  }
+
+  private isStrongReferenceExtraCandidate(
+    item: GeneratedRecommendationItem,
+    score: number,
+  ): boolean {
+    return (
+      item.diagnosticSignals?.includes('ai_generated') ||
+      score >= STRONG_REFERENCE_EXTRA_SCORE
+    );
   }
 
   private applyDiversity(
@@ -714,6 +1179,8 @@ export class QuestionnaireRelevanceRankerService {
       { item: GeneratedRecommendationItem; index: number }
     >,
     context: string,
+    profile: NormalizedQuestionnaireProfile,
+    stage: QuestionnaireStage,
     limit: number,
   ): GeneratedRecommendationItem[] {
     const selected: GeneratedRecommendationItem[] = [];
@@ -724,6 +1191,11 @@ export class QuestionnaireRelevanceRankerService {
         if (usedTargetIds.has(this.getCandidateTargetId(candidate)))
           return false;
         const serviceText = this.normalizeCandidateText(candidate);
+        if (
+          this.shouldSkipCandidateByAntiFilters(serviceText, profile, stage)
+        ) {
+          return false;
+        }
         return rule.terms.every((term) =>
           serviceText.includes(this.normalize(term)),
         );
@@ -779,13 +1251,19 @@ export class QuestionnaireRelevanceRankerService {
     return RecommendationPriority.Low;
   }
 
+  private scorePriority(priority: RecommendationPriority): number {
+    if (priority === RecommendationPriority.Urgent) return 3;
+    if (priority === RecommendationPriority.Medium) return 2;
+    return 1;
+  }
+
   private getServiceGroup(item: GeneratedRecommendationItem): ServiceGroup {
-    const text = this.normalize(
-      `${item.serviceName} ${item.diagnosticSignals.join(' ')}`,
-    );
+    const text = this.normalize(item.serviceName);
 
     if (text.includes('crm')) return 'crm';
-    if (this.includesAny(text, ['телефони', 'мессенджер', 'звонк'])) {
+    if (
+      this.includesAny(text, ['телефони', 'мессенджер', 'звонк', 'разговор'])
+    ) {
       return 'communications';
     }
     if (
