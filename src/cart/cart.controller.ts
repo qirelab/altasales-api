@@ -48,6 +48,17 @@ export class CartController {
     return this.cartService.updateItemQuantity(user.id, itemId, dto);
   }
 
+  @Patch('items/:itemId/offerings/:offeringId')
+  @ApiOperation({ summary: 'Update expert offering quantity in cart item' })
+  updateExpertOfferingQuantity(
+    @CurrentUser() user: CurrentUserData,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('offeringId', ParseUUIDPipe) offeringId: string,
+    @Body() dto: UpdateCartItemDto,
+  ) {
+    return this.cartService.updateExpertOfferingQuantity(user.id, itemId, offeringId, dto);
+  }
+
   @Delete('items/:itemId/offerings/:offeringId')
   @ApiOperation({ summary: 'Remove expert offering from cart item' })
   removeExpertOffering(
