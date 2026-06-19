@@ -21,7 +21,14 @@ import { Service } from '../services/entities/service.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
+import { AuthService } from '../auth/auth.service';
+import { FirebaseService } from '../auth/firebase/firebase.service';
+import { Order } from '../orders/entities/order.entity';
 import { AddExpertToGroupDto } from './dto/add-expert-to-group.dto';
+import {
+  CreateAdminExpertMemberDto,
+  UpdateAdminExpertMemberDto,
+} from './dto/admin-expert-member.dto';
 import {
   CreateAdminExpertGroupDto,
   UpdateAdminExpertGroupDto,
@@ -35,6 +42,7 @@ import {
 } from './dto/update-group-prices.dto';
 import { ExpertPosition } from './entities/expert-position.entity';
 import { ExpertPositionMember } from './entities/expert-position-member.entity';
+import { ExpertProfile } from './entities/expert-profile.entity';
 import { ExpertPositionOffering } from './entities/expert-position-offering.entity';
 import { ExpertServicePrice } from './entities/expert-service-price.entity';
 
@@ -166,6 +174,70 @@ export interface AvailableGroupExpertsDto {
   limit: number;
 }
 
+export interface AdminExpertMemberProfile {
+  displayName: string | null;
+  description: string;
+  skills: string[];
+  image: string | null;
+  experienceYears: number | null;
+}
+
+interface FallbackExpertProfile {
+  displayName: string | null;
+  description: string;
+  skills: string[];
+  image: string | null;
+  experienceYears: number | null;
+}
+
+export interface AdminExpertMemberListItem {
+  id: string;
+  name: string;
+  lastName: string;
+  email: string;
+  phoneNumber: string;
+  profile: AdminExpertMemberProfile;
+  group: { id: string; title: string } | null;
+  servicesCount: number;
+  ordersCount: number;
+}
+
+export interface AdminExpertMemberDetails {
+  user: {
+    id: string;
+    name: string;
+    lastName: string;
+    email: string;
+    phoneNumber: string;
+  };
+  profile: AdminExpertMemberProfile;
+  group: {
+    id: string;
+    title: string;
+    description: string;
+    image: string | null;
+    services: Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      defaultPrice: number;
+      price: number | null;
+    }>;
+  } | null;
+  stats: {
+    totalProjects: number;
+    activeOrders: number;
+    totalIncome: number;
+  };
+  orders: Array<{
+    id: string;
+    hours: number;
+    createdAt: Date;
+    amount: number;
+    status: OrderStatus;
+  }>;
+}
+
 export interface ExpertCheckoutResolveInput {
   positionId: string;
   executorUserId: string;
@@ -192,11 +264,15 @@ export class ExpertsService {
     private readonly expertServicePriceRepository: Repository<ExpertServicePrice>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(ExpertProfile)
+    private readonly expertProfileRepository: Repository<ExpertProfile>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(OrderItemSubItem)
     private readonly orderItemSubItemRepository: Repository<OrderItemSubItem>,
     private readonly dataSource: DataSource,
+    private readonly authService: AuthService,
+    private readonly firebaseService: FirebaseService,
   ) { }
 
   async findAllPositions(): Promise<ExpertPositionListItem[]> {
@@ -1191,6 +1267,413 @@ export class ExpertsService {
         .orUpdate(['price'], ['expertId', 'groupServiceId'])
         .execute();
     });
+  }
+
+  async getAdminExpertMembers(query: ExpertGroupsQueryDto): Promise<{
+    data: AdminExpertMemberListItem[];
+    total: number;
+    offset: number;
+    limit: number;
+  }> {
+    const { offset = 0, limit = 20 } = query;
+    const search = query.search?.trim();
+
+    const qb = this.userRepository
+      .createQueryBuilder('u')
+      .leftJoin(ExpertProfile, 'profile', 'profile."userId" = u.id')
+      .where('u.role = :role', { role: UserRole.EXPERT });
+
+    if (search) {
+      qb.andWhere(
+        new Brackets((subQb) => {
+          subQb
+            .where('u.name ILIKE :search', { search: `%${search}%` })
+            .orWhere('u."lastName" ILIKE :search', { search: `%${search}%` })
+            .orWhere(`CONCAT(u.name, ' ', u."lastName") ILIKE :search`, { search: `%${search}%` })
+            .orWhere('u.email ILIKE :search', { search: `%${search}%` })
+            .orWhere('u."phoneNumber" ILIKE :search', { search: `%${search}%` })
+            .orWhere('profile."displayName" ILIKE :search', { search: `%${search}%` })
+            .orWhere('profile.description ILIKE :search', { search: `%${search}%` })
+            .orWhere('profile.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([search]) });
+        }),
+      );
+    }
+
+    const total = await qb.getCount();
+    const users = await qb
+      .orderBy('u."createdAt"', 'DESC')
+      .offset(offset)
+      .limit(limit)
+      .getMany();
+
+    if (!users.length) {
+      return { data: [], total, offset, limit };
+    }
+
+    const userIds = users.map((user) => user.id);
+    const profiles = await this.expertProfileRepository.find({ where: { userId: In(userIds) } });
+    const profileByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(userIds);
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds(userIds);
+    const groupIds = [...new Set([...assignedByUserId.values()])];
+
+    const groupsById = new Map<string, ExpertPosition>();
+    if (groupIds.length) {
+      const groups = await this.positionRepository.find({
+        where: { id: In(groupIds), deletedAt: IsNull() },
+      });
+      groups.forEach((group) => groupsById.set(group.id, group));
+    }
+
+    const servicesCountsRaw = groupIds.length
+      ? await this.offeringRepository
+        .createQueryBuilder('service')
+        .select('service."positionId"', 'positionId')
+        .addSelect('COUNT(service.id)', 'count')
+        .where('service."positionId" IN (:...groupIds)', { groupIds })
+        .andWhere('service."deletedAt" IS NULL')
+        .groupBy('service."positionId"')
+        .getRawMany<{ positionId: string; count: string }>()
+      : [];
+    const servicesCountByGroup = new Map(
+      servicesCountsRaw.map((row) => [row.positionId, Number(row.count)]),
+    );
+
+    const ordersCountsRaw = await this.orderItemRepository
+      .createQueryBuilder('item')
+      .select('item."executorUserId"', 'userId')
+      .addSelect('COUNT(item.id)', 'count')
+      .where('item."executorUserId" IN (:...userIds)', { userIds })
+      .groupBy('item."executorUserId"')
+      .getRawMany<{ userId: string; count: string }>();
+    const ordersCountByUserId = new Map(
+      ordersCountsRaw.map((row) => [row.userId, Number(row.count)]),
+    );
+
+    return {
+      data: users.map((user) => {
+        const groupId = assignedByUserId.get(user.id) ?? null;
+        const group = groupId ? groupsById.get(groupId) : undefined;
+        const profile = this.resolveExpertProfile(
+          profileByUserId.get(user.id),
+          fallbackProfileByUserId.get(user.id),
+          user.experienceYears,
+        );
+        return {
+          id: user.id,
+          name: user.name,
+          lastName: user.lastName,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          profile,
+          group: group ? { id: group.id, title: group.name } : null,
+          servicesCount: groupId ? (servicesCountByGroup.get(groupId) ?? 0) : 0,
+          ordersCount: ordersCountByUserId.get(user.id) ?? 0,
+        };
+      }),
+      total,
+      offset,
+      limit,
+    };
+  }
+
+  async getAdminExpertMemberById(userId: string): Promise<AdminExpertMemberDetails> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.role !== UserRole.EXPERT) {
+      throw new NotFoundException(`Эксперт с ID ${userId} не найден`);
+    }
+
+    const storedProfile = await this.expertProfileRepository.findOne({ where: { userId } });
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds([userId]);
+    const profile = this.resolveExpertProfile(
+      storedProfile,
+      fallbackProfileByUserId.get(userId),
+      user.experienceYears,
+    );
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds([userId]);
+    const groupId = assignedByUserId.get(userId) ?? null;
+
+    let group: AdminExpertMemberDetails['group'] = null;
+    if (groupId) {
+      const position = await this.findActiveGroupOrThrow(groupId);
+      const services = await this.offeringRepository.find({
+        where: { positionId: groupId, deletedAt: IsNull() },
+        order: { name: 'ASC' },
+      });
+      const prices = services.length
+        ? await this.expertServicePriceRepository.find({
+          where: {
+            expertId: userId,
+            groupServiceId: In(services.map((service) => service.id)),
+          },
+        })
+        : [];
+      const priceByServiceId = new Map(
+        prices.map((entry) => [entry.groupServiceId, entry.price === null ? null : Number(entry.price)]),
+      );
+
+      group = {
+        id: position.id,
+        title: position.name,
+        description: position.description,
+        image: position.image ?? null,
+        services: services.map((service) => ({
+          id: service.id,
+          name: service.name,
+          description: service.description,
+          defaultPrice: Number(service.defaultPrice),
+          price: priceByServiceId.get(service.id) ?? null,
+        })),
+      };
+    }
+
+    const activeStatuses = [
+      OrderStatus.PendingPayment,
+      OrderStatus.Planned,
+      OrderStatus.InProgress,
+    ];
+
+    const aggregateRaw = await this.orderItemRepository.manager
+      .getRepository(Order)
+      .createQueryBuilder('o')
+      .innerJoin('o.item', 'item')
+      .select('COUNT(o.id)', 'totalProjects')
+      .addSelect(
+        `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
+        'activeOrders',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN o.amount ELSE 0 END), 0)`,
+        'totalIncome',
+      )
+      .where('item."executorUserId" = :userId', { userId })
+      .setParameter('activeStatuses', activeStatuses)
+      .setParameter('completedStatus', OrderStatus.Completed)
+      .getRawOne<{
+        totalProjects: string | null;
+        activeOrders: string | null;
+        totalIncome: string | null;
+      }>();
+
+    const ordersRaw = await this.orderItemRepository.manager
+      .getRepository(Order)
+      .createQueryBuilder('o')
+      .innerJoin('o.item', 'item')
+      .select('o.id', 'id')
+      .addSelect('COALESCE(item.hours, 0)', 'hours')
+      .addSelect('o."createdAt"', 'createdAt')
+      .addSelect('o.amount', 'amount')
+      .addSelect('o.status', 'status')
+      .where('item."executorUserId" = :userId', { userId })
+      .orderBy('o."createdAt"', 'DESC')
+      .getRawMany<{
+        id: string;
+        hours: string;
+        createdAt: Date;
+        amount: string;
+        status: OrderStatus;
+      }>();
+
+    return {
+      user: {
+        id: user.id,
+        name: user.name,
+        lastName: user.lastName,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+      },
+      profile,
+      group,
+      stats: {
+        totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
+        activeOrders: Number(aggregateRaw?.activeOrders ?? 0),
+        totalIncome: Number(aggregateRaw?.totalIncome ?? 0),
+      },
+      orders: ordersRaw.map((order) => ({
+        id: order.id,
+        hours: Number(order.hours),
+        createdAt: order.createdAt,
+        amount: Number(order.amount),
+        status: order.status,
+      })),
+    };
+  }
+
+  async createAdminExpertMember(dto: CreateAdminExpertMemberDto): Promise<AdminExpertMemberListItem> {
+    const registerResult = await this.authService.register({
+      name: dto.name.trim(),
+      lastName: dto.lastName.trim(),
+      email: dto.email.trim(),
+      phoneNumber: dto.phoneNumber.trim(),
+      password: dto.password,
+    });
+
+    const user = await this.userRepository.findOne({ where: { id: registerResult.id } });
+    if (!user) {
+      throw new NotFoundException('Не удалось создать эксперта');
+    }
+
+    user.role = UserRole.EXPERT;
+    await this.userRepository.save(user);
+
+    const profileEntity = this.expertProfileRepository.create({
+      userId: user.id,
+      description: dto.description.trim(),
+      skills: dto.skills,
+      image: dto.image ?? null,
+      experienceYears: dto.experienceYears,
+    });
+    await this.expertProfileRepository.save(profileEntity);
+
+    return {
+      id: user.id,
+      name: user.name,
+      lastName: user.lastName,
+      email: user.email,
+      phoneNumber: user.phoneNumber,
+      profile: this.mapExpertProfileEntity(profileEntity),
+      group: null,
+      servicesCount: 0,
+      ordersCount: 0,
+    };
+  }
+
+  async updateAdminExpertMember(
+    userId: string,
+    dto: UpdateAdminExpertMemberDto,
+  ): Promise<AdminExpertMemberDetails> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.role !== UserRole.EXPERT) {
+      throw new NotFoundException(`Эксперт с ID ${userId} не найден`);
+    }
+
+    if (dto.email && dto.email !== user.email) {
+      const existingUser = await this.userRepository.findOne({ where: { email: dto.email } });
+      if (existingUser) {
+        throw new ConflictException('Пользователь с таким email уже существует');
+      }
+    }
+
+    if (dto.name !== undefined) user.name = dto.name.trim();
+    if (dto.lastName !== undefined) user.lastName = dto.lastName.trim();
+    if (dto.email !== undefined) user.email = dto.email.trim();
+    if (dto.phoneNumber !== undefined) user.phoneNumber = dto.phoneNumber.trim();
+    await this.userRepository.save(user);
+
+    let profileEntity = await this.expertProfileRepository.findOne({ where: { userId } });
+    if (!profileEntity) {
+      profileEntity = this.expertProfileRepository.create({ userId, skills: [] });
+    }
+    if (dto.description !== undefined) profileEntity.description = dto.description.trim();
+    if (dto.skills !== undefined) profileEntity.skills = dto.skills;
+    if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
+    await this.expertProfileRepository.save(profileEntity);
+
+    return this.getAdminExpertMemberById(userId);
+  }
+
+  async removeAdminExpertMember(userId: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.role !== UserRole.EXPERT) {
+      throw new NotFoundException(`Эксперт с ID ${userId} не найден`);
+    }
+
+    const hasActiveOrders = await this.orderItemRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.order', 'order')
+      .where('item."executorUserId" = :userId', { userId })
+      .andWhere('order.status IN (:...statuses)', {
+        statuses: [OrderStatus.PendingPayment, OrderStatus.Planned, OrderStatus.InProgress],
+      })
+      .getExists();
+
+    if (hasActiveOrders) {
+      throw new BadRequestException('Нельзя удалить эксперта с активными покупками');
+    }
+
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds([userId]);
+    const groupId = assignedByUserId.get(userId);
+    if (groupId) {
+      await this.removeExpertFromGroup(groupId, userId);
+    }
+
+    const firebaseUid = user.firebaseUid;
+    await this.userRepository.remove(user);
+
+    if (firebaseUid) {
+      try {
+        await this.firebaseService.getAuth().deleteUser(firebaseUid);
+      } catch {
+        // ignore firebase cleanup errors
+      }
+    }
+  }
+
+  private mapExpertProfileEntity(profile: ExpertProfile): AdminExpertMemberProfile {
+    return {
+      displayName: profile.displayName,
+      description: profile.description ?? '',
+      skills: profile.skills ?? [],
+      image: profile.image,
+      experienceYears: profile.experienceYears,
+    };
+  }
+
+  private resolveExpertProfile(
+    profile: ExpertProfile | null | undefined,
+    fallback: FallbackExpertProfile | undefined,
+    legacyUserExperienceYears: number | null,
+  ): AdminExpertMemberProfile {
+    return {
+      displayName: profile?.displayName ?? fallback?.displayName ?? null,
+      description: profile?.description ?? fallback?.description ?? '',
+      skills: profile?.skills?.length ? profile.skills : (fallback?.skills ?? []),
+      image: profile?.image ?? fallback?.image ?? null,
+      experienceYears: profile?.experienceYears
+        ?? fallback?.experienceYears
+        ?? legacyUserExperienceYears
+        ?? null,
+    };
+  }
+
+  private async loadFallbackExpertProfileByUserIds(
+    userIds: string[],
+  ): Promise<Map<string, FallbackExpertProfile>> {
+    if (!userIds.length) {
+      return new Map();
+    }
+
+    const rows = await this.dataSource
+      .getRepository(Service)
+      .createQueryBuilder('service')
+      .select('service."userId"', 'userId')
+      .addSelect('service.name', 'displayName')
+      .addSelect('service.description', 'description')
+      .addSelect('service.skills', 'skills')
+      .addSelect('service.image', 'image')
+      .addSelect('service."contractorExperienceYears"', 'experienceYears')
+      .where('service."userId" IN (:...userIds)', { userIds })
+      .andWhere('service.type = :contractorType', { contractorType: ServiceType.Contractor })
+      .andWhere('service."deletedAt" IS NULL')
+      .getRawMany<{
+        userId: string;
+        displayName: string | null;
+        description: string | null;
+        skills: string[] | null;
+        image: string | null;
+        experienceYears: string | null;
+      }>();
+
+    return new Map(
+      rows.map((row) => [row.userId, {
+        displayName: row.displayName,
+        description: row.description ?? '',
+        skills: row.skills ?? [],
+        image: row.image,
+        experienceYears: row.experienceYears === null ? null : Number(row.experienceYears),
+      }]),
+    );
   }
 
   private async findActiveGroupOrThrow(
