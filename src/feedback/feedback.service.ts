@@ -79,7 +79,7 @@ export class FeedbackService {
 
     const qb = this.feedbackRepository
       .createQueryBuilder('feedback')
-      .leftJoinAndSelect('feedback.user', 'user');
+      .leftJoinAndSelect('feedback.user', 'u');
 
     if (query.status) {
       qb.andWhere('feedback.status = :status', { status: query.status });
@@ -87,14 +87,19 @@ export class FeedbackService {
 
     if (query.search?.trim()) {
       const search = `%${query.search.trim()}%`;
-      qb.andWhere(new Brackets((sub) => {
-        sub
-          .where('feedback.message ILIKE :search', { search })
-          .orWhere('user.name ILIKE :search', { search })
-          .orWhere('user."lastName" ILIKE :search', { search })
-          .orWhere('user.email ILIKE :search', { search })
-          .orWhere(`CONCAT(user.name, ' ', user."lastName") ILIKE :search`, { search });
-      }));
+      qb.andWhere(
+        new Brackets((sub) => {
+          sub
+            .where('feedback.message ILIKE :search', { search })
+            .orWhere('u.name ILIKE :search', { search })
+            .orWhere('u."lastName" ILIKE :search', { search })
+            .orWhere('u.email ILIKE :search', { search })
+            .orWhere(
+              `CONCAT(u.name, ' ', u."lastName") ILIKE :search`,
+              { search },
+            );
+        }),
+      );
     }
 
     const sortColumnMap: Record<string, string> = {
