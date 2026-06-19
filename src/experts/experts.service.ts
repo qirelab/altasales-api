@@ -29,6 +29,8 @@ import {
   CreateAdminExpertMemberDto,
   UpdateAdminExpertMemberDto,
 } from './dto/admin-expert-member.dto';
+import { PublicExpertProfileDto } from './dto/public-expert-profile.dto';
+import { UpdateExpertProfileDto } from './dto/update-expert-profile.dto';
 import {
   CreateAdminExpertGroupDto,
   UpdateAdminExpertGroupDto,
@@ -78,6 +80,7 @@ export interface ExpertExecutorDto {
   id: string;
   name: string;
   lastName: string;
+  image: string | null;
   experienceYears: number | null;
   offerings: ExpertExecutorOfferingPrice[];
 }
@@ -366,6 +369,11 @@ export class ExpertsService {
       : [];
     const executorByUserId = new Map(executorUsers.map((user) => [user.id, user]));
     const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(executorUserIds);
+    const storedProfiles = executorUserIds.length > 0
+      ? await this.expertProfileRepository.find({ where: { userId: In(executorUserIds) } })
+      : [];
+    const profileByUserId = new Map(storedProfiles.map((profile) => [profile.userId, profile]));
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(executorUserIds);
 
     const executors = await Promise.all(
       activeMembers
@@ -374,11 +382,17 @@ export class ExpertsService {
           if (!memberUser) return null;
           const prices = await this.getMemberOfferingPrices(member.id, positionOfferings);
           if (memberUser.role !== UserRole.EXPERT) return null;
+          const resolvedProfile = this.resolveExpertProfile(
+            profileByUserId.get(memberUser.id),
+            fallbackProfileByUserId.get(memberUser.id),
+            memberUser.experienceYears,
+          );
           return {
             id: memberUser.id,
             name: memberUser.name,
             lastName: memberUser.lastName,
-            experienceYears: memberUser.experienceYears
+            image: resolvedProfile.image,
+            experienceYears: resolvedProfile.experienceYears
               ?? fallbackExperienceByUserId.get(memberUser.id)
               ?? null,
             offerings: prices,
@@ -1688,5 +1702,112 @@ export class ExpertsService {
       throw new NotFoundException('Группа экспертов не найдена');
     }
     return group;
+  }
+
+  async findPublicExpertProfile(userId: string): Promise<PublicExpertProfileDto> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.role !== UserRole.EXPERT) {
+      throw new NotFoundException(`Эксперт с ID ${userId} не найден`);
+    }
+
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds([userId]);
+    const groupId = assignedByUserId.get(userId) ?? null;
+
+    const storedProfile = await this.expertProfileRepository.findOne({ where: { userId } });
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds([userId]);
+    const resolvedProfile = this.resolveExpertProfile(
+      storedProfile,
+      fallbackProfileByUserId.get(userId),
+      user.experienceYears,
+    );
+
+    let group: PublicExpertProfileDto['group'] = null;
+    if (groupId) {
+      const position = await this.findActiveGroupOrThrow(groupId);
+      const services = await this.offeringRepository.find({
+        where: { positionId: groupId, deletedAt: IsNull() },
+        order: { name: 'ASC' },
+      });
+      const prices = services.length
+        ? await this.expertServicePriceRepository.find({
+          where: {
+            expertId: userId,
+            groupServiceId: In(services.map((service) => service.id)),
+          },
+        })
+        : [];
+      const priceByServiceId = new Map(
+        prices.map((entry) => [entry.groupServiceId, entry.price === null ? null : Number(entry.price)]),
+      );
+
+      group = {
+        id: position.id,
+        title: position.name,
+        description: position.description,
+        image: position.image ?? null,
+        services: services.map((service) => ({
+          id: service.id,
+          name: service.name,
+          description: service.description,
+          defaultPrice: Number(service.defaultPrice),
+          price: priceByServiceId.get(service.id) ?? null,
+        })),
+      };
+    }
+
+    const aggregateRaw = await this.orderItemRepository.manager
+      .getRepository(Order)
+      .createQueryBuilder('o')
+      .innerJoin('o.item', 'item')
+      .select('COUNT(o.id)', 'totalProjects')
+      .addSelect(
+        `SUM(CASE WHEN o.status = :completedStatus THEN 1 ELSE 0 END)`,
+        'completedProjects',
+      )
+      .where('item."executorUserId" = :userId', { userId })
+      .setParameter('completedStatus', OrderStatus.Completed)
+      .getRawOne<{
+        totalProjects: string | null;
+        completedProjects: string | null;
+      }>();
+
+    return {
+      id: user.id,
+      name: user.name,
+      lastName: user.lastName,
+      profile: {
+        description: resolvedProfile.description,
+        skills: resolvedProfile.skills,
+        image: resolvedProfile.image,
+        experienceYears: resolvedProfile.experienceYears,
+      },
+      group,
+      stats: {
+        totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
+        completedProjects: Number(aggregateRaw?.completedProjects ?? 0),
+      },
+    };
+  }
+
+  async updateExpertProfile(
+    userId: string,
+    dto: UpdateExpertProfileDto,
+  ): Promise<PublicExpertProfileDto> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.role !== UserRole.EXPERT) {
+      throw new NotFoundException('Эксперт не найден');
+    }
+
+    let profileEntity = await this.expertProfileRepository.findOne({ where: { userId } });
+    if (!profileEntity) {
+      profileEntity = this.expertProfileRepository.create({ userId, skills: [] });
+    }
+    if (dto.description !== undefined) profileEntity.description = dto.description.trim();
+    if (dto.skills !== undefined) profileEntity.skills = dto.skills;
+    if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
+    await this.expertProfileRepository.save(profileEntity);
+
+    return this.findPublicExpertProfile(userId);
   }
 }
