@@ -194,24 +194,39 @@ export class CartService {
     });
 
     if (existing) {
-      const existingOfferingIds = new Set(
-        (existing.offerings ?? []).map((offering) => offering.expertPositionOfferingId),
+      const offeringsById = new Map(
+        (existing.offerings ?? []).map((offering) => [offering.expertPositionOfferingId, offering]),
       );
-      const missingOfferingIds = offeringIds.filter((offeringId) => !existingOfferingIds.has(offeringId));
+      const missingOfferingIds = offeringIds.filter((offeringId) => !offeringsById.has(offeringId));
+      const existingOfferings = offeringIds
+        .map((offeringId) => offeringsById.get(offeringId))
+        .filter((offering): offering is CartItemOffering => Boolean(offering));
 
-      if (missingOfferingIds.length > 0) {
+      if (missingOfferingIds.length > 0 || existingOfferings.length > 0) {
         await this.dataSource.transaction(async (manager) => {
-          await manager.save(
-            CartItemOffering,
-            missingOfferingIds.map((offeringId) => manager.create(CartItemOffering, {
-              cartItemId: existing.id,
-              expertPositionOfferingId: offeringId,
-            })),
-          );
+          await manager.update(CartItem, { id: existing.id }, { quantity: 1 });
+
+          if (existingOfferings.length > 0) {
+            existingOfferings.forEach((offering) => {
+              offering.quantity += quantityToAdd;
+            });
+            await manager.save(
+              CartItemOffering,
+              existingOfferings,
+            );
+          }
+
+          if (missingOfferingIds.length > 0) {
+            await manager.save(
+              CartItemOffering,
+              missingOfferingIds.map((offeringId) => manager.create(CartItemOffering, {
+                cartItemId: existing.id,
+                expertPositionOfferingId: offeringId,
+                quantity: quantityToAdd,
+              })),
+            );
+          }
         });
-      } else {
-        existing.quantity += quantityToAdd;
-        await this.cartItemRepository.save(existing);
       }
 
       return this.getMyCart(userId);
@@ -224,7 +239,7 @@ export class CartService {
         packageId: null,
         expertPositionId: positionId,
         executorUserId,
-        quantity: quantityToAdd,
+        quantity: 1,
       });
       const savedItem = await manager.save(CartItem, item);
       await manager.save(
@@ -232,6 +247,7 @@ export class CartService {
         offeringIds.map((offeringId) => manager.create(CartItemOffering, {
           cartItemId: savedItem.id,
           expertPositionOfferingId: offeringId,
+          quantity: quantityToAdd,
         })),
       );
     });
@@ -248,6 +264,32 @@ export class CartService {
     }
     existing.quantity = dto.quantity;
     await this.cartItemRepository.save(existing);
+    return this.getMyCart(userId);
+  }
+
+  async updateExpertOfferingQuantity(
+    userId: string,
+    itemId: string,
+    offeringId: string,
+    dto: UpdateCartItemDto,
+  ) {
+    const cart = await this.ensureActiveCart(userId);
+    const existing = await this.cartItemRepository.findOne({
+      where: { cartId: cart.id, id: itemId },
+      relations: ['offerings'],
+    });
+    if (!existing || !existing.expertPositionId) {
+      throw new NotFoundException('Expert cart item not found');
+    }
+
+    const offeringEntry = (existing.offerings ?? [])
+      .find((offering) => offering.expertPositionOfferingId === offeringId);
+    if (!offeringEntry) {
+      throw new NotFoundException('Offering not found in cart item');
+    }
+
+    offeringEntry.quantity = dto.quantity;
+    await this.dataSource.manager.save(CartItemOffering, offeringEntry);
     return this.getMyCart(userId);
   }
 
