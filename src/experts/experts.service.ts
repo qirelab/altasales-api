@@ -1712,9 +1712,6 @@ export class ExpertsService {
 
     const assignedByUserId = await this.loadAssignedGroupsByUserIds([userId]);
     const groupId = assignedByUserId.get(userId) ?? null;
-    if (!groupId) {
-      throw new NotFoundException(`Эксперт с ID ${userId} не найден`);
-    }
 
     const storedProfile = await this.expertProfileRepository.findOne({ where: { userId } });
     const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds([userId]);
@@ -1724,22 +1721,39 @@ export class ExpertsService {
       user.experienceYears,
     );
 
-    const position = await this.findActiveGroupOrThrow(groupId);
-    const services = await this.offeringRepository.find({
-      where: { positionId: groupId, deletedAt: IsNull() },
-      order: { name: 'ASC' },
-    });
-    const prices = services.length
-      ? await this.expertServicePriceRepository.find({
-        where: {
-          expertId: userId,
-          groupServiceId: In(services.map((service) => service.id)),
-        },
-      })
-      : [];
-    const priceByServiceId = new Map(
-      prices.map((entry) => [entry.groupServiceId, entry.price === null ? null : Number(entry.price)]),
-    );
+    let group: PublicExpertProfileDto['group'] = null;
+    if (groupId) {
+      const position = await this.findActiveGroupOrThrow(groupId);
+      const services = await this.offeringRepository.find({
+        where: { positionId: groupId, deletedAt: IsNull() },
+        order: { name: 'ASC' },
+      });
+      const prices = services.length
+        ? await this.expertServicePriceRepository.find({
+          where: {
+            expertId: userId,
+            groupServiceId: In(services.map((service) => service.id)),
+          },
+        })
+        : [];
+      const priceByServiceId = new Map(
+        prices.map((entry) => [entry.groupServiceId, entry.price === null ? null : Number(entry.price)]),
+      );
+
+      group = {
+        id: position.id,
+        title: position.name,
+        description: position.description,
+        image: position.image ?? null,
+        services: services.map((service) => ({
+          id: service.id,
+          name: service.name,
+          description: service.description,
+          defaultPrice: Number(service.defaultPrice),
+          price: priceByServiceId.get(service.id) ?? null,
+        })),
+      };
+    }
 
     const aggregateRaw = await this.orderItemRepository.manager
       .getRepository(Order)
@@ -1767,19 +1781,7 @@ export class ExpertsService {
         image: resolvedProfile.image,
         experienceYears: resolvedProfile.experienceYears,
       },
-      group: {
-        id: position.id,
-        title: position.name,
-        description: position.description,
-        image: position.image ?? null,
-        services: services.map((service) => ({
-          id: service.id,
-          name: service.name,
-          description: service.description,
-          defaultPrice: Number(service.defaultPrice),
-          price: priceByServiceId.get(service.id) ?? null,
-        })),
-      },
+      group,
       stats: {
         totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
         completedProjects: Number(aggregateRaw?.completedProjects ?? 0),

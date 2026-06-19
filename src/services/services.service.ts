@@ -9,6 +9,7 @@ import { OrderStatus } from '../orders/entities/order-status.enum';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
+import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { GetAdminContractorsQueryDto } from './dto/get-admin-contractors-query.dto';
@@ -34,6 +35,8 @@ export class ServicesService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(ExpertProfile)
+    private readonly expertProfileRepository: Repository<ExpertProfile>,
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
     private readonly dataSource: DataSource,
@@ -488,7 +491,7 @@ export class ServicesService {
   }
 
   async findExpertProfile(userId: string): Promise<{
-    contractor: Service;
+    contractor: Service & { user: User | null; category?: Category | null };
     stats: {
       totalProjects: number;
       activeOrders: number;
@@ -502,19 +505,33 @@ export class ServicesService {
       status: string;
     }>;
   }> {
-    const contractor = await this.serviceRepository.findOne({
-      where: { type: ServiceType.Contractor, userId },
-      relations: ['user'],
-    });
-
-    if (!contractor) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.role !== UserRole.EXPERT) {
       throw new NotFoundException('Профиль эксперта не найден');
     }
+
+    const [contractor, expertProfile] = await Promise.all([
+      this.serviceRepository.findOne({
+        where: { type: ServiceType.Contractor, userId },
+        relations: ['user', 'category'],
+      }),
+      this.expertProfileRepository.findOne({ where: { userId } }),
+    ]);
+
+    const contractorView = contractor ?? this.buildExpertCabinetContractorView(user, expertProfile);
+
+    const expertOrdersFilter = new Brackets((qb) => {
+      qb.where('item."executorUserId" = :userId', { userId })
+        .orWhere('service.type = :contractorType AND service."userId" = :userId', {
+          contractorType: ServiceType.Contractor,
+          userId,
+        });
+    });
 
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
       .innerJoin('o.item', 'item')
-      .innerJoin('item.service', 'service')
+      .leftJoin('item.service', 'service')
       .select('COUNT(DISTINCT o.id)', 'totalProjects')
       .addSelect(
         `COUNT(DISTINCT CASE WHEN o.status IN (:...activeStatuses) THEN o.id END)`,
@@ -524,8 +541,7 @@ export class ServicesService {
         `COALESCE(SUM(CASE WHEN o.status = :completedStatus THEN item.amount ELSE 0 END), 0)`,
         'totalIncome',
       )
-      .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
-      .andWhere('service."userId" = :userId', { userId })
+      .where(expertOrdersFilter)
       .setParameter('activeStatuses', [
         OrderStatus.PendingPayment,
         OrderStatus.Planned,
@@ -541,14 +557,13 @@ export class ServicesService {
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
       .innerJoin('o.item', 'item')
-      .innerJoin('item.service', 'service')
+      .leftJoin('item.service', 'service')
       .select('o.id', 'id')
       .addSelect('COALESCE(item.hours, 0)', 'hours')
       .addSelect('o."createdAt"', 'createdAt')
       .addSelect('item.amount', 'amount')
       .addSelect('o.status', 'status')
-      .where('service.type = :contractorType', { contractorType: ServiceType.Contractor })
-      .andWhere('service."userId" = :userId', { userId })
+      .where(expertOrdersFilter)
       .orderBy('o."createdAt"', 'DESC')
       .getRawMany<{
         id: string;
@@ -559,7 +574,7 @@ export class ServicesService {
       }>();
 
     return {
-      contractor,
+      contractor: contractorView,
       stats: {
         totalProjects: Number(aggregateRaw?.totalProjects ?? 0),
         activeOrders: Number(aggregateRaw?.activeOrders ?? 0),
@@ -573,6 +588,35 @@ export class ServicesService {
         status: order.status,
       })),
     };
+  }
+
+  private buildExpertCabinetContractorView(
+    user: User,
+    expertProfile: ExpertProfile | null,
+  ): Service & { user: User | null } {
+    const displayName = expertProfile?.displayName?.trim()
+      || `${user.name} ${user.lastName}`.trim()
+      || user.name;
+
+    return {
+      id: user.id,
+      type: ServiceType.Contractor,
+      name: displayName,
+      description: expertProfile?.description ?? '',
+      categoryId: null,
+      category: null,
+      price: 0,
+      image: expertProfile?.image ?? null,
+      skills: expertProfile?.skills ?? [],
+      contractorRatePerHour: null,
+      contractorExperienceYears: expertProfile?.experienceYears ?? null,
+      userId: user.id,
+      user,
+      giftEligible: false,
+      deletedAt: null,
+      createdAt: user.createdAt,
+      packages: [],
+    } as Service & { user: User | null };
   }
 
   async findOneServiceForAdmin(id: string): Promise<{

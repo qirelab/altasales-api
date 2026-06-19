@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  ForbiddenException,
   HttpCode,
   HttpStatus,
   Post,
@@ -9,6 +10,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { CurrentUser, type CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { ApiBody, ApiConsumes, ApiCookieAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -34,7 +36,7 @@ export class CatalogStorageController {
   @Post('images/upload')
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(SessionGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.EXPERT)
   @ApiCookieAuth('session')
   @ApiOperation({
     summary: 'Upload catalog image to server disk (admin)',
@@ -69,11 +71,16 @@ export class CatalogStorageController {
     }),
   )
   async uploadImage(
+    @CurrentUser() user: CurrentUserData,
     @UploadedFile() file: Express.Multer.File,
     @Query('folder') folder: string,
   ): Promise<UploadCatalogImageResponseDto> {
     if (!CATALOG_STORAGE_FOLDERS.includes(folder as CatalogStorageFolder)) {
-      throw new BadRequestException('folder должен быть services или packages');
+      throw new BadRequestException('Некорректная папка загрузки');
+    }
+
+    if (user.role === UserRole.EXPERT && folder !== 'experts') {
+      throw new ForbiddenException('Эксперт может загружать изображения только в папку experts');
     }
 
     return this.catalogStorageService.uploadImage(file, folder as CatalogStorageFolder);
