@@ -6,7 +6,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AiCacheService } from './ai-cache.service';
 import { AiMonitoringService } from './ai-monitoring.service';
+import { AiError } from './errors/ai-error';
 import { AgentId } from './enums/agent-id.enum';
 import { AiMonitoringEventName } from './enums/ai-monitoring-event-name.enum';
 import { AiMonitoringOperation } from './enums/ai-monitoring-operation.enum';
@@ -31,6 +33,7 @@ describe('LlmProxyService', () => {
   let provider: MockLlmProvider;
   let fallbackProvider: MockLlmProvider;
   let openAICompatibleProvider: LlmProviderAdapter;
+  let fallbackOpenAICompatibleProvider: LlmProviderAdapter;
   let anonymizerProvider: { anonymize: jest.Mock };
   let piiAnonymizer: PiiAnonymizerService;
   let loggerLogSpy: jest.SpyInstance;
@@ -54,6 +57,17 @@ describe('LlmProxyService', () => {
     process.env.LLM_PRIMARY_PROVIDER = LlmProvider.Mock;
     process.env.LLM_PRIMARY_MODEL_ALIAS = 'mock-llm-v1';
     process.env.LLM_FALLBACK_ENABLED = 'false';
+    process.env.LLM_FALLBACK_PROVIDER = LlmProvider.OpenAICompatible;
+    process.env.LLM_FALLBACK_MODEL_ALIAS = 'chat-fallback';
+    process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_BASE_URL =
+      'https://fallback-provider.test';
+    process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY = 'fallback-secret-key';
+    process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_CHAT_MODEL =
+      'real-fallback-chat-model';
+    process.env.LLM_FALLBACK_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_PROVIDER_BACKOFF_BASE_MS = '1';
+    process.env.LLM_FALLBACK_PROVIDER_BACKOFF_MAX_MS = '1';
+    process.env.LLM_FALLBACK_PROVIDER_TIMEOUT_MS = '10000';
 
     loggerLogSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     loggerWarnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
@@ -76,9 +90,20 @@ describe('LlmProxyService', () => {
     openAICompatibleProvider = {
       providerId: LlmProvider.OpenAICompatible,
       modelId: 'chat-default',
+      providerRole: 'primary',
       isExternal: false,
       chat: jest.fn().mockResolvedValue({
         content: 'OpenAI-compatible response',
+        usage: usage(),
+      }),
+    };
+    fallbackOpenAICompatibleProvider = {
+      providerId: LlmProvider.OpenAICompatible,
+      modelId: 'chat-fallback',
+      providerRole: 'fallback',
+      isExternal: false,
+      chat: jest.fn().mockResolvedValue({
+        content: 'Fallback OpenAI-compatible response',
         usage: usage(),
       }),
     };
@@ -86,6 +111,7 @@ describe('LlmProxyService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         LlmProxyService,
+        AiCacheService,
         AiMonitoringService,
         PiiAnonymizerService,
         MockLlmProvider,
@@ -99,6 +125,7 @@ describe('LlmProxyService', () => {
             mockProvider,
             fallbackProvider,
             openAICompatibleProvider,
+            fallbackOpenAICompatibleProvider,
           ],
           inject: [MockLlmProvider],
         },
@@ -313,11 +340,13 @@ describe('LlmProxyService', () => {
     anonymizerProvider.anonymize.mockResolvedValueOnce(
       anonymizedEmailResponse(baseRequest.messages),
     );
-    jest.spyOn(provider, 'chat').mockRejectedValueOnce(
-      new Error(
-        'https://api.provider.test Authorization Bearer secret-key body user@example.com',
-      ),
-    );
+    jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValueOnce(
+        new Error(
+          'https://api.provider.test Authorization Bearer secret-key body user@example.com',
+        ),
+      );
 
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new ServiceUnavailableException('LLM provider is unavailable'),
@@ -357,7 +386,7 @@ describe('LlmProxyService', () => {
         status: AiMonitoringStatus.Success,
         latencyMs: expect.any(Number),
         providerAlias: 'primary',
-        modelAlias: 'default',
+        modelAlias: 'mock-llm-v1',
         providerConfigured: true,
       }),
     );
@@ -557,7 +586,7 @@ describe('LlmProxyService', () => {
     jest
       .spyOn(provider, 'chat')
       .mockRejectedValueOnce(new TypeError('primary unavailable'));
-    const fallbackSpy = jest.spyOn(fallbackProvider, 'chat');
+    const fallbackSpy = jest.spyOn(fallbackOpenAICompatibleProvider, 'chat');
 
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new ServiceUnavailableException('LLM provider is unavailable'),
@@ -565,30 +594,175 @@ describe('LlmProxyService', () => {
     expect(fallbackSpy).not.toHaveBeenCalled();
   });
 
-  it('uses fallback when enabled and primary fails transiently', async () => {
+  it('fallback disabled allows empty fallback provider config', async () => {
+    process.env.LLM_FALLBACK_ENABLED = 'false';
+    delete process.env.LLM_FALLBACK_PROVIDER;
+    delete process.env.LLM_FALLBACK_MODEL_ALIAS;
+    delete process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_BASE_URL;
+    delete process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY;
+    delete process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_CHAT_MODEL;
+
+    const response = await service.chat(baseRequest);
+
+    expect(response.content).toBe('Mock LLM response');
+  });
+
+  it('fallback enabled with missing fallback config fails safely before primary provider call', async () => {
     process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
     process.env.LLM_FALLBACK_ENABLED = 'true';
-    process.env.LLM_FALLBACK_PROVIDER = LlmProvider.Mock;
-    process.env.LLM_FALLBACK_MODEL = 'mock-fallback-v1';
+    delete process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY;
+    const primarySpy = jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Primary response',
+      usage: usage(),
+    });
+    const fallbackSpy = jest.spyOn(fallbackOpenAICompatibleProvider, 'chat');
+
+    await expect(service.chat(baseRequest)).rejects.toThrow(
+      new ServiceUnavailableException('LLM provider configuration is invalid'),
+    );
+    expect(primarySpy).not.toHaveBeenCalled();
+    expect(fallbackSpy).not.toHaveBeenCalled();
+
+    const serializedLogs = serializeLogs();
+    expect(serializedLogs).toContain('AI_PROVIDER_CONFIG_INVALID');
+    expect(serializedLogs).not.toContain('fallback-secret-key');
+    expect(serializedLogs).not.toContain('real-fallback-chat-model');
+    expect(serializedLogs).not.toContain('https://fallback-provider.test');
+  });
+
+  it('uses fallback model alias when enabled and primary fails transiently', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
     jest
       .spyOn(provider, 'chat')
       .mockRejectedValueOnce(new TypeError('primary unavailable'));
-    const fallbackSpy = jest.spyOn(fallbackProvider, 'chat').mockResolvedValueOnce({
-      content: 'Fallback response',
-      usage: usage(),
-    });
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Fallback response',
+        usage: usage(),
+      });
 
     const response = await service.chat(baseRequest);
 
     expect(response.content).toBe('Fallback response');
-    expect(response.modelId).toBe('mock-fallback-v1');
+    expect(response.modelId).toBe('chat-fallback');
     expect(fallbackSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects primary and fallback adapters by provider role when aliases collide', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    process.env.LLM_PRIMARY_PROVIDER = LlmProvider.OpenAICompatible;
+    process.env.LLM_PRIMARY_MODEL_ALIAS = 'shared-chat-alias';
+    process.env.LLM_FALLBACK_MODEL_ALIAS = 'shared-chat-alias';
+    openAICompatibleProvider.modelId = 'shared-chat-alias';
+    fallbackOpenAICompatibleProvider.modelId = 'shared-chat-alias';
+    const primarySpy = jest
+      .spyOn(openAICompatibleProvider, 'chat')
+      .mockRejectedValueOnce(new TypeError('primary unavailable'));
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Fallback selected by role',
+        usage: usage(),
+      });
+
+    const response = await service.chat(baseRequest);
+
+    expect(response.content).toBe('Fallback selected by role');
+    expect(response.modelId).toBe('shared-chat-alias');
+    expect(primarySpy).toHaveBeenCalledTimes(1);
+    expect(fallbackSpy).toHaveBeenCalledTimes(1);
+
+    const serializedLogs = serializeLogs();
+    expect(serializedLogs).toContain('primary');
+    expect(serializedLogs).toContain('fallback');
+    expect(serializedLogs).not.toContain('fallback-secret-key');
+    expect(serializedLogs).not.toContain('real-fallback-chat-model');
+    expect(serializedLogs).not.toContain('https://fallback-provider.test');
+  });
+
+  it.each([
+    [
+      'timeout',
+      new AiError('AI_PROVIDER_TIMEOUT', 'provider_timeout', {
+        retryable: true,
+        fallbackEligible: true,
+      }),
+    ],
+    ['network unavailable', new TypeError('primary network unavailable')],
+    ['5xx', Object.assign(new Error('raw provider 500 body'), { status: 500 })],
+    ['429', Object.assign(new Error('raw provider 429 body'), { status: 429 })],
+  ])(
+    'uses fallback after primary transient %s failure',
+    async (_name, error) => {
+      process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+      process.env.LLM_FALLBACK_ENABLED = 'true';
+      jest.spyOn(provider, 'chat').mockRejectedValueOnce(error);
+      const fallbackSpy = jest
+        .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+        .mockResolvedValueOnce({
+          content: 'Fallback response',
+          usage: usage(),
+        });
+
+      const response = await service.chat(baseRequest);
+
+      expect(response.content).toBe('Fallback response');
+      expect(response.providerId).toBe(LlmProvider.OpenAICompatible);
+      expect(response.modelId).toBe('chat-fallback');
+      expect(fallbackSpy).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not use fallback for primary provider config errors', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    jest.spyOn(openAICompatibleProvider, 'chat').mockRejectedValueOnce(
+      new AiError('AI_PROVIDER_CONFIG_INVALID', 'provider_config_invalid', {
+        retryable: false,
+        fallbackEligible: false,
+      }),
+    );
+    process.env.LLM_PRIMARY_PROVIDER = LlmProvider.OpenAICompatible;
+    process.env.LLM_PRIMARY_MODEL_ALIAS = 'chat-default';
+    const fallbackSpy = jest.spyOn(fallbackOpenAICompatibleProvider, 'chat');
+
+    await expect(service.chat(baseRequest)).rejects.toThrow(
+      new ServiceUnavailableException('LLM provider configuration is invalid'),
+    );
+    expect(fallbackSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses fallback-specific retry and backoff settings', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_PROVIDER_BACKOFF_BASE_MS = '99';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    process.env.LLM_FALLBACK_PROVIDER_MAX_ATTEMPTS = '2';
+    process.env.LLM_FALLBACK_PROVIDER_BACKOFF_BASE_MS = '7';
+    process.env.LLM_FALLBACK_PROVIDER_BACKOFF_MAX_MS = '7';
+    const timeoutSpy = jest.spyOn(global, 'setTimeout');
+    jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValueOnce(new TypeError('primary unavailable'));
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockRejectedValueOnce(new TypeError('fallback network unavailable'))
+      .mockResolvedValueOnce({
+        content: 'Fallback recovered response',
+        usage: usage(),
+      });
+
+    const response = await service.chat(baseRequest);
+
+    expect(response.content).toBe('Fallback recovered response');
+    expect(fallbackSpy).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 7);
   });
 
   it('does not use fallback for restore errors', async () => {
     process.env.LLM_FALLBACK_ENABLED = 'true';
-    process.env.LLM_FALLBACK_PROVIDER = LlmProvider.Mock;
-    process.env.LLM_FALLBACK_MODEL = 'mock-fallback-v1';
     anonymizerProvider.anonymize.mockResolvedValueOnce(
       anonymizedEmailResponse(baseRequest.messages),
     );
@@ -596,7 +770,7 @@ describe('LlmProxyService', () => {
       content: 'Unknown {{PII_PHONE_0001}}',
       usage: usage(),
     });
-    const fallbackSpy = jest.spyOn(fallbackProvider, 'chat');
+    const fallbackSpy = jest.spyOn(fallbackOpenAICompatibleProvider, 'chat');
 
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new BadRequestException('LLM response restore failed'),
@@ -607,13 +781,13 @@ describe('LlmProxyService', () => {
   it('blocks fallback when fallback model is not allowed', async () => {
     process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
     process.env.LLM_FALLBACK_ENABLED = 'true';
-    process.env.LLM_FALLBACK_PROVIDER = LlmProvider.Mock;
+    process.env.LLM_FALLBACK_MODEL_ALIAS = 'chat-fallback';
     process.env.LLM_FALLBACK_MODEL = 'mock-fallback-v1';
     process.env.LLM_ALLOWED_MODEL_ALIASES = 'mock-llm-v1';
     jest
       .spyOn(provider, 'chat')
       .mockRejectedValueOnce(new TypeError('primary unavailable'));
-    const fallbackSpy = jest.spyOn(fallbackProvider, 'chat');
+    const fallbackSpy = jest.spyOn(fallbackOpenAICompatibleProvider, 'chat');
 
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new ForbiddenException('LLM model is not allowed by policy'),
@@ -644,20 +818,20 @@ describe('LlmProxyService', () => {
   it('safe logs across retry and fallback do not include raw payloads', async () => {
     process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
     process.env.LLM_FALLBACK_ENABLED = 'true';
-    process.env.LLM_FALLBACK_PROVIDER = LlmProvider.Mock;
-    process.env.LLM_FALLBACK_MODEL = 'mock-fallback-v1';
     anonymizerProvider.anonymize.mockResolvedValueOnce(
       anonymizedEmailResponse(baseRequest.messages),
     );
-    jest.spyOn(provider, 'chat').mockRejectedValueOnce(
-      Object.assign(
-        new Error(
-          'https://provider.test Authorization Bearer secret body user@example.com placeholderMap',
+    jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'https://provider.test Authorization Bearer secret body user@example.com placeholderMap',
+          ),
+          { status: 500 },
         ),
-        { status: 500 },
-      ),
-    );
-    jest.spyOn(fallbackProvider, 'chat').mockResolvedValueOnce({
+      );
+    jest.spyOn(fallbackOpenAICompatibleProvider, 'chat').mockResolvedValueOnce({
       content: 'Email {{PII_EMAIL_0001}}',
       usage: usage(),
     });
@@ -681,14 +855,16 @@ describe('LlmProxyService', () => {
 
   it('failure monitoring does not include raw provider error body or endpoint fields', async () => {
     process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
-    jest.spyOn(provider, 'chat').mockRejectedValueOnce(
-      Object.assign(
-        new Error(
-          'raw provider body https://provider.test Authorization Bearer secret user@example.com',
+    jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error(
+            'raw provider body https://provider.test Authorization Bearer secret user@example.com',
+          ),
+          { status: 500 },
         ),
-        { status: 500 },
-      ),
-    );
+      );
 
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new ServiceUnavailableException('LLM provider is unavailable'),
@@ -714,6 +890,33 @@ describe('LlmProxyService', () => {
     await expect(service.chat(baseRequest)).rejects.toThrow(
       new ForbiddenException('LLM request blocked by data policy'),
     );
+  });
+
+  it('does not cache provider responses rejected by output PII scan', async () => {
+    const cachedRequest = {
+      ...baseRequest,
+      policy: { cacheTtlMs: 60_000 },
+    };
+    const chatSpy = jest
+      .spyOn(provider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'New email leak@example.com',
+        usage: usage(),
+      })
+      .mockResolvedValueOnce({
+        content: 'Safe response',
+        usage: usage(),
+      });
+
+    await expect(service.chat(cachedRequest)).rejects.toThrow(
+      new ForbiddenException('LLM request blocked by data policy'),
+    );
+
+    const response = await service.chat(cachedRequest);
+
+    expect(response.content).toBe('Safe response');
+    expect(response.cacheHit).toBe(false);
+    expect(chatSpy).toHaveBeenCalledTimes(2);
   });
 
   it('uses generic validation errors', async () => {
@@ -777,6 +980,21 @@ describe('LlmProxyService', () => {
       LLM_FALLBACK_ENABLED: process.env.LLM_FALLBACK_ENABLED,
       LLM_FALLBACK_PROVIDER: process.env.LLM_FALLBACK_PROVIDER,
       LLM_FALLBACK_MODEL: process.env.LLM_FALLBACK_MODEL,
+      LLM_FALLBACK_MODEL_ALIAS: process.env.LLM_FALLBACK_MODEL_ALIAS,
+      LLM_FALLBACK_OPENAI_COMPATIBLE_BASE_URL:
+        process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_BASE_URL,
+      LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY:
+        process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY,
+      LLM_FALLBACK_OPENAI_COMPATIBLE_CHAT_MODEL:
+        process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_CHAT_MODEL,
+      LLM_FALLBACK_PROVIDER_MAX_ATTEMPTS:
+        process.env.LLM_FALLBACK_PROVIDER_MAX_ATTEMPTS,
+      LLM_FALLBACK_PROVIDER_BACKOFF_BASE_MS:
+        process.env.LLM_FALLBACK_PROVIDER_BACKOFF_BASE_MS,
+      LLM_FALLBACK_PROVIDER_BACKOFF_MAX_MS:
+        process.env.LLM_FALLBACK_PROVIDER_BACKOFF_MAX_MS,
+      LLM_FALLBACK_PROVIDER_TIMEOUT_MS:
+        process.env.LLM_FALLBACK_PROVIDER_TIMEOUT_MS,
       LLM_ALLOWED_PROVIDERS: process.env.LLM_ALLOWED_PROVIDERS,
       LLM_ALLOWED_MODEL_ALIASES: process.env.LLM_ALLOWED_MODEL_ALIASES,
     };

@@ -23,9 +23,13 @@ describe('EmbeddingProxyService', () => {
       LLM_ALLOWED_MODEL_ALIASES: process.env.LLM_ALLOWED_MODEL_ALIASES,
       LLM_EMBEDDING_TIMEOUT_MS: process.env.LLM_EMBEDDING_TIMEOUT_MS,
       LLM_EMBEDDING_MAX_ATTEMPTS: process.env.LLM_EMBEDDING_MAX_ATTEMPTS,
-      LLM_EMBEDDING_BACKOFF_BASE_MS:
-        process.env.LLM_EMBEDDING_BACKOFF_BASE_MS,
+      LLM_EMBEDDING_BACKOFF_BASE_MS: process.env.LLM_EMBEDDING_BACKOFF_BASE_MS,
       LLM_EMBEDDING_BACKOFF_MAX_MS: process.env.LLM_EMBEDDING_BACKOFF_MAX_MS,
+      LLM_FALLBACK_ENABLED: process.env.LLM_FALLBACK_ENABLED,
+      LLM_FALLBACK_PROVIDER: process.env.LLM_FALLBACK_PROVIDER,
+      LLM_FALLBACK_MODEL_ALIAS: process.env.LLM_FALLBACK_MODEL_ALIAS,
+      LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY:
+        process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY,
     };
     process.env.LLM_EMBEDDING_PROVIDER = 'openai_compatible';
     process.env.LLM_EMBEDDING_MODEL_ALIAS = 'embedding-default';
@@ -82,6 +86,21 @@ describe('EmbeddingProxyService', () => {
     expect(serializedLogs).not.toContain('0.2');
   });
 
+  it('does not apply chat fallback config to embeddings', async () => {
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    process.env.LLM_FALLBACK_PROVIDER = 'openai_compatible';
+    process.env.LLM_FALLBACK_MODEL_ALIAS = 'chat-fallback';
+    delete process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY;
+
+    const response = await service.embed({
+      inputs: ['public chunk'],
+      declaredDataClass: DataClass.NoPii,
+    });
+
+    expect(response.vectors).toEqual([[0.1, 0.2]]);
+    expect(provider.embed).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects empty inputs without retrying provider calls', async () => {
     await expect(
       service.embed({ inputs: [], declaredDataClass: DataClass.NoPii }),
@@ -93,7 +112,10 @@ describe('EmbeddingProxyService', () => {
     'blocks %s for external embedding providers',
     async (dataClass) => {
       await expect(
-        service.embed({ inputs: ['private chunk'], declaredDataClass: dataClass }),
+        service.embed({
+          inputs: ['private chunk'],
+          declaredDataClass: dataClass,
+        }),
       ).rejects.toThrow(ForbiddenException);
       expect(provider.embed).not.toHaveBeenCalled();
     },
@@ -115,7 +137,10 @@ describe('EmbeddingProxyService', () => {
     provider.isExternal = false;
 
     await expect(
-      service.embed({ inputs: ['private chunk'], declaredDataClass: DataClass.Unknown }),
+      service.embed({
+        inputs: ['private chunk'],
+        declaredDataClass: DataClass.Unknown,
+      }),
     ).rejects.toThrow(ForbiddenException);
     expect(provider.embed).not.toHaveBeenCalled();
   });
@@ -145,7 +170,10 @@ describe('EmbeddingProxyService', () => {
     process.env.LLM_ALLOWED_MODEL_ALIASES = 'chat-default';
 
     await expect(
-      service.embed({ inputs: ['public chunk'], declaredDataClass: DataClass.NoPii }),
+      service.embed({
+        inputs: ['public chunk'],
+        declaredDataClass: DataClass.NoPii,
+      }),
     ).rejects.toThrow(ForbiddenException);
     expect(provider.embed).not.toHaveBeenCalled();
   });
@@ -153,11 +181,16 @@ describe('EmbeddingProxyService', () => {
   it('maps provider failures to safe unavailable errors', async () => {
     process.env.LLM_EMBEDDING_MAX_ATTEMPTS = '1';
     (provider.embed as jest.Mock).mockRejectedValueOnce(
-      Object.assign(new Error('raw provider body private chunk'), { status: 500 }),
+      Object.assign(new Error('raw provider body private chunk'), {
+        status: 500,
+      }),
     );
 
     await expect(
-      service.embed({ inputs: ['private chunk'], declaredDataClass: DataClass.NoPii }),
+      service.embed({
+        inputs: ['private chunk'],
+        declaredDataClass: DataClass.NoPii,
+      }),
     ).rejects.toThrow(ServiceUnavailableException);
 
     const serializedLogs = serializeLogs();
@@ -178,7 +211,10 @@ describe('EmbeddingProxyService', () => {
     );
 
     await expect(
-      service.embed({ inputs: ['private chunk'], declaredDataClass: DataClass.NoPii }),
+      service.embed({
+        inputs: ['private chunk'],
+        declaredDataClass: DataClass.NoPii,
+      }),
     ).rejects.toThrow(ServiceUnavailableException);
 
     const serializedLogs = serializeLogs();

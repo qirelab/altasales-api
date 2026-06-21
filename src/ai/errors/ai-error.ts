@@ -1,6 +1,7 @@
 export type AiErrorCode =
   | 'AI_PROVIDER_TIMEOUT'
   | 'AI_PROVIDER_RETRY_EXHAUSTED'
+  | 'AI_PROVIDER_CONFIG_INVALID'
   | 'AI_PROVIDER_UNAVAILABLE'
   | 'AI_PROVIDER_RATE_LIMITED'
   | 'AI_PROVIDER_HTTP_5XX'
@@ -28,7 +29,11 @@ export class AiError extends Error {
   readonly fallbackEligible: boolean;
   readonly status?: number;
 
-  constructor(code: AiErrorCode, message: string, options: AiErrorOptions = {}) {
+  constructor(
+    code: AiErrorCode,
+    message: string,
+    options: AiErrorOptions = {},
+  ) {
     super(message);
     this.name = 'AiError';
     this.code = code;

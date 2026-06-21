@@ -6,7 +6,11 @@ import { LlmProxyService } from './llm-proxy.service';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
 import { AnonymizerLlmProvider } from './providers/anonymizer-llm.provider';
 import { EMBEDDING_PROVIDER_ADAPTERS } from './providers/embedding-provider-registry';
-import { LLM_PROVIDER_ADAPTERS } from './providers/llm-provider-registry';
+import {
+  FALLBACK_OPENAI_COMPATIBLE_CHAT_PROVIDER,
+  LLM_PROVIDER_ADAPTERS,
+  PRIMARY_OPENAI_COMPATIBLE_CHAT_PROVIDER,
+} from './providers/llm-provider-registry';
 import { MockLlmProvider } from './providers/mock-llm.provider';
 import { OpenAICompatibleChatProviderAdapter } from './providers/openai-compatible-chat.provider';
 import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-compatible-embedding.provider';
@@ -20,15 +24,31 @@ import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-com
     PiiAnonymizerService,
     MockLlmProvider,
     AnonymizerLlmProvider,
-    OpenAICompatibleChatProviderAdapter,
     OpenAICompatibleEmbeddingProviderAdapter,
+    {
+      provide: PRIMARY_OPENAI_COMPATIBLE_CHAT_PROVIDER,
+      useFactory: () => new OpenAICompatibleChatProviderAdapter('primary'),
+    },
+    {
+      provide: FALLBACK_OPENAI_COMPATIBLE_CHAT_PROVIDER,
+      useFactory: () => new OpenAICompatibleChatProviderAdapter('fallback'),
+    },
     {
       provide: LLM_PROVIDER_ADAPTERS,
       useFactory: (
         mockProvider: MockLlmProvider,
-        openAICompatibleProvider: OpenAICompatibleChatProviderAdapter,
-      ) => [mockProvider, openAICompatibleProvider],
-      inject: [MockLlmProvider, OpenAICompatibleChatProviderAdapter],
+        primaryOpenAICompatibleProvider: OpenAICompatibleChatProviderAdapter,
+        fallbackOpenAICompatibleProvider: OpenAICompatibleChatProviderAdapter,
+      ) => [
+        mockProvider,
+        primaryOpenAICompatibleProvider,
+        fallbackOpenAICompatibleProvider,
+      ],
+      inject: [
+        MockLlmProvider,
+        PRIMARY_OPENAI_COMPATIBLE_CHAT_PROVIDER,
+        FALLBACK_OPENAI_COMPATIBLE_CHAT_PROVIDER,
+      ],
     },
     {
       provide: EMBEDDING_PROVIDER_ADAPTERS,

@@ -35,6 +35,7 @@ const VALIDATION_ERROR = 'LLM request validation failed';
 const POLICY_ERROR = 'LLM request blocked by data policy';
 const PROVIDER_POLICY_ERROR = 'LLM provider is not allowed by policy';
 const MODEL_POLICY_ERROR = 'LLM model is not allowed by policy';
+const PROVIDER_CONFIG_ERROR = 'LLM provider configuration is invalid';
 const PROVIDER_TIMEOUT_ERROR = 'LLM provider timed out';
 const PROVIDER_UNAVAILABLE_ERROR = 'LLM provider is unavailable';
 const RESTORE_ERROR = 'LLM response restore failed';
@@ -44,15 +45,28 @@ const DEFAULT_PROVIDER_TIMEOUT_MS = 10_000;
 const DEFAULT_PROVIDER_MAX_ATTEMPTS = 2;
 const DEFAULT_PROVIDER_BACKOFF_BASE_MS = 200;
 const DEFAULT_PROVIDER_BACKOFF_MAX_MS = 2_000;
+const DEFAULT_FALLBACK_PROVIDER_TIMEOUT_MS = 10_000;
+const DEFAULT_FALLBACK_PROVIDER_MAX_ATTEMPTS = 1;
+const DEFAULT_FALLBACK_PROVIDER_BACKOFF_BASE_MS = 200;
+const DEFAULT_FALLBACK_PROVIDER_BACKOFF_MAX_MS = 1_000;
 
 type SafeException = Error & {
   safeErrorCode?: SafeLlmErrorCode;
 };
 
 type ProviderCallResult = {
-  response: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
+  response?: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
+  cachedResponse?: CachedChatResponse;
   cacheKey?: string;
   cacheHit?: boolean;
+};
+
+type CachedChatResponse = Omit<LlmChatResponse, 'cacheKey' | 'cacheHit'>;
+
+type ProviderSelectionResult = ProviderCallResult & {
+  provider: LlmProviderAdapter;
+  fallbackUsed: boolean;
+  fallbackReasonCode?: SafeLlmErrorCode;
 };
 
 @Injectable()
@@ -83,6 +97,7 @@ export class LlmProxyService {
     try {
       this.validateRequest(request);
       task = request.task;
+      this.assertFallbackConfig();
 
       const declaredDataClass = this.resolveDeclaredDataClass(request);
       const anonymizationMode = this.getAnonymizationMode();
@@ -119,7 +134,29 @@ export class LlmProxyService {
       fallbackReasonCode = providerCallResult.fallbackReasonCode;
       cacheKey = providerCallResult.cacheKey;
       cacheHit = providerCallResult.cacheHit;
+      if (providerCallResult.cachedResponse) {
+        const response: LlmChatResponse = {
+          ...providerCallResult.cachedResponse,
+          cacheKey,
+          cacheHit,
+        };
+
+        this.logFlowSucceeded({
+          request,
+          response,
+          fallbackUsed,
+          fallbackReasonCode,
+          anonymizationStats,
+          startedAt: flowStartedAt,
+        });
+
+        return response;
+      }
+
       const providerResponse = providerCallResult.response;
+      if (!providerResponse) {
+        throw this.safeProviderUnavailableError('AI_PROVIDER_UNAVAILABLE');
+      }
 
       currentStage = AiMonitoringStage.SafetyScan;
       this.assertProviderResponsePolicy(providerResponse.content);
@@ -141,24 +178,19 @@ export class LlmProxyService {
         cacheHit,
       };
 
-      this.monitoring.log({
-        eventName: AiMonitoringEventName.AiFlowSucceeded,
-        operation: AiMonitoringOperation.LlmChat,
-        stage: AiMonitoringStage.AiFlow,
-        status: AiMonitoringStatus.Success,
-        providerAlias: fallbackUsed ? 'fallback' : 'primary',
-        modelAlias: 'default',
-        providerConfigured: true,
-        task: request.task,
-        dataClass: response.dataClass,
-        effectiveDataClass: response.dataClass,
-        tokensIn: response.usage.tokensIn,
-        tokensOut: response.usage.tokensOut,
-        costRub: response.usage.costRub,
-        latencyMs: Date.now() - flowStartedAt,
-        anonymizationStats,
+      this.writeSafeCachedResponse(
+        cacheKey,
+        cacheHit,
+        response,
+        request.policy?.cacheTtlMs,
+      );
+      this.logFlowSucceeded({
+        request,
+        response,
         fallbackUsed,
         fallbackReasonCode,
+        anonymizationStats,
+        startedAt: flowStartedAt,
       });
 
       return response;
@@ -312,7 +344,7 @@ export class LlmProxyService {
     const modelId =
       role === 'primary'
         ? process.env.LLM_PRIMARY_MODEL_ALIAS || this.mockProvider.modelId
-        : process.env.LLM_FALLBACK_MODEL;
+        : process.env.LLM_FALLBACK_MODEL_ALIAS;
 
     if (!providerId) {
       throw this.safePolicyError(
@@ -321,7 +353,7 @@ export class LlmProxyService {
       );
     }
 
-    const provider = this.findProvider(providerId, modelId);
+    const provider = this.findProvider(providerId, modelId, role);
     this.assertProviderAndModelAllowed(provider, request);
     return provider;
   }
@@ -329,12 +361,14 @@ export class LlmProxyService {
   private findProvider(
     providerId: string,
     modelId?: string,
+    role: 'primary' | 'fallback' = 'primary',
   ): LlmProviderAdapter {
     const providers = this.getRegisteredProviders();
     const provider = providers.find(
       (candidate) =>
         candidate.providerId === providerId &&
-        (!modelId || candidate.modelId === modelId),
+        (!modelId || candidate.modelId === modelId) &&
+        this.getProviderRole(candidate) === role,
     );
 
     if (provider) {
@@ -349,6 +383,12 @@ export class LlmProxyService {
       'AI_PROVIDER_NOT_ALLOWED',
       PROVIDER_POLICY_ERROR,
     );
+  }
+
+  private getProviderRole(
+    provider: LlmProviderAdapter,
+  ): 'primary' | 'fallback' {
+    return provider.providerRole ?? 'primary';
   }
 
   private getRegisteredProviders(): LlmProviderAdapter[] {
@@ -409,14 +449,7 @@ export class LlmProxyService {
     provider: LlmProviderAdapter,
     messages: LlmMessage[],
     effectiveDataClass: DataClass,
-  ): Promise<{
-    provider: LlmProviderAdapter;
-    response: Awaited<ReturnType<LlmProviderAdapter['chat']>>;
-    fallbackUsed: boolean;
-    fallbackReasonCode?: SafeLlmErrorCode;
-    cacheKey?: string;
-    cacheHit?: boolean;
-  }> {
+  ): Promise<ProviderSelectionResult> {
     try {
       const callResult = await this.callProvider(
         request,
@@ -428,10 +461,8 @@ export class LlmProxyService {
 
       return {
         provider,
-        response: callResult.response,
+        ...callResult,
         fallbackUsed: false,
-        cacheKey: callResult.cacheKey,
-        cacheHit: callResult.cacheHit,
       };
     } catch (error) {
       if (!this.shouldUseFallback(error)) {
@@ -446,7 +477,7 @@ export class LlmProxyService {
         status: AiMonitoringStatus.Failure,
         task: request.task,
         providerAlias: 'primary',
-        modelAlias: 'default',
+        modelAlias: provider.modelId,
         providerConfigured: true,
         dataClass: effectiveDataClass,
         effectiveDataClass,
@@ -472,7 +503,7 @@ export class LlmProxyService {
           status: AiMonitoringStatus.Success,
           task: request.task,
           providerAlias: 'fallback',
-          modelAlias: 'default',
+          modelAlias: fallbackProvider.modelId,
           providerConfigured: true,
           dataClass: effectiveDataClass,
           effectiveDataClass,
@@ -482,11 +513,9 @@ export class LlmProxyService {
 
         return {
           provider: fallbackProvider,
-          response: callResult.response,
+          ...callResult,
           fallbackUsed: true,
           fallbackReasonCode,
-          cacheKey: callResult.cacheKey,
-          cacheHit: callResult.cacheHit,
         };
       } catch (fallbackError) {
         this.monitoring.log({
@@ -496,7 +525,7 @@ export class LlmProxyService {
           status: AiMonitoringStatus.Failure,
           task: request.task,
           providerAlias: 'fallback',
-          modelAlias: 'default',
+          modelAlias: this.safeFallbackModelAlias(),
           providerConfigured: Boolean(process.env.LLM_FALLBACK_PROVIDER),
           dataClass: effectiveDataClass,
           effectiveDataClass,
@@ -529,7 +558,7 @@ export class LlmProxyService {
       return { response: await providerCall() };
     }
 
-    const cached = await this.aiCache.remember(
+    const cacheKey = this.aiCache.buildKey(
       'llm:chat',
       this.buildCachePayload(
         request,
@@ -538,15 +567,14 @@ export class LlmProxyService {
         effectiveDataClass,
         providerAlias,
       ),
-      providerCall,
-      request.policy.cacheTtlMs,
     );
+    const cached = this.aiCache.read<CachedChatResponse>(cacheKey);
 
-    return {
-      response: cached.value,
-      cacheKey: cached.key,
-      cacheHit: cached.hit,
-    };
+    if (cached) {
+      return { cachedResponse: cached, cacheKey, cacheHit: true };
+    }
+
+    return { response: await providerCall(), cacheKey, cacheHit: false };
   }
 
   private async executeProviderCall(
@@ -557,20 +585,36 @@ export class LlmProxyService {
     providerAlias: 'primary' | 'fallback',
   ) {
     const timeoutMs = this.getPositiveInteger(
-      process.env.LLM_PROVIDER_TIMEOUT_MS,
-      DEFAULT_PROVIDER_TIMEOUT_MS,
+      providerAlias === 'fallback'
+        ? process.env.LLM_FALLBACK_PROVIDER_TIMEOUT_MS
+        : process.env.LLM_PROVIDER_TIMEOUT_MS,
+      providerAlias === 'fallback'
+        ? DEFAULT_FALLBACK_PROVIDER_TIMEOUT_MS
+        : DEFAULT_PROVIDER_TIMEOUT_MS,
     );
     const maxAttempts = this.getPositiveInteger(
-      process.env.LLM_PROVIDER_MAX_ATTEMPTS,
-      DEFAULT_PROVIDER_MAX_ATTEMPTS,
+      providerAlias === 'fallback'
+        ? process.env.LLM_FALLBACK_PROVIDER_MAX_ATTEMPTS
+        : process.env.LLM_PROVIDER_MAX_ATTEMPTS,
+      providerAlias === 'fallback'
+        ? DEFAULT_FALLBACK_PROVIDER_MAX_ATTEMPTS
+        : DEFAULT_PROVIDER_MAX_ATTEMPTS,
     );
     const backoffBaseMs = this.getPositiveInteger(
-      process.env.LLM_PROVIDER_BACKOFF_BASE_MS,
-      DEFAULT_PROVIDER_BACKOFF_BASE_MS,
+      providerAlias === 'fallback'
+        ? process.env.LLM_FALLBACK_PROVIDER_BACKOFF_BASE_MS
+        : process.env.LLM_PROVIDER_BACKOFF_BASE_MS,
+      providerAlias === 'fallback'
+        ? DEFAULT_FALLBACK_PROVIDER_BACKOFF_BASE_MS
+        : DEFAULT_PROVIDER_BACKOFF_BASE_MS,
     );
     const backoffMaxMs = this.getPositiveInteger(
-      process.env.LLM_PROVIDER_BACKOFF_MAX_MS,
-      DEFAULT_PROVIDER_BACKOFF_MAX_MS,
+      providerAlias === 'fallback'
+        ? process.env.LLM_FALLBACK_PROVIDER_BACKOFF_MAX_MS
+        : process.env.LLM_PROVIDER_BACKOFF_MAX_MS,
+      providerAlias === 'fallback'
+        ? DEFAULT_FALLBACK_PROVIDER_BACKOFF_MAX_MS
+        : DEFAULT_PROVIDER_BACKOFF_MAX_MS,
     );
 
     return executeWithResilience(
@@ -588,7 +632,7 @@ export class LlmProxyService {
             status: AiMonitoringStatus.Failure,
             task: request.task,
             providerAlias,
-            modelAlias: 'default',
+            modelAlias: provider.modelId,
             providerConfigured: true,
             dataClass: effectiveDataClass,
             effectiveDataClass,
@@ -607,6 +651,34 @@ export class LlmProxyService {
     }
 
     return isAiError(error) && error.fallbackEligible;
+  }
+
+  private assertFallbackConfig(): void {
+    if (process.env.LLM_FALLBACK_ENABLED !== 'true') {
+      return;
+    }
+
+    const hasRequiredValue = (value: string | undefined) =>
+      Boolean(value?.trim());
+    const hasRequiredOpenAiCompatibleConfig =
+      hasRequiredValue(process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_BASE_URL) &&
+      hasRequiredValue(process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_API_KEY) &&
+      hasRequiredValue(process.env.LLM_FALLBACK_OPENAI_COMPATIBLE_CHAT_MODEL);
+
+    if (
+      process.env.LLM_FALLBACK_PROVIDER !== LlmProvider.OpenAICompatible ||
+      !hasRequiredValue(process.env.LLM_FALLBACK_MODEL_ALIAS) ||
+      !hasRequiredOpenAiCompatibleConfig
+    ) {
+      throw new AiError(
+        'AI_PROVIDER_CONFIG_INVALID',
+        'provider_config_invalid',
+        {
+          retryable: false,
+          fallbackEligible: false,
+        },
+      );
+    }
   }
 
   private assertProviderResponsePolicy(content: string): void {
@@ -684,6 +756,14 @@ export class LlmProxyService {
     return error;
   }
 
+  private safeProviderConfigError(): ServiceUnavailableException {
+    const error = new ServiceUnavailableException(
+      PROVIDER_CONFIG_ERROR,
+    ) as ServiceUnavailableException & SafeException;
+    error.safeErrorCode = 'AI_PROVIDER_CONFIG_INVALID';
+    return error;
+  }
+
   private safeProviderTimeoutError(): GatewayTimeoutException {
     const error = new GatewayTimeoutException(
       PROVIDER_TIMEOUT_ERROR,
@@ -714,13 +794,16 @@ export class LlmProxyService {
       }
 
       if (
+        error.code === 'AI_PROVIDER_CONFIG_INVALID' ||
         error.code === 'AI_PROVIDER_UNAVAILABLE' ||
         error.code === 'AI_PROVIDER_RATE_LIMITED' ||
         error.code === 'AI_PROVIDER_HTTP_5XX' ||
         error.code === 'AI_PROVIDER_RETRY_EXHAUSTED' ||
         error.code === 'AI_FALLBACK_NOT_AVAILABLE'
       ) {
-        return this.safeProviderUnavailableError(error.code);
+        return error.code === 'AI_PROVIDER_CONFIG_INVALID'
+          ? this.safeProviderConfigError()
+          : this.safeProviderUnavailableError(error.code);
       }
 
       if (
@@ -770,6 +853,54 @@ export class LlmProxyService {
       effectiveDataClass,
       messages,
     };
+  }
+
+  private writeSafeCachedResponse(
+    cacheKey: string | undefined,
+    cacheHit: boolean | undefined,
+    response: LlmChatResponse,
+    ttlMs: number | undefined,
+  ): void {
+    if (!this.aiCache || !cacheKey || cacheHit) {
+      return;
+    }
+
+    const { cacheKey: _cacheKey, cacheHit: _cacheHit, ...cacheable } = response;
+    this.aiCache.write(cacheKey, cacheable, ttlMs);
+  }
+
+  private logFlowSucceeded(options: {
+    request: LlmChatRequest;
+    response: LlmChatResponse;
+    fallbackUsed: boolean;
+    fallbackReasonCode?: SafeLlmErrorCode;
+    anonymizationStats?: Record<string, number>;
+    startedAt: number;
+  }): void {
+    this.monitoring.log({
+      eventName: AiMonitoringEventName.AiFlowSucceeded,
+      operation: AiMonitoringOperation.LlmChat,
+      stage: AiMonitoringStage.AiFlow,
+      status: AiMonitoringStatus.Success,
+      providerAlias: options.fallbackUsed ? 'fallback' : 'primary',
+      modelAlias: options.response.modelId,
+      providerConfigured: true,
+      task: options.request.task,
+      dataClass: options.response.dataClass,
+      effectiveDataClass: options.response.dataClass,
+      tokensIn: options.response.usage.tokensIn,
+      tokensOut: options.response.usage.tokensOut,
+      costRub: options.response.usage.costRub,
+      latencyMs: Date.now() - options.startedAt,
+      anonymizationStats: options.anonymizationStats,
+      fallbackUsed: options.fallbackUsed,
+      fallbackReasonCode: options.fallbackReasonCode,
+    });
+  }
+
+  private safeFallbackModelAlias(): string | undefined {
+    const value = process.env.LLM_FALLBACK_MODEL_ALIAS?.trim();
+    return value || undefined;
   }
 
   private parseCsv(value: string | undefined): string[] {
