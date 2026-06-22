@@ -134,6 +134,7 @@ export interface AdminExpertGroupDetailsDto {
     name: string;
     description: string | null;
     defaultPrice: number;
+    giftEligible: boolean;
   }>;
   prices: Record<string, Record<string, number | null>>;
   stats: {
@@ -226,6 +227,7 @@ export interface AdminExpertMemberDetails {
       description: string | null;
       defaultPrice: number;
       price: number | null;
+      giftEligible: boolean;
     }>;
   } | null;
   stats: {
