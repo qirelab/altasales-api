@@ -73,7 +73,7 @@ export class CartItem {
   @Column({ type: 'uuid', nullable: true })
   executorUserId: string | null;
 
-  @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => User, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'executorUserId' })
   executor: User | null;
 

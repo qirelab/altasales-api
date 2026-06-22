@@ -14,6 +14,7 @@ import {
   QueryFailedError,
   Repository,
 } from 'typeorm';
+import { CartItem } from '../cart/entities/cart-item.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
@@ -273,6 +274,8 @@ export class ExpertsService {
     private readonly orderItemRepository: Repository<OrderItem>,
     @InjectRepository(OrderItemSubItem)
     private readonly orderItemSubItemRepository: Repository<OrderItemSubItem>,
+    @InjectRepository(CartItem)
+    private readonly cartItemRepository: Repository<CartItem>,
     private readonly dataSource: DataSource,
     private readonly authService: AuthService,
     private readonly firebaseService: FirebaseService,
@@ -1611,6 +1614,9 @@ export class ExpertsService {
     if (groupId) {
       await this.removeExpertFromGroup(groupId, userId);
     }
+
+    await this.orderItemRepository.update({ executorUserId: userId }, { executorUserId: null });
+    await this.cartItemRepository.update({ executorUserId: userId }, { executorUserId: null });
 
     const firebaseUid = user.firebaseUid;
     await this.userRepository.remove(user);
