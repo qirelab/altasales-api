@@ -653,6 +653,7 @@ export class ExpertsService {
       expertOrdersCountsRaw.map((row) => [row.executorUserId, Number(row.count)]),
     );
     const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(expertIds);
+    const profileExperienceByUserId = await this.loadProfileExperienceYearsByUserIds(expertIds);
 
     const experts = expertMembers.map((member) => ({
       id: member.user!.id,
@@ -660,9 +661,12 @@ export class ExpertsService {
       lastName: member.user!.lastName,
       email: member.user!.email,
       phoneNumber: member.user!.phoneNumber,
-      experienceYears: member.user!.experienceYears
-        ?? fallbackExperienceByUserId.get(member.user!.id)
-        ?? null,
+      experienceYears: this.resolveExperienceYears(
+        member.user!.id,
+        member.user!.experienceYears,
+        profileExperienceByUserId,
+        fallbackExperienceByUserId,
+      ),
       ordersCount: expertOrdersCountById.get(member.user!.id) ?? 0,
     }));
 
@@ -879,8 +883,10 @@ export class ExpertsService {
       .offset(offset)
       .limit(limit)
       .getMany();
-    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(users.map((user) => user.id));
-    const assignedByUserId = await this.loadAssignedGroupsByUserIds(users.map((user) => user.id));
+    const userIds = users.map((user) => user.id);
+    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(userIds);
+    const profileExperienceByUserId = await this.loadProfileExperienceYearsByUserIds(userIds);
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds(userIds);
 
     return {
       data: users.map((user) => ({
@@ -889,7 +895,12 @@ export class ExpertsService {
         lastName: user.lastName,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        experienceYears: user.experienceYears ?? fallbackExperienceByUserId.get(user.id) ?? null,
+        experienceYears: this.resolveExperienceYears(
+          user.id,
+          user.experienceYears,
+          profileExperienceByUserId,
+          fallbackExperienceByUserId,
+        ),
         assignedToGroupId: assignedByUserId.get(user.id) ?? null,
       })),
       total,
@@ -924,8 +935,10 @@ export class ExpertsService {
       .offset(offset)
       .limit(limit)
       .getMany();
-    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(users.map((user) => user.id));
-    const assignedByUserId = await this.loadAssignedGroupsByUserIds(users.map((user) => user.id));
+    const userIds = users.map((user) => user.id);
+    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(userIds);
+    const profileExperienceByUserId = await this.loadProfileExperienceYearsByUserIds(userIds);
+    const assignedByUserId = await this.loadAssignedGroupsByUserIds(userIds);
 
     return {
       data: users.map((user) => ({
@@ -934,7 +947,12 @@ export class ExpertsService {
         lastName: user.lastName,
         email: user.email,
         phoneNumber: user.phoneNumber,
-        experienceYears: user.experienceYears ?? fallbackExperienceByUserId.get(user.id) ?? null,
+        experienceYears: this.resolveExperienceYears(
+          user.id,
+          user.experienceYears,
+          profileExperienceByUserId,
+          fallbackExperienceByUserId,
+        ),
         assignedToGroupId: assignedByUserId.get(user.id) ?? null,
       })),
       total,
@@ -1071,6 +1089,30 @@ export class ExpertsService {
         .filter((row) => row.experienceYears !== null)
         .map((row) => [row.userId, Number(row.experienceYears)]),
     );
+  }
+
+  private async loadProfileExperienceYearsByUserIds(userIds: string[]): Promise<Map<string, number>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+    const profiles = await this.expertProfileRepository.find({ where: { userId: In(userIds) } });
+    return new Map(
+      profiles
+        .filter((profile) => profile.experienceYears !== null && profile.experienceYears !== undefined)
+        .map((profile) => [profile.userId, profile.experienceYears as number]),
+    );
+  }
+
+  private resolveExperienceYears(
+    userId: string,
+    userValue: number | null,
+    profileMap: Map<string, number>,
+    fallbackMap: Map<string, number>,
+  ): number | null {
+    return profileMap.get(userId)
+      ?? fallbackMap.get(userId)
+      ?? userValue
+      ?? null;
   }
 
   async removeExpertFromGroup(groupId: string, expertId: string): Promise<void> {
