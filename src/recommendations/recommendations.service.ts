@@ -216,8 +216,8 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
-      .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
-      .addOrderBy('recommendation."createdAt"', 'DESC')
+      .orderBy('recommendation."createdAt"', 'DESC')
+      .addOrderBy('recommendation.id', 'DESC')
       .getMany();
   }
 
@@ -253,8 +253,8 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
-      .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
-      .addOrderBy('recommendation."createdAt"', 'DESC')
+      .orderBy('recommendation."createdAt"', 'DESC')
+      .addOrderBy('recommendation.id', 'DESC')
       .getRawMany<
         UserRecommendationListItem & {
           orderId: string | null;
@@ -378,8 +378,8 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
-      .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
-      .addOrderBy('recommendation."createdAt"', 'DESC')
+      .orderBy('recommendation."createdAt"', 'DESC')
+      .addOrderBy('recommendation.id', 'DESC')
       .getRawMany<AdminRecommendationListItem>();
 
     return rows.map((row) => ({
