@@ -36,6 +36,13 @@ export class ExpertPositionOffering {
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   defaultPrice: number;
 
+  @ApiProperty({
+    example: false,
+    description: 'Whether this offering is payable from the user gift balance (e.g. consultations)',
+  })
+  @Column({ type: 'boolean', default: false })
+  giftEligible: boolean;
+
   @DeleteDateColumn({ type: 'timestamptz', nullable: true })
   deletedAt: Date | null;
 }
