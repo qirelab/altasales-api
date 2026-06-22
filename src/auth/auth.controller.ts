@@ -117,6 +117,30 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Post('login-email-session')
+  @ApiOperation({ summary: 'Login with email/password and set session cookie' })
+  @ApiResponse({ status: 200, description: 'Successful login, sets session cookie' })
+  @ApiResponse({ status: 400, description: 'Invalid credentials' })
+  @ApiResponse({ status: 403, description: 'Email not verified' })
+  async loginWithEmailSession(
+    @Body() loginDto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+  ) {
+    const result = await this.authService.loginWithEmailSession(loginDto);
+    const isLocal = req.hostname === 'localhost' || req.hostname === '127.0.0.1';
+
+    res.cookie('session', result.sessionCookie, {
+      maxAge: result.expiresIn,
+      httpOnly: true,
+      secure: !isLocal,
+      sameSite: isLocal ? 'lax' : 'none',
+      domain: isLocal ? undefined : '.altasales.qirelab.com',
+    });
+
+    return result.body;
+  }
+
   @Post('verify-token')
   @ApiOperation({ summary: 'Verify Firebase ID token' })
   @ApiResponse({ status: 200, description: 'Token is valid' })

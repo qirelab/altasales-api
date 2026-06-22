@@ -91,17 +91,7 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     try {
       const auth = this.firebaseService.getAuth();
-
-      const user = await auth.getUserByEmail(loginDto.email);
-      await this.validateFirebasePassword(loginDto.email, loginDto.password);
-
-      const dbUser = await this.userRepository.findOne({
-        where: { firebaseUid: user.uid },
-      });
-
-      if (!dbUser) {
-        throw new BadRequestException('User not found in database');
-      }
+      const { user, dbUser } = await this.authenticateEmailPassword(loginDto);
 
       const customToken = await auth.createCustomToken(user.uid);
 
@@ -125,7 +115,63 @@ export class AuthService {
     }
   }
 
-  private async validateFirebasePassword(email: string, password: string): Promise<void> {
+  async loginWithEmailSession(loginDto: LoginDto): Promise<{
+    body: {
+      id: string;
+      uid: string;
+      email: string;
+      displayName: string;
+      emailVerified: boolean;
+      role: UserRole;
+      notificationsSeenAt: Date | null;
+    };
+    sessionCookie: string;
+    expiresIn: number;
+  }> {
+    const { user, dbUser, idToken } = await this.authenticateEmailPassword(loginDto);
+
+    if (!user.emailVerified) {
+      throw new ForbiddenException('Email not verified');
+    }
+
+    const { sessionCookie, expiresIn } = await this.createSessionCookie(idToken);
+
+    return {
+      body: {
+        id: dbUser.id,
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || '',
+        emailVerified: user.emailVerified,
+        role: dbUser.role,
+        notificationsSeenAt: dbUser.notificationsSeenAt ?? null,
+      },
+      sessionCookie,
+      expiresIn,
+    };
+  }
+
+  private async authenticateEmailPassword(loginDto: LoginDto): Promise<{
+    user: UserRecord;
+    dbUser: User;
+    idToken: string;
+  }> {
+    const auth = this.firebaseService.getAuth();
+    const user = await auth.getUserByEmail(loginDto.email);
+    const idToken = await this.validateFirebasePassword(loginDto.email, loginDto.password);
+
+    const dbUser = await this.userRepository.findOne({
+      where: { firebaseUid: user.uid },
+    });
+
+    if (!dbUser) {
+      throw new BadRequestException('User not found in database');
+    }
+
+    return { user, dbUser, idToken };
+  }
+
+  private async validateFirebasePassword(email: string, password: string): Promise<string> {
     const firebaseApiKey = this.configService.get<string>('FIREBASE_WEB_API_KEY')
       || this.configService.get<string>('FIREBASE_API_KEY');
     if (!firebaseApiKey) {
@@ -148,7 +194,11 @@ export class AuthService {
     );
 
     if (response.ok) {
-      return;
+      const payload = await response.json().catch(() => null) as { idToken?: string } | null;
+      if (payload?.idToken) {
+        return payload.idToken;
+      }
+      throw new BadRequestException('Login error');
     }
 
     const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
