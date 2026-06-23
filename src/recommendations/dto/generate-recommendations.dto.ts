@@ -36,7 +36,7 @@ export class GenerateRecommendationsDto {
   diagnostics?: string[];
 
   @ApiPropertyOptional({
-    description: 'Maximum number of recommendations to return',
+    description: 'Maximum number of recommendations after package compaction',
     minimum: 1,
     maximum: 20,
   })
