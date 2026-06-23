@@ -137,8 +137,32 @@ describe('RecommendationScoringService', () => {
     expect(result[0]).toMatchObject({
       serviceId: 'semantic-service-id',
       score: 6,
-      diagnosticSignals: ['ai_generated', 'ai_semantic_match', 'custom_fit'],
+      diagnosticSignals: ['ai_generated', 'ai_semantic_match'],
     });
+  });
+
+  it('does not expose an unsupported diagnosis from the AI rationale', async () => {
+    const candidate = {
+      id: 'crm-service-id',
+      name: 'CRM audit',
+      description: 'CRM quality audit',
+      type: ServiceType.Service,
+      skills: ['CRM'],
+      category: null,
+    } as any;
+    llmProxy.chat.mockResolvedValueOnce({
+      content:
+        '{"recommendations":[{"serviceId":"crm-service-id","priority":"medium","rationale":"У клиента просадка конверсии.","diagnosticSignals":["conversion_drop"]}]}',
+    });
+
+    const result = await service.generateAiRecommendations(
+      { userId: 'user-id', diagnostics: ['CRM'] },
+      [candidate],
+      'crm',
+    );
+
+    expect(result[0].rationale).not.toContain('просадка конверсии');
+    expect(result[0].diagnosticSignals).not.toContain('conversion_drop');
   });
 
   it('rejects AI-only semantic recommendations without service-specific evidence', async () => {
