@@ -698,7 +698,7 @@ export class OrdersService {
            WHEN item."expertPositionId" IS NOT NULL THEN
              CASE WHEN COALESCE(expSub."offeringsCount", 0) > 1 THEN 'Услуги эксперта' ELSE 'Услуга эксперта' END
            WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
-           WHEN svc.type IN ('Услуга', 'Документ', 'Подрядчик') THEN svc.type
+           WHEN svc.type IN ('Услуга', 'Документ') THEN svc.type
            ELSE 'Услуга'
          END`,
         'typeLabel',
@@ -725,7 +725,6 @@ export class OrdersService {
         typeLabel:
           | 'Услуга'
           | 'Документ'
-          | 'Подрядчик'
           | 'Пакет услуг'
           | 'Услуга эксперта'
           | 'Услуги эксперта';
