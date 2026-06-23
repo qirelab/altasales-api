@@ -1,6 +1,7 @@
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
+import { RECOMMENDATION_CATALOG } from './recommendation-catalog.registry';
 import { RecommendationsService } from './recommendations.service';
 import { ServiceType } from '../services/entities/service-type.enum';
 
@@ -322,6 +323,66 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('uses the real CRM Start composition from the catalog', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([]);
+    const crmStartServices = [
+      {
+        id: 'da4c0e35-54a8-41f4-88a7-78e43c0ae5be',
+        name: 'Интеграция мессенджера',
+        description: 'Подключение мессенджеров к CRM',
+        deletedAt: null,
+        skills: ['crm', 'мессенджер'],
+        category: { name: 'CRM система' },
+      },
+      {
+        id: '59f1273e-fff8-49da-9553-776579985660',
+        name: 'Интеграция почты',
+        description: 'Подключение почты к CRM',
+        deletedAt: null,
+        skills: ['crm', 'почта'],
+        category: { name: 'CRM система' },
+      },
+      {
+        id: '3dd98b30-1d7c-4c99-b8bd-0bb8cfcbcaca',
+        name: 'Интеграция телефонии',
+        description: 'Подключение телефонии к CRM',
+        deletedAt: null,
+        skills: ['crm', 'телефония'],
+        category: { name: 'CRM система' },
+      },
+    ];
+    packageRepository.find.mockResolvedValue([
+      {
+        id: '292a8ec3-ea07-4326-9bb8-fed6056b3b20',
+        name: 'CRM Старт',
+        description:
+          'Базовый стартовый пакет CRM: телефония, мессенджер, почта.',
+        packageType: 'Старт',
+        price: 20000,
+        tags: ['CRM', 'Старт', 'Интеграции'],
+        categoryId: 'category-id',
+        category: { name: 'CRM система' },
+        services: crmStartServices,
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({ userId, persist: false });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    const crmStart = candidates.find(
+      (item) => item.packageId === '292a8ec3-ea07-4326-9bb8-fed6056b3b20',
+    );
+    expect(crmStart.coveredServiceIds).toEqual(
+      expect.arrayContaining(crmStartServices.map((item) => item.id)),
+    );
+  });
+
   it('adds logical duplicate services to package coverage', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();
@@ -555,6 +616,72 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('deduplicates equal catalog names and prefers the service variant', async () => {
+    const { service, serviceRepository, relevanceRanker } = createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'technical-spec-document-id',
+        name: 'Подготовка технического задания',
+        description: 'Детальный план настройки CRM',
+        type: ServiceType.Document,
+        price: 20000,
+        skills: ['crm', 'тз'],
+        category: { name: 'CRM система' },
+      },
+      {
+        id: 'technical-spec-service-id',
+        name: 'Подготовка технического задания',
+        description: 'Формирование плана внедрения CRM',
+        type: ServiceType.Service,
+        price: 20000,
+        skills: ['crm', 'тз'],
+        category: { name: 'CRM система' },
+      },
+    ]);
+
+    await service.generateForUser({ userId, persist: false });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.serviceId)).toEqual([
+      'technical-spec-service-id',
+    ]);
+  });
+
+  it('keeps the registered catalog ID when duplicate service names exist', async () => {
+    const { service, serviceRepository, relevanceRanker } = createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'duplicate-sales-head-id',
+        name: 'Руководитель отдела продаж',
+        description: 'Дублирующая позиция из каталога',
+        type: ServiceType.Service,
+        price: 0,
+        skills: ['роп'],
+        category: { name: 'Эксперты' },
+      },
+      {
+        id: RECOMMENDATION_CATALOG.salesHead.id,
+        name: 'Руководитель отдела продаж',
+        description: 'Зарегистрированная позиция из каталога рекомендаций',
+        type: ServiceType.Service,
+        price: 0,
+        skills: ['роп'],
+        category: { name: 'Эксперты' },
+      },
+    ]);
+
+    await service.generateForUser({ userId, persist: false });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.serviceId)).toEqual([
+      RECOMMENDATION_CATALOG.salesHead.id,
+    ]);
+  });
+
   it('skips placeholder real package candidates without own description or tags', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();
@@ -711,7 +838,7 @@ describe('RecommendationsService', () => {
         priority: 'urgent',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-id'],
       },
       {
@@ -721,7 +848,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'service fit',
         diagnosticSignals: [],
-        score: 8,
+        score: 25,
         coveredServiceIds: ['service-id'],
       },
     ]);
@@ -746,7 +873,7 @@ describe('RecommendationsService', () => {
         priority: 'urgent',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['catalog_semantic:crm_technical_spec'],
       },
       {
@@ -756,7 +883,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'service fit',
         diagnosticSignals: [],
-        score: 8,
+        score: 25,
         coveredServiceIds: [
           'tech-spec-service-id',
           'catalog_semantic:crm_technical_spec',
@@ -795,7 +922,7 @@ describe('RecommendationsService', () => {
         priority: 'urgent',
         rationale: 'service fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-id'],
       },
       {
@@ -805,7 +932,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 8,
+        score: 25,
         coveredServiceIds: ['service-id'],
       },
     ]);
@@ -840,7 +967,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-id', 'service-b'],
       },
     ]);
@@ -875,7 +1002,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-id', 'service-b'],
       },
     ]);
@@ -898,7 +1025,7 @@ describe('RecommendationsService', () => {
         priority: 'urgent',
         rationale: 'small package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-a'],
       },
       {
@@ -908,7 +1035,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'full package fit',
         diagnosticSignals: [],
-        score: 8,
+        score: 25,
         coveredServiceIds: ['service-a', 'service-b'],
       },
     ]);
@@ -920,6 +1047,141 @@ describe('RecommendationsService', () => {
 
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
       'full-package-id',
+    ]);
+  });
+
+  it('keeps a relevant package when it only partially overlaps a stronger selected service', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'dashboard-id',
+        packageId: null,
+        serviceName: 'Дашборд ОП',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'analytics',
+        diagnosticSignals: [],
+        score: 120,
+        coveredServiceIds: ['dashboard-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'documents-package-id',
+        serviceName: 'Пакет документов отдела продаж',
+        priority: RecommendationPriority.Medium,
+        rationale: 'documents package',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['dashboard-id', 'document-1-id', 'document-2-id'],
+      },
+      {
+        serviceId: 'document-1-id',
+        packageId: null,
+        serviceName: 'Документ под запрос',
+        priority: RecommendationPriority.Medium,
+        rationale: 'single document',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['document-1-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'dashboard-id',
+      'documents-package-id',
+    ]);
+  });
+
+  it('applies the requested limit only after package compaction', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'telephony-id',
+        packageId: null,
+        serviceName: 'Интеграция телефонии',
+        priority: 'urgent',
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 100,
+        coveredServiceIds: ['telephony-id'],
+      },
+      {
+        serviceId: 'messenger-id',
+        packageId: null,
+        serviceName: 'Интеграция мессенджера',
+        priority: 'urgent',
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 99,
+        coveredServiceIds: ['messenger-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'crm-start-id',
+        serviceName: 'CRM Старт',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 85,
+        coveredServiceIds: ['telephony-id', 'messenger-id', 'mail-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+      limit: 1,
+    });
+
+    expect(relevanceRanker.rankRecommendations).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      undefined,
+    );
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'crm-start-id',
+    ]);
+  });
+
+  it('keeps golden reference recommendations above expanded generated matches', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'golden-lower-score-id',
+        packageId: null,
+        serviceName: 'Golden recommendation',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'golden',
+        diagnosticSignals: [
+          'ideal_reference:new_outbound_full_sales_department',
+        ],
+        score: 90,
+      },
+      {
+        serviceId: 'expanded-higher-score-id',
+        packageId: null,
+        serviceName: 'Expanded generated recommendation',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'expanded',
+        diagnosticSignals: ['ai_generated'],
+        score: 120,
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'golden-lower-score-id',
+      'expanded-higher-score-id',
     ]);
   });
 
@@ -935,7 +1197,7 @@ describe('RecommendationsService', () => {
         priority: 'urgent',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-id'],
       },
     ]);
@@ -953,7 +1215,7 @@ describe('RecommendationsService', () => {
     );
   });
 
-  it('filters out generated recommendations with ranking below 5/10 before persisting', async () => {
+  it('filters out generated recommendations below the strong relevance threshold before persisting', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     recommendationRepository.findOne.mockResolvedValue(null);
@@ -965,7 +1227,7 @@ describe('RecommendationsService', () => {
         priority: RecommendationPriority.Low,
         rationale: 'weak fit',
         diagnosticSignals: [],
-        score: 4,
+        score: 19,
         coveredServiceIds: ['low-score-service-id'],
       },
       {
@@ -975,7 +1237,7 @@ describe('RecommendationsService', () => {
         priority: RecommendationPriority.Medium,
         rationale: 'minimum fit',
         diagnosticSignals: [],
-        score: 5,
+        score: 20,
         coveredServiceIds: ['threshold-service-id'],
       },
     ]);
@@ -1026,7 +1288,7 @@ describe('RecommendationsService', () => {
         priority: 'medium',
         rationale: 'package fit',
         diagnosticSignals: [],
-        score: 10,
+        score: 30,
         coveredServiceIds: ['service-id'],
       },
     ]);
