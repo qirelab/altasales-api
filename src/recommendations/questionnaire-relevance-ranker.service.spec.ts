@@ -485,6 +485,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         clientProfile: {
           productStage: 'new',
           components: components({ crm: true, telephony: true }),
+          componentsToAdd: components(),
         },
         persist: false,
       },
@@ -499,7 +500,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
-  it('uses componentsToAdd as desired tools for a new sales department', () => {
+  it('uses componentsToAdd only for an existing-stage split flow', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -508,11 +509,13 @@ describe('QuestionnaireRelevanceRankerService', () => {
           desiredResult: {
             description: 'Отдела продаж нет, нужно построить его с нуля',
           },
-          components: components(),
-          componentsToAdd: components({
+          components: components({
             crm: true,
             telephony: true,
             trainingSystem: true,
+          }),
+          componentsToAdd: components({
+            messenger: true,
           }),
         },
         persist: false,
@@ -526,6 +529,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(serviceIds).toEqual(
       expect.arrayContaining(['from-zero', 'crm-start', 'training-3m']),
     );
+    expect(serviceIds).toContain('telephony');
+    expect(serviceIds).not.toContain('messenger');
     expect(serviceIds).not.toEqual(
       expect.arrayContaining(['crm-audit', 'crm-deals-report']),
     );
