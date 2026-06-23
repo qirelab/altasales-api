@@ -1036,9 +1036,9 @@ export class QuestionnaireRelevanceRankerService {
     profile: Record<string, unknown>,
   ): NormalizedQuestionnaireProfile {
     const desiredSalesDepartment = this.toArray(profile.desiredSalesDepartment);
-    const usesExistingAndDesiredComponents =
-      this.isPlainObject(profile.componentsToAdd) &&
-      this.isExistingProductStage(profile.productStage);
+    const usesExistingAndDesiredComponents = this.isPlainObject(
+      profile.componentsToAdd,
+    );
     const existingComponents = usesExistingAndDesiredComponents
       ? this.getSelectedComponents(profile.components, [])
       : [];
@@ -1098,13 +1098,6 @@ export class QuestionnaireRelevanceRankerService {
       return String(profile.desiredResult.period ?? '');
     }
     return String(profile.period ?? '');
-  }
-
-  private isExistingProductStage(productStage: unknown): boolean {
-    return this.includesAny(this.normalize(String(productStage ?? '')), [
-      'existing',
-      'уже продаю',
-    ]);
   }
 
   private inferManagersCount(profile: Record<string, unknown>): number {
