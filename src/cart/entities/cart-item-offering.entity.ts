@@ -36,6 +36,10 @@ export class CartItemOffering {
   @JoinColumn({ name: 'expertPositionOfferingId' })
   expertPositionOffering: ExpertPositionOffering;
 
+  @ApiProperty({ description: 'Offering quantity in cart', minimum: 1 })
+  @Column({ type: 'int', default: 1 })
+  quantity: number;
+
   @CreateDateColumn()
   createdAt: Date;
 }

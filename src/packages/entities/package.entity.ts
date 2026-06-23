@@ -45,6 +45,13 @@ export class ServicePackage {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   price: number;
 
+  @ApiProperty({
+    example: false,
+    description: 'Whether the package can be paid with gift balance',
+  })
+  @Column({ type: 'boolean', default: false })
+  giftEligible: boolean;
+
   @ApiPropertyOptional({ example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;

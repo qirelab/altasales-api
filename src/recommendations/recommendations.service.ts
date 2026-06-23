@@ -36,13 +36,17 @@ import {
   type GeneratedRecommendationItem,
   type ServiceCandidate,
 } from './recommendation-scoring.service';
+import { RECOMMENDATION_CATALOG_ENTRIES } from './recommendation-catalog.registry';
 import {
   ensureDependencyGraphIsValid,
   validateDependencyIds,
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
-const MIN_RECOMMENDATION_RANKING_SCORE = 5;
+const MIN_RECOMMENDATION_RANKING_SCORE = 20;
+const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
+  RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
+);
 
 type LogicalCoverageRule = {
   key: string;
@@ -109,6 +113,7 @@ export type PackageInnerServiceItem = {
   name: string;
   type: ServiceType;
   price: number;
+  giftEligible: boolean;
   status: RecommendationStatus | null;
 };
 
@@ -138,6 +143,7 @@ export type UserRecommendationListItem = {
   type: ServiceType | 'Пакет услуг';
   category: string;
   price: number;
+  giftEligible: boolean | null;
   status: RecommendationStatus;
   priority: RecommendationPriority;
   rationale: string | null;
@@ -234,6 +240,7 @@ export class RecommendationsService implements OnModuleInit {
         'category',
       )
       .addSelect('COALESCE(service.price, package.price)', 'price')
+      .addSelect('COALESCE(service."giftEligible", package."giftEligible")', 'giftEligible')
       .addSelect('recommendation.status', 'status')
       .addSelect('recommendation.priority', 'priority')
       .addSelect('recommendation.rationale', 'rationale')
@@ -244,10 +251,20 @@ export class RecommendationsService implements OnModuleInit {
       .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."generatedAt"', 'ASC', 'NULLS LAST')
       .addOrderBy('recommendation."createdAt"', 'DESC')
-      .getRawMany<UserRecommendationListItem & { orderId: string | null }>();
+      .getRawMany<
+        UserRecommendationListItem & {
+          orderId: string | null;
+          giftEligible: boolean | 'true' | 'false' | 't' | 'f' | null;
+        }
+      >();
 
     const rows: UserRecommendationListItem[] = rawRows.map(
-      ({ orderId: _omit, ...rest }) => rest,
+      ({ orderId: _omit, giftEligible, ...rest }) => ({
+        ...rest,
+        giftEligible: giftEligible == null
+          ? null
+          : giftEligible === true,
+      }),
     );
 
     const packageRows = rawRows.filter((row) => row.packageId);
@@ -270,6 +287,7 @@ export class RecommendationsService implements OnModuleInit {
           name: service.name,
           type: service.type,
           price: Number(service.price),
+          giftEligible: service.giftEligible,
           status: null,
         })),
       );
@@ -554,7 +572,7 @@ export class RecommendationsService implements OnModuleInit {
       services,
       ranked,
       context,
-      limit,
+      undefined,
     );
     ranked = ranked.filter(
       (item) => Number(item.score || 0) >= MIN_RECOMMENDATION_RANKING_SCORE,
@@ -563,6 +581,10 @@ export class RecommendationsService implements OnModuleInit {
       ranked,
       await this.findExistingRecommendationCoverage(dto.userId),
     );
+    ranked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
+    if (limit !== undefined) {
+      ranked = ranked.slice(0, limit);
+    }
 
     if (dto.persist === false) {
       return ranked.map((item) =>
@@ -708,23 +730,57 @@ export class RecommendationsService implements OnModuleInit {
         } as unknown as ServiceCandidate;
       })
       .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
-    const serviceCandidates = services
-      .filter(
+    const serviceCandidates = this.deduplicateServicesByName(
+      services.filter(
         (service) =>
           this.hasRecommendableServiceContent(service) &&
           !this.isDuplicateLegacyPackageService(service, packageCandidates),
-      )
-      .map((service) => ({
-        ...service,
-        serviceId: service.id,
-        packageId: null,
-        coveredServiceIds: this.uniqueIds([
-          service.id,
-          ...this.getServiceCoverageKeys(service),
-        ]),
-      })) as ServiceCandidate[];
+      ),
+    ).map((service) => ({
+      ...service,
+      serviceId: service.id,
+      packageId: null,
+      coveredServiceIds: this.uniqueIds([
+        service.id,
+        ...this.getServiceCoverageKeys(service),
+      ]),
+    })) as ServiceCandidate[];
 
     return [...packageCandidates, ...serviceCandidates];
+  }
+
+  private deduplicateServicesByName(services: Service[]): Service[] {
+    const byName = new Map<string, Service>();
+
+    services.forEach((service) => {
+      const key = this.normalizeCatalogName(service.name);
+      const existing = byName.get(key);
+      if (!existing || this.shouldPreferDuplicateService(service, existing)) {
+        byName.set(key, service);
+      }
+    });
+
+    return Array.from(byName.values());
+  }
+
+  private shouldPreferDuplicateService(
+    candidate: Service,
+    existing: Service,
+  ): boolean {
+    const candidateIsRegistered = REGISTERED_RECOMMENDATION_CATALOG_IDS.has(
+      candidate.id,
+    );
+    const existingIsRegistered = REGISTERED_RECOMMENDATION_CATALOG_IDS.has(
+      existing.id,
+    );
+    if (candidateIsRegistered !== existingIsRegistered) {
+      return candidateIsRegistered;
+    }
+
+    return (
+      candidate.type === ServiceType.Service &&
+      existing.type === ServiceType.Document
+    );
   }
 
   private isDuplicateLegacyPackageService(
@@ -1048,28 +1104,35 @@ export class RecommendationsService implements OnModuleInit {
           ),
         );
 
-        if (
-          !this.shouldReplaceOverlappingRecommendations(
+        const shouldReplace = this.shouldReplaceOverlappingRecommendations(
+          item,
+          overlappingSelected,
+        );
+        const shouldKeepPartialPackage =
+          this.shouldKeepPartiallyOverlappingPackage(
             item,
-            overlappingSelected,
-          )
-        ) {
+            selectedCoveredServiceIds,
+          );
+
+        if (!shouldReplace && !shouldKeepPartialPackage) {
           continue;
         }
 
-        overlappingSelected.forEach((selectedItem) => {
-          const selectedTargetId =
-            this.getGeneratedRecommendationTargetId(selectedItem);
-          if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
-          const selectedIndex = selected.indexOf(selectedItem);
-          if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
-        });
-        selectedCoveredServiceIds.clear();
-        selected.forEach((selectedItem) => {
-          this.getGeneratedRecommendationCoveredServiceIds(
-            selectedItem,
-          ).forEach((serviceId) => selectedCoveredServiceIds.add(serviceId));
-        });
+        if (shouldReplace) {
+          overlappingSelected.forEach((selectedItem) => {
+            const selectedTargetId =
+              this.getGeneratedRecommendationTargetId(selectedItem);
+            if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
+            const selectedIndex = selected.indexOf(selectedItem);
+            if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
+          });
+          selectedCoveredServiceIds.clear();
+          selected.forEach((selectedItem) => {
+            this.getGeneratedRecommendationCoveredServiceIds(
+              selectedItem,
+            ).forEach((serviceId) => selectedCoveredServiceIds.add(serviceId));
+          });
+        }
       }
 
       selected.push(item);
@@ -1080,6 +1143,30 @@ export class RecommendationsService implements OnModuleInit {
     }
 
     return selected;
+  }
+
+  private compareGeneratedRecommendations(
+    a: GeneratedRecommendationItem,
+    b: GeneratedRecommendationItem,
+  ): number {
+    const aIsIdeal = this.isIdealReferenceRecommendation(a);
+    const bIsIdeal = this.isIdealReferenceRecommendation(b);
+    if (aIsIdeal !== bIsIdeal) return aIsIdeal ? -1 : 1;
+
+    return (
+      Number(b.score || 0) - Number(a.score || 0) ||
+      a.serviceName.localeCompare(b.serviceName, 'ru')
+    );
+  }
+
+  private isIdealReferenceRecommendation(
+    item: GeneratedRecommendationItem,
+  ): boolean {
+    return Boolean(
+      item.diagnosticSignals?.some((signal) =>
+        signal.startsWith('ideal_reference:'),
+      ),
+    );
   }
 
   private shouldReplaceOverlappingRecommendations(
@@ -1098,8 +1185,32 @@ export class RecommendationsService implements OnModuleInit {
           this.getGeneratedRecommendationCoveredServiceIds(selectedItem).length,
       ),
     );
+    const maxSelectedScore = Math.max(
+      ...overlappingSelected.map((selectedItem) =>
+        Number(selectedItem.score || 0),
+      ),
+    );
 
-    return itemCoverageSize > maxSelectedCoverageSize;
+    return (
+      itemCoverageSize > maxSelectedCoverageSize &&
+      Number(item.score || 0) >= maxSelectedScore - 15
+    );
+  }
+
+  private shouldKeepPartiallyOverlappingPackage(
+    item: GeneratedRecommendationItem,
+    selectedCoveredServiceIds: Set<string>,
+  ): boolean {
+    if (!item.packageId) return false;
+
+    const uncoveredPublicCoverage =
+      this.getGeneratedRecommendationCoveredServiceIds(item).filter(
+        (serviceId) =>
+          !selectedCoveredServiceIds.has(serviceId) &&
+          !this.isInternalCoverageKey(serviceId),
+      );
+
+    return uncoveredPublicCoverage.length >= 2;
   }
 
   private getExistingCoveredServiceIdsExceptTarget(

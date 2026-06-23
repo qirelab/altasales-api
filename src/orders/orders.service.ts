@@ -178,6 +178,39 @@ export class OrdersService {
     }
   }
 
+  private async hydrateDeletedExpertOfferings(subItems: OrderItemSubItem[]): Promise<void> {
+    const offeringIds = [
+      ...new Set(
+        subItems
+          .filter((subItem) => subItem.expertPositionOfferingId && !subItem.expertPositionOffering)
+          .map((subItem) => subItem.expertPositionOfferingId!),
+      ),
+    ];
+    if (!offeringIds.length) {
+      return;
+    }
+
+    const offerings = await this.expertOfferingRepository.find({
+      where: { id: In(offeringIds) },
+      withDeleted: true,
+    });
+    const offeringById = new Map(offerings.map((offering) => [offering.id, offering]));
+
+    for (const subItem of subItems) {
+      if (subItem.expertPositionOfferingId && !subItem.expertPositionOffering) {
+        const offering = offeringById.get(subItem.expertPositionOfferingId);
+        if (offering) {
+          subItem.expertPositionOffering = offering;
+        }
+      }
+    }
+  }
+
+  private async hydrateDeletedExpertOfferingsForOrders(orders: Order[]): Promise<void> {
+    const subItems = orders.flatMap((order) => order.item?.subItems ?? []);
+    await this.hydrateDeletedExpertOfferings(subItems);
+  }
+
   private transformOrderFiles(order: Order): OrderDto {
     return {
       id: order.id,
@@ -291,6 +324,7 @@ export class OrdersService {
     try {
       const createdOrders: Order[] = [];
       let totalAmount = 0;
+      let giftEligibleAmount = 0;
       for (const checkoutItem of dto.items) {
         const productRefs = [
           checkoutItem.serviceId,
@@ -304,6 +338,8 @@ export class OrdersService {
         }
 
         let resolvedAmount = Number(checkoutItem.amount);
+        let resolvedService: Service | null = null;
+        let resolvedPackage: ServicePackage | null = null;
 
         if (checkoutItem.expertPositionId) {
           const quantity = checkoutItem.quantity ?? 1;
@@ -362,21 +398,28 @@ export class OrdersService {
         }
 
         if (checkoutItem.serviceId) {
-          const service = await this.serviceRepository.findOne({
+          resolvedService = await this.serviceRepository.findOne({
             where: { id: checkoutItem.serviceId, deletedAt: IsNull() },
           });
-          if (!service) {
+          if (!resolvedService) {
             throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
           }
         }
         if (checkoutItem.packageId) {
-          const servicePackage = await this.packageRepository.findOne({
+          resolvedPackage = await this.packageRepository.findOne({
             where: { id: checkoutItem.packageId, deletedAt: IsNull() },
+            relations: ['services'],
           });
-          if (!servicePackage) {
+          if (!resolvedPackage) {
             throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
           }
-          resolvedAmount = Number(servicePackage.price);
+          resolvedAmount = Number(resolvedPackage.price);
+        }
+
+        if (resolvedService?.giftEligible) {
+          giftEligibleAmount += resolvedAmount;
+        } else if (resolvedPackage?.giftEligible) {
+          giftEligibleAmount += resolvedAmount;
         }
 
         const order = this.orderRepository.create({
@@ -397,11 +440,7 @@ export class OrdersService {
         });
         await queryRunner.manager.save(OrderItem, item);
         if (checkoutItem.packageId) {
-          const servicePackage = await this.packageRepository.findOne({
-            where: { id: checkoutItem.packageId, deletedAt: IsNull() },
-            relations: ['services'],
-          });
-          const packageServices = servicePackage?.services ?? [];
+          const packageServices = resolvedPackage?.services ?? [];
           const subItems = packageServices.map((service) => this.orderItemSubItemRepository.create({
             orderItemId: item.id,
             serviceId: service.id,
@@ -439,6 +478,9 @@ export class OrdersService {
           {
             orderId: primaryOrderId,
             description: balancePaymentDescription,
+          },
+          {
+            maxGiftAmount: giftEligibleAmount,
           },
           queryRunner.manager,
         );
@@ -532,6 +574,7 @@ export class OrdersService {
       skip: offset,
       take: limit,
     });
+    await this.hydrateDeletedExpertOfferingsForOrders(data);
     return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
@@ -587,6 +630,7 @@ export class OrdersService {
       order: { createdAt: 'DESC' },
     });
 
+    await this.hydrateDeletedExpertOfferingsForOrders(data);
     return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
@@ -689,6 +733,7 @@ export class OrdersService {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
 
+    await this.hydrateDeletedExpertOfferingsForOrders([order]);
     return this.transformOrderFiles(order);
   }
 
@@ -794,6 +839,8 @@ export class OrdersService {
       if (!subItem) {
         throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
       }
+
+      await this.hydrateDeletedExpertOfferings(item.subItems);
 
       await subItemRepo.update({ id: subItemId }, { status });
       subItem.status = status;

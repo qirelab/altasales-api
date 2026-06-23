@@ -352,4 +352,82 @@ export class MailService {
       );
     }
   }
+
+  async sendNewFeedbackNotification(feedback: {
+    id: string;
+    userId: string;
+    message: string;
+    rating: number | null;
+  }): Promise<void> {
+    const escape = (value: string): string => value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+    const admins = await this.userRepository.find({
+      where: { role: UserRole.ADMIN },
+      select: ['email'],
+    });
+    if (admins.length === 0) {
+      this.logger.warn('No admins to notify about new feedback');
+      return;
+    }
+    const author = await this.userRepository.findOne({
+      where: { id: feedback.userId },
+      select: ['name', 'lastName', 'email'],
+    });
+    const clientUrl = process.env.CLIENT_URI || 'http://localhost:3000';
+    const adminLink = `${clientUrl}/admin/feedback?open=${feedback.id}`;
+    const ratingLine = feedback.rating !== null
+      ? `<tr><td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Оценка:</td>`
+        + `<td style="padding: 8px; border-bottom: 1px solid #eee;">${feedback.rating} / 5</td></tr>`
+      : '';
+    const subject = 'Новое обращение в обратную связь';
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #E75E32;">Новая обратная связь</h2>
+        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666;">Автор:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">
+              ${author ? `${escape(author.name)} ${escape(author.lastName)} (${escape(author.email)})` : escape(feedback.userId)}
+            </td>
+          </tr>
+          ${ratingLine}
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #666; vertical-align: top;">Сообщение:</td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; white-space: pre-wrap;">${escape(feedback.message)}</td>
+          </tr>
+        </table>
+        <p>
+          <a href="${adminLink}"
+             style="display: inline-block; padding: 12px 24px; background-color: #E75E32; color: white; text-decoration: none; border-radius: 6px;">
+            Открыть раздел обратной связи
+          </a>
+        </p>
+      </div>
+    `;
+    const adminEmails = admins.map((admin) => admin.email);
+    try {
+      const { data: result, error } = await this.resend.emails.send({
+        from: this.defaultFrom,
+        to: adminEmails,
+        subject,
+        html,
+      });
+      if (error) {
+        this.logger.error(`Failed to send feedback notification: ${error.message}`, error);
+        return;
+      }
+      this.logger.log(
+        `Feedback notification sent to ${adminEmails.length} admin(s) (id: ${result?.id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send feedback notification: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
 }

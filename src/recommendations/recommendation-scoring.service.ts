@@ -128,7 +128,7 @@ export class RecommendationScoringService {
           {
             role: 'system',
             content:
-              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог. Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава, рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией. Обоснование пиши на русском. Верни только валидный JSON.',
+              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог. Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава, рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией. Не придумывай диагнозы, метрики или проблемы, которых нет в clientProfile или diagnostics. Обоснование пиши на русском. Верни только валидный JSON.',
           },
           {
             role: 'user',
@@ -184,7 +184,7 @@ export class RecommendationScoringService {
         const diagnosticSignals = this.normalizeSignals([
           'ai_generated',
           ...(aiOnlyCandidate ? ['ai_semantic_match'] : []),
-          ...(item.diagnosticSignals ?? fallback.diagnosticSignals),
+          ...fallback.diagnosticSignals,
         ]);
         const score = aiOnlyCandidate
           ? AI_SEMANTIC_RECOMMENDATION_SCORE
@@ -195,11 +195,9 @@ export class RecommendationScoringService {
           packageId: fallback.packageId,
           serviceName: service.name,
           priority,
-          rationale: this.resolveRussianRationale(
-            item.rationale,
-            fallback.rationale,
-            service.name,
-          ),
+          rationale: aiOnlyCandidate
+            ? `${service.name}: рекомендация соответствует явно указанным ответам анкеты.`
+            : fallback.rationale,
           diagnosticSignals,
           score,
           coveredServiceIds: fallback.coveredServiceIds,
@@ -353,21 +351,6 @@ export class RecommendationScoringService {
       .map((group) => this.getSignalLabel(group.signal))
       .join(', ');
     return `${serviceName} подходит по результатам диагностики: ${signalText || 'общее соответствие запросу'}.`;
-  }
-
-  private resolveRussianRationale(
-    aiRationale: string | undefined,
-    fallbackRationale: string,
-    serviceName: string,
-  ): string {
-    const trimmed = aiRationale?.trim();
-    if (trimmed && /[а-яё]/i.test(trimmed)) {
-      return trimmed;
-    }
-
-    return (
-      fallbackRationale || `${serviceName} подходит по результатам диагностики.`
-    );
   }
 
   private hasRussianText(value: string | undefined): boolean {
