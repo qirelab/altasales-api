@@ -12,6 +12,7 @@ import { ExpertsService } from './experts.service';
 import { User } from '../users/entities/user.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
+import { CartItem } from '../cart/entities/cart-item.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -26,6 +27,7 @@ import { AuthModule } from '../auth/auth.module';
       User,
       OrderItem,
       OrderItemSubItem,
+      CartItem,
     ]),
   ],
   controllers: [ExpertsController, AdminExpertGroupsController, AdminExpertsController],
