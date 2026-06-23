@@ -29,6 +29,9 @@ export class PublicExpertGroupServiceDto {
 
   @ApiPropertyOptional({ example: 18000 })
   price: number | null;
+
+  @ApiProperty({ example: false })
+  giftEligible: boolean;
 }
 
 export class PublicExpertGroupDto {

@@ -91,6 +91,7 @@ export interface ExpertPositionDetailDto extends ExpertPositionBase {
     id: string;
     name: string;
     description: string | null;
+    giftEligible: boolean;
   }>;
   executors: ExpertExecutorDto[];
 }
@@ -134,6 +135,7 @@ export interface AdminExpertGroupDetailsDto {
     name: string;
     description: string | null;
     defaultPrice: number;
+    giftEligible: boolean;
   }>;
   prices: Record<string, Record<string, number | null>>;
   stats: {
@@ -226,6 +228,7 @@ export interface AdminExpertMemberDetails {
       description: string | null;
       defaultPrice: number;
       price: number | null;
+      giftEligible: boolean;
     }>;
   } | null;
   stats: {
@@ -251,7 +254,7 @@ export interface ExpertCheckoutResolveInput {
 export interface ExpertCheckoutResolveResult {
   positionId: string;
   executorUserId: string;
-  offeringLines: Array<{ offeringId: string; unitPrice: number }>;
+  offeringLines: Array<{ offeringId: string; unitPrice: number; giftEligible: boolean }>;
   amount: number;
 }
 
@@ -352,6 +355,7 @@ export class ExpertsService {
       id: offering.id,
       name: offering.name,
       description: offering.description,
+      giftEligible: offering.giftEligible,
     }));
 
     const activeMembers = (position.members ?? [])
@@ -463,6 +467,7 @@ export class ExpertsService {
     const offeringLines = offerings.map((offering) => ({
       offeringId: offering.id,
       unitPrice: priceByOfferingId.get(offering.id) ?? Number(offering.defaultPrice),
+      giftEligible: offering.giftEligible,
     }));
     const amount = offeringLines.reduce((sum, line) => sum + line.unitPrice, 0);
     if (amount <= 0) {
@@ -729,6 +734,7 @@ export class ExpertsService {
         name: service.name,
         description: service.description,
         defaultPrice: Number(service.defaultPrice),
+        giftEligible: service.giftEligible,
       })),
       prices: matrix,
       stats: {
@@ -1166,6 +1172,7 @@ export class ExpertsService {
     name: string;
     description: string | null;
     defaultPrice: number;
+    giftEligible: boolean;
   }> {
     let createdServiceId = '';
     await this.dataSource.transaction(async (manager) => {
@@ -1185,6 +1192,7 @@ export class ExpertsService {
         name: dto.name.trim(),
         description: dto.description?.trim() || null,
         defaultPrice: dto.defaultPrice,
+        giftEligible: dto.giftEligible ?? false,
       });
       const savedService = await serviceRepo.save(service);
       createdServiceId = savedService.id;
@@ -1217,6 +1225,7 @@ export class ExpertsService {
       name: created.name,
       description: created.description,
       defaultPrice: Number(created.defaultPrice),
+      giftEligible: created.giftEligible,
     };
   }
 
@@ -1235,6 +1244,7 @@ export class ExpertsService {
     if (dto.name !== undefined) service.name = dto.name.trim();
     if (dto.description !== undefined) service.description = dto.description?.trim() || null;
     if (dto.defaultPrice !== undefined) service.defaultPrice = dto.defaultPrice;
+    if (dto.giftEligible !== undefined) service.giftEligible = dto.giftEligible;
 
     await this.offeringRepository.save(service);
     return this.getAdminExpertGroupById(groupId);
@@ -1482,6 +1492,7 @@ export class ExpertsService {
           description: service.description,
           defaultPrice: Number(service.defaultPrice),
           price: priceByServiceId.get(service.id) ?? null,
+          giftEligible: service.giftEligible,
         })),
       };
     }
@@ -1799,6 +1810,7 @@ export class ExpertsService {
           description: service.description,
           defaultPrice: Number(service.defaultPrice),
           price: priceByServiceId.get(service.id) ?? null,
+          giftEligible: service.giftEligible,
         })),
       };
     }

@@ -392,6 +392,12 @@ export class OrdersService {
             await queryRunner.manager.save(OrderItemSubItem, subItems);
           }
 
+          for (const line of expert.offeringLines) {
+            if (line.giftEligible) {
+              giftEligibleAmount += line.unitPrice * quantity;
+            }
+          }
+
           totalAmount += resolvedAmount;
           createdOrders.push(order);
           continue;

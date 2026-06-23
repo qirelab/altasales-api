@@ -1,6 +1,6 @@
-import { ApiProperty, PartialType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateGroupServiceDto {
   @ApiProperty({ example: 'Консультация' })
@@ -18,6 +18,14 @@ export class CreateGroupServiceDto {
   @IsNumber()
   @Min(0)
   defaultPrice: number;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Whether this offering is payable from the user gift balance',
+  })
+  @IsBoolean()
+  @IsOptional()
+  giftEligible?: boolean;
 }
 
 export class UpdateGroupServiceDto extends PartialType(CreateGroupServiceDto) {}

@@ -8,6 +8,7 @@ export interface CartExpertOfferingDto {
   description: string | null;
   price: number | null;
   quantity: number;
+  giftEligible: boolean;
 }
 
 export interface CartExpertItemDto {
@@ -42,6 +43,7 @@ export function mapCartExpertItem(
         description: offeringDef?.description ?? null,
         price: priceEntry?.price ?? null,
         quantity: entry.quantity,
+        giftEligible: offeringDef?.giftEligible ?? false,
       };
     });
 
