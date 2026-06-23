@@ -165,6 +165,15 @@ export class OrdersService {
     if (!item) {
       return '';
     }
+    if (item.expertPositionId) {
+      const offeringNames = (item.subItems ?? [])
+        .map((sub) => sub.expertPositionOffering?.name?.trim())
+        .filter((name): name is string => Boolean(name));
+      if (offeringNames.length > 0) {
+        return offeringNames.join(', ');
+      }
+      return 'Услуга эксперта';
+    }
     return item.package?.name ?? item.service?.name ?? '';
   }
 
@@ -669,19 +678,38 @@ export class OrdersService {
       .leftJoin('o.item', 'item')
       .leftJoin('item.service', 'svc')
       .leftJoin(ServicePackage, 'pkg', 'pkg.id = item."packageId"')
+      .leftJoin(
+        (subQb) => subQb
+          .from(OrderItemSubItem, 'sub')
+          .leftJoin(ExpertPositionOffering, 'epo', 'epo.id = sub."expertPositionOfferingId"')
+          .select('sub."orderItemId"', 'orderItemId')
+          .addSelect('COUNT(sub.id)', 'offeringsCount')
+          .addSelect(`STRING_AGG(epo.name, ', ' ORDER BY epo.name)`, 'offeringNames')
+          .where('sub."expertPositionOfferingId" IS NOT NULL')
+          .groupBy('sub."orderItemId"'),
+        'expSub',
+        'expSub."orderItemId" = item.id',
+      )
       .select('o.id', 'id')
       .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
       .addSelect(
         `CASE
            WHEN item.id IS NULL THEN 'Услуга'
-           WHEN item."expertPositionId" IS NOT NULL THEN 'Эксперт'
+           WHEN item."expertPositionId" IS NOT NULL THEN
+             CASE WHEN COALESCE(expSub."offeringsCount", 0) > 1 THEN 'Услуги эксперта' ELSE 'Услуга эксперта' END
            WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
            WHEN svc.type IN ('Услуга', 'Документ', 'Подрядчик') THEN svc.type
            ELSE 'Услуга'
          END`,
         'typeLabel',
       )
-      .addSelect('COALESCE(svc.name, pkg.name)', 'name')
+      .addSelect(
+        `CASE
+           WHEN item."expertPositionId" IS NOT NULL THEN COALESCE(expSub."offeringNames", 'Услуга эксперта')
+           ELSE COALESCE(svc.name, pkg.name)
+         END`,
+        'name',
+      )
       .addSelect('u.name', 'clientName')
       .addSelect('u."lastName"', 'clientLastName')
       .addSelect('o."createdAt"', 'date')
@@ -694,7 +722,13 @@ export class OrdersService {
       .getRawMany<{
         id: string;
         itemsCount: string;
-        typeLabel: 'Услуга' | 'Документ' | 'Подрядчик' | 'Пакет услуг' | 'Эксперт';
+        typeLabel:
+          | 'Услуга'
+          | 'Документ'
+          | 'Подрядчик'
+          | 'Пакет услуг'
+          | 'Услуга эксперта'
+          | 'Услуги эксперта';
         name: string | null;
         clientName: string;
         clientLastName: string;
