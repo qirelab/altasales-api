@@ -365,6 +365,7 @@ export class ExpertsService {
         .getMany()
       : [];
     const executorByUserId = new Map(executorUsers.map((user) => [user.id, user]));
+    const profileExperienceByUserId = await this.loadExpertProfileExperienceYearsByUserIds(executorUserIds);
     const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(executorUserIds);
 
     const executors = await Promise.all(
@@ -378,7 +379,8 @@ export class ExpertsService {
             id: memberUser.id,
             name: memberUser.name,
             lastName: memberUser.lastName,
-            experienceYears: memberUser.experienceYears
+            experienceYears: profileExperienceByUserId.get(memberUser.id)
+              ?? memberUser.experienceYears
               ?? fallbackExperienceByUserId.get(memberUser.id)
               ?? null,
             offerings: prices,
@@ -1056,6 +1058,23 @@ export class ExpertsService {
       rows
         .filter((row) => row.experienceYears !== null)
         .map((row) => [row.userId, Number(row.experienceYears)]),
+    );
+  }
+
+  private async loadExpertProfileExperienceYearsByUserIds(userIds: string[]): Promise<Map<string, number>> {
+    if (userIds.length === 0) {
+      return new Map();
+    }
+
+    const profiles = await this.expertProfileRepository.find({
+      where: { userId: In(userIds) },
+      select: ['userId', 'experienceYears'],
+    });
+
+    return new Map(
+      profiles
+        .filter((profile) => profile.experienceYears !== null)
+        .map((profile) => [profile.userId, profile.experienceYears as number]),
     );
   }
 
