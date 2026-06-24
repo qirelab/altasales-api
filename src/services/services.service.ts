@@ -284,6 +284,9 @@ export class ServicesService {
 
     const service = await this.findOne(id);
     Object.assign(service, updateServiceDto);
+    if ('categoryId' in updateServiceDto && updateServiceDto.categoryId === null) {
+      service.category = null;
+    }
     return await this.serviceRepository.save(service);
   }
 

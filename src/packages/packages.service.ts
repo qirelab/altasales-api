@@ -110,6 +110,10 @@ export class PackagesService {
       services,
     });
 
+    if ('categoryId' in packageFields && packageFields.categoryId === null) {
+      servicePackage.category = null;
+    }
+
     if (updatePackageDto.tags === undefined && !servicePackage.tags) {
       servicePackage.tags = [];
     }
