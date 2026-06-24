@@ -103,8 +103,8 @@ export class CategoriesService {
     const category = await this.categoryRepository
       .createQueryBuilder('c')
       .leftJoinAndSelect('c.faqs', 'faq')
-      .leftJoinAndSelect('c.services', 'service')
-      .leftJoinAndSelect('c.packages', 'pkg')
+      .leftJoinAndSelect('c.services', 'service', 'service.deletedAt IS NULL')
+      .leftJoinAndSelect('c.packages', 'pkg', 'pkg.deletedAt IS NULL')
       .loadRelationCountAndMap('c.servicesCount', 'c.services')
       .loadRelationCountAndMap('c.packagesCount', 'c.packages')
       .loadRelationCountAndMap('c.faqsCount', 'c.faqs')
