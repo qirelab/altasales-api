@@ -1122,7 +1122,7 @@ describe('RecommendationsService', () => {
         priority: RecommendationPriority.Urgent,
         rationale: 'crm audit',
         diagnosticSignals: [],
-        score: 120,
+        score: 70,
         coveredServiceIds: ['crm-audit-id'],
       },
       {
@@ -1154,6 +1154,76 @@ describe('RecommendationsService', () => {
 
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
       'crm-silver-package-id',
+    ]);
+  });
+
+  it('does not let a weak package replace a much stronger covered service', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'crm-audit-id',
+        packageId: null,
+        serviceName: 'Аудит CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'high confidence audit',
+        diagnosticSignals: [],
+        score: 120,
+        coveredServiceIds: ['crm-audit-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'crm-silver-package-id',
+        serviceName: 'CRM Серебро',
+        priority: RecommendationPriority.Medium,
+        rationale: 'weak crm package',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id', 'crm-report-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'crm-audit-id',
+    ]);
+  });
+
+  it('does not let a package replace an ideal-reference covered service', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'crm-audit-id',
+        packageId: null,
+        serviceName: 'Аудит CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'golden recommendation',
+        diagnosticSignals: ['ideal_reference:existing_department'],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'crm-silver-package-id',
+        serviceName: 'CRM Серебро',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'crm package',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id', 'crm-report-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'crm-audit-id',
     ]);
   });
 

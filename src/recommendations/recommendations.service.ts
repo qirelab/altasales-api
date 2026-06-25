@@ -45,6 +45,7 @@ import {
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
 const MIN_RECOMMENDATION_RANKING_SCORE = 20;
+const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
   RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
 );
@@ -1210,6 +1211,13 @@ export class RecommendationsService implements OnModuleInit {
     if (!item.packageId || overlappingSelected.length === 0) {
       return false;
     }
+    if (
+      overlappingSelected.some((selectedItem) =>
+        this.isIdealReferenceRecommendation(selectedItem),
+      )
+    ) {
+      return false;
+    }
 
     const itemCoverageSize =
       this.getGeneratedRecommendationCoveredServiceIds(item).length;
@@ -1219,7 +1227,17 @@ export class RecommendationsService implements OnModuleInit {
           this.getGeneratedRecommendationCoveredServiceIds(selectedItem).length,
       ),
     );
-    return itemCoverageSize > maxSelectedCoverageSize;
+    const maxSelectedScore = Math.max(
+      ...overlappingSelected.map((selectedItem) =>
+        Number(selectedItem.score || 0),
+      ),
+    );
+
+    return (
+      itemCoverageSize > maxSelectedCoverageSize &&
+      Number(item.score || 0) >=
+        maxSelectedScore - PACKAGE_REPLACEMENT_SCORE_TOLERANCE
+    );
   }
 
   private getExistingCoveredServiceIdsExceptTarget(
