@@ -12,6 +12,7 @@ import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderItemSubItem } from './entities/order-item-sub-item.entity';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
@@ -25,6 +26,7 @@ import { OrdersController } from './orders.controller';
       Recommendation,
       Service,
       ServicePackage,
+      ExpertProfile,
       ExpertPositionOffering,
     ]),
     PaymentModule,

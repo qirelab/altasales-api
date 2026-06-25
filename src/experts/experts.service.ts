@@ -125,6 +125,7 @@ export interface AdminExpertGroupDetailsDto {
     id: string;
     name: string;
     lastName: string;
+    image: string | null;
     email: string;
     phoneNumber: string;
     experienceYears: number | null;
@@ -152,6 +153,7 @@ export interface AdminExpertGroupOrderItem {
   clientLastName: string;
   executorName: string | null;
   executorLastName: string | null;
+  executorImage: string | null;
   serviceName: string | null;
   amount: number;
   createdAt: Date;
@@ -660,23 +662,29 @@ export class ExpertsService {
     const expertOrdersCountById = new Map(
       expertOrdersCountsRaw.map((row) => [row.executorUserId, Number(row.count)]),
     );
-    const fallbackExperienceByUserId = await this.loadFallbackExperienceYearsByUserIds(expertIds);
-    const profileExperienceByUserId = await this.loadProfileExperienceYearsByUserIds(expertIds);
+    const storedProfiles = expertIds.length > 0
+      ? await this.expertProfileRepository.find({ where: { userId: In(expertIds) } })
+      : [];
+    const profileByUserId = new Map(storedProfiles.map((profile) => [profile.userId, profile]));
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(expertIds);
 
-    const experts = expertMembers.map((member) => ({
-      id: member.user!.id,
-      name: member.user!.name,
-      lastName: member.user!.lastName,
-      email: member.user!.email,
-      phoneNumber: member.user!.phoneNumber,
-      experienceYears: this.resolveExperienceYears(
-        member.user!.id,
+    const experts = expertMembers.map((member) => {
+      const resolvedProfile = this.resolveExpertProfile(
+        profileByUserId.get(member.user!.id),
+        fallbackProfileByUserId.get(member.user!.id),
         member.user!.experienceYears,
-        profileExperienceByUserId,
-        fallbackExperienceByUserId,
-      ),
-      ordersCount: expertOrdersCountById.get(member.user!.id) ?? 0,
-    }));
+      );
+      return {
+        id: member.user!.id,
+        name: member.user!.name,
+        lastName: member.user!.lastName,
+        image: resolvedProfile.image,
+        email: member.user!.email,
+        phoneNumber: member.user!.phoneNumber,
+        experienceYears: resolvedProfile.experienceYears,
+        ordersCount: expertOrdersCountById.get(member.user!.id) ?? 0,
+      };
+    });
 
     const matrix: Record<string, Record<string, number | null>> = {};
     experts.forEach((expert) => {
@@ -779,14 +787,33 @@ export class ExpertsService {
       .orderBy('parent_order."createdAt"', 'DESC')
       .getMany();
 
+    const executorIds = [...new Set(
+      items.map((item) => item.executor?.id).filter((id): id is string => Boolean(id)),
+    )];
+    const executorProfiles = executorIds.length > 0
+      ? await this.expertProfileRepository.find({ where: { userId: In(executorIds) } })
+      : [];
+    const executorProfileByUserId = new Map(
+      executorProfiles.map((profile) => [profile.userId, profile]),
+    );
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(executorIds);
+
     const data: AdminExpertGroupOrderItem[] = items.map((item) => {
       const firstOffering = item.subItems?.find((sub) => sub.expertPositionOffering)?.expertPositionOffering;
+      const resolvedProfile = item.executor
+        ? this.resolveExpertProfile(
+          executorProfileByUserId.get(item.executor.id),
+          fallbackProfileByUserId.get(item.executor.id),
+          item.executor.experienceYears,
+        )
+        : null;
       return {
         id: item.orderId,
         clientName: item.order?.user?.name ?? '',
         clientLastName: item.order?.user?.lastName ?? '',
         executorName: item.executor?.name ?? null,
         executorLastName: item.executor?.lastName ?? null,
+        executorImage: resolvedProfile?.image ?? null,
         serviceName: firstOffering?.name ?? null,
         amount: Number(item.amount),
         createdAt: item.order?.createdAt ?? new Date(0),

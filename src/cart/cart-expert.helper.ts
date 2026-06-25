@@ -17,7 +17,7 @@ export interface CartExpertItemDto {
   expertPositionId: string;
   expertPosition: { id: string; name: string; description: string };
   executorUserId: string;
-  executor: { id: string; name: string; lastName: string };
+  executor: { id: string; name: string; lastName: string; image: string | null };
   offerings: CartExpertOfferingDto[];
   amount: number;
 }
@@ -66,6 +66,7 @@ export function mapCartExpertItem(
       id: executor.id,
       name: executor.name,
       lastName: executor.lastName,
+      image: executor.image ?? null,
     },
     offerings,
     amount,

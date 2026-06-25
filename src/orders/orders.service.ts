@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ExpertsService } from '../experts/experts.service';
 import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
+import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { ServicePackage } from '../packages/entities/package.entity';
@@ -106,6 +107,8 @@ export class OrdersService {
     private readonly packageRepository: Repository<ServicePackage>,
     @InjectRepository(Recommendation)
     private readonly recommendationRepository: Repository<Recommendation>,
+    @InjectRepository(ExpertProfile)
+    private readonly expertProfileRepository: Repository<ExpertProfile>,
     @InjectRepository(ExpertPositionOffering)
     private readonly expertOfferingRepository: Repository<ExpertPositionOffering>,
     private readonly expertsService: ExpertsService,
@@ -218,6 +221,48 @@ export class OrdersService {
   private async hydrateDeletedExpertOfferingsForOrders(orders: Order[]): Promise<void> {
     const subItems = orders.flatMap((order) => order.item?.subItems ?? []);
     await this.hydrateDeletedExpertOfferings(subItems);
+  }
+
+  private async attachExecutorImagesToOrders(orders: Order[]): Promise<void> {
+    const executorUserIds = [...new Set(
+      orders
+        .map((order) => order.item?.executorUserId ?? order.item?.executor?.id ?? null)
+        .filter((id): id is string => Boolean(id)),
+    )];
+    if (!executorUserIds.length) return;
+
+    const profiles = await this.expertProfileRepository.find({
+      where: { userId: In(executorUserIds) },
+    });
+    const imageByUserId = new Map(
+      profiles
+        .filter((profile) => Boolean(profile.image))
+        .map((profile) => [profile.userId, profile.image as string]),
+    );
+
+    const fallbackRows = await this.serviceRepository
+      .createQueryBuilder('service')
+      .select('service."userId"', 'userId')
+      .addSelect('MAX(service.image)', 'image')
+      .where('service."userId" IN (:...executorUserIds)', { executorUserIds })
+      .andWhere('service.type = :contractorType', { contractorType: ServiceType.Contractor })
+      .andWhere('service."deletedAt" IS NULL')
+      .andWhere('service.image IS NOT NULL')
+      .groupBy('service."userId"')
+      .getRawMany<{ userId: string; image: string | null }>();
+
+    fallbackRows.forEach((row) => {
+      if (!imageByUserId.has(row.userId) && row.image) {
+        imageByUserId.set(row.userId, row.image);
+      }
+    });
+
+    orders.forEach((order) => {
+      const executor = order.item?.executor as (OrderItem['executor'] & { image?: string | null }) | undefined;
+      const executorUserId = order.item?.executorUserId ?? executor?.id;
+      if (!executor || !executorUserId) return;
+      executor.image = imageByUserId.get(executorUserId) ?? null;
+    });
   }
 
   private transformOrderFiles(order: Order): OrderDto {
@@ -590,6 +635,7 @@ export class OrdersService {
       take: limit,
     });
     await this.hydrateDeletedExpertOfferingsForOrders(data);
+    await this.attachExecutorImagesToOrders(data);
     return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
@@ -646,6 +692,7 @@ export class OrdersService {
     });
 
     await this.hydrateDeletedExpertOfferingsForOrders(data);
+    await this.attachExecutorImagesToOrders(data);
     return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
   }
 
@@ -693,8 +740,8 @@ export class OrdersService {
           .addSelect(`STRING_AGG(epo.name, ', ' ORDER BY epo.name)`, 'offeringNames')
           .where('sub."expertPositionOfferingId" IS NOT NULL')
           .groupBy('sub."orderItemId"'),
-        'expSub',
-        'expSub."orderItemId" = item.id',
+        'exp_sub',
+        'exp_sub."orderItemId" = item.id',
       )
       .select('o.id', 'id')
       .addSelect('CASE WHEN item.id IS NULL THEN 0 ELSE 1 END', 'itemsCount')
@@ -702,7 +749,7 @@ export class OrdersService {
         `CASE
            WHEN item.id IS NULL THEN 'Услуга'
            WHEN item."expertPositionId" IS NOT NULL THEN
-             CASE WHEN COALESCE(expSub."offeringsCount", 0) > 1 THEN 'Услуги эксперта' ELSE 'Услуга эксперта' END
+             CASE WHEN COALESCE(exp_sub."offeringsCount", 0) > 1 THEN 'Услуги эксперта' ELSE 'Услуга эксперта' END
            WHEN item."packageId" IS NOT NULL THEN 'Пакет услуг'
            WHEN svc.type IN ('Услуга', 'Документ') THEN svc.type
            ELSE 'Услуга'
@@ -711,7 +758,7 @@ export class OrdersService {
       )
       .addSelect(
         `CASE
-           WHEN item."expertPositionId" IS NOT NULL THEN COALESCE(expSub."offeringNames", 'Услуга эксперта')
+           WHEN item."expertPositionId" IS NOT NULL THEN COALESCE(exp_sub."offeringNames", 'Услуга эксперта')
            ELSE COALESCE(svc.name, pkg.name)
          END`,
         'name',
@@ -773,6 +820,7 @@ export class OrdersService {
     }
 
     await this.hydrateDeletedExpertOfferingsForOrders([order]);
+    await this.attachExecutorImagesToOrders([order]);
     return this.transformOrderFiles(order);
   }
 
