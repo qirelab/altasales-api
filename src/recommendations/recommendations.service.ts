@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
@@ -189,6 +190,8 @@ interface ExistingRecommendationCoverage {
 
 @Injectable()
 export class RecommendationsService implements OnModuleInit {
+  private readonly logger = new Logger(RecommendationsService.name);
+
   constructor(
     @InjectRepository(Recommendation)
     private readonly recommendationRepository: Repository<Recommendation>,
@@ -1417,6 +1420,13 @@ export class RecommendationsService implements OnModuleInit {
     job: RecommendationGenerationJob,
   ): Promise<Record<string, unknown>[]> {
     const request = job.request as Partial<GenerateRecommendationsDto>;
+    const user = await this.userRepository.findOne({
+      where: { id: job.userId },
+    });
+    const shouldNotify = user
+      ? await this.notificationService.shouldNotifyAboutNewRecommendation(user)
+      : false;
+
     const recommendations = await this.generateForUser({
       userId: job.userId,
       clientProfile: request.clientProfile,
@@ -1424,6 +1434,27 @@ export class RecommendationsService implements OnModuleInit {
       limit: request.limit,
       persist: request.persist,
     });
+
+    if (shouldNotify && user && recommendations.length > 0) {
+      const latest = await this.recommendationRepository.findOne({
+        where: { userId: job.userId },
+        order: { createdAt: 'DESC' },
+      });
+      if (latest) {
+        try {
+          await this.notificationService.notifyUserAboutRecommendations(
+            user,
+            latest,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to notify user ${job.userId} about generated recommendations: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    }
 
     return recommendations.map((item) => ({
       serviceId: item.serviceId,
