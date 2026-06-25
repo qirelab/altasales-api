@@ -399,12 +399,42 @@ describe('RecommendationsService', () => {
         category: { name: 'CRM система' },
         deletedAt: null,
       },
+      {
+        id: 'crm-audit-service-id',
+        name: 'Аудит CRM',
+        description: 'Диагностика CRM и процессов продаж',
+        type: ServiceType.Service,
+        price: 7000,
+        skills: ['crm', 'аудит'],
+        category: { name: 'CRM система' },
+        deletedAt: null,
+      },
+      {
+        id: 'dashboard-service-id',
+        name: 'Дашборд ОП',
+        description: 'Панель с ключевыми показателями отдела продаж',
+        type: ServiceType.Document,
+        price: 10000,
+        skills: ['дашборд оп', 'аналитика'],
+        category: { name: 'Документы' },
+        deletedAt: null,
+      },
+      {
+        id: 'instruction-service-id',
+        name: 'Рабочая инструкция МП',
+        description: 'Описание правил работы менеджера',
+        type: ServiceType.Document,
+        price: 1000,
+        skills: ['документы'],
+        category: { name: 'Документы' },
+        deletedAt: null,
+      },
     ]);
     packageRepository.find.mockResolvedValue([
       {
         id: 'crm-silver-package-id',
         name: 'CRM Серебро',
-        description: 'Расширенная настройка CRM',
+        description: 'Расширенная настройка CRM: аудит, подготовка ТЗ',
         packageType: 'silver',
         price: 100000,
         tags: ['crm'],
@@ -423,6 +453,28 @@ describe('RecommendationsService', () => {
         createdAt: new Date(),
         deletedAt: null,
       },
+      {
+        id: 'documents-package-id',
+        name: 'Пакет документов отдела продаж',
+        description: 'Комплект документов и дашборд ОП',
+        packageType: 'documents',
+        price: 25000,
+        tags: ['документы'],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'instruction-service-id',
+            name: 'Рабочая инструкция МП',
+            description: 'Описание правил работы менеджера',
+            deletedAt: null,
+            skills: ['документы'],
+            category: { name: 'Документы' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
     ]);
 
     await service.generateForUser({
@@ -435,7 +487,17 @@ describe('RecommendationsService', () => {
       (item) => item.packageId === 'crm-silver-package-id',
     );
     expect(packageCandidate.coveredServiceIds).toEqual(
-      expect.arrayContaining(['inner-tz-service-id', 'tech-spec-service-id']),
+      expect.arrayContaining([
+        'inner-tz-service-id',
+        'tech-spec-service-id',
+        'crm-audit-service-id',
+      ]),
+    );
+    const documentsPackageCandidate = candidates.find(
+      (item) => item.packageId === 'documents-package-id',
+    );
+    expect(documentsPackageCandidate.coveredServiceIds).toEqual(
+      expect.arrayContaining(['dashboard-service-id']),
     );
   });
 
@@ -1050,38 +1112,38 @@ describe('RecommendationsService', () => {
     ]);
   });
 
-  it('keeps a relevant package when it only partially overlaps a stronger selected service', async () => {
+  it('prefers a relevant package over covered services even when they scored higher', async () => {
     const { service, relevanceRanker } = createService();
     relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'crm-audit-id',
+        packageId: null,
+        serviceName: 'Аудит CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'crm audit',
+        diagnosticSignals: [],
+        score: 70,
+        coveredServiceIds: ['crm-audit-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'crm-silver-package-id',
+        serviceName: 'CRM Серебро',
+        priority: RecommendationPriority.Medium,
+        rationale: 'crm package',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id', 'dashboard-id', 'crm-report-id'],
+      },
       {
         serviceId: 'dashboard-id',
         packageId: null,
         serviceName: 'Дашборд ОП',
-        priority: RecommendationPriority.Urgent,
+        priority: RecommendationPriority.Medium,
         rationale: 'analytics',
         diagnosticSignals: [],
-        score: 120,
+        score: 60,
         coveredServiceIds: ['dashboard-id'],
-      },
-      {
-        serviceId: null,
-        packageId: 'documents-package-id',
-        serviceName: 'Пакет документов отдела продаж',
-        priority: RecommendationPriority.Medium,
-        rationale: 'documents package',
-        diagnosticSignals: [],
-        score: 60,
-        coveredServiceIds: ['dashboard-id', 'document-1-id', 'document-2-id'],
-      },
-      {
-        serviceId: 'document-1-id',
-        packageId: null,
-        serviceName: 'Документ под запрос',
-        priority: RecommendationPriority.Medium,
-        rationale: 'single document',
-        diagnosticSignals: [],
-        score: 60,
-        coveredServiceIds: ['document-1-id'],
       },
     ]);
 
@@ -1091,8 +1153,77 @@ describe('RecommendationsService', () => {
     });
 
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
-      'dashboard-id',
-      'documents-package-id',
+      'crm-silver-package-id',
+    ]);
+  });
+
+  it('does not let a weak package replace a much stronger covered service', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'crm-audit-id',
+        packageId: null,
+        serviceName: 'Аудит CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'high confidence audit',
+        diagnosticSignals: [],
+        score: 120,
+        coveredServiceIds: ['crm-audit-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'crm-silver-package-id',
+        serviceName: 'CRM Серебро',
+        priority: RecommendationPriority.Medium,
+        rationale: 'weak crm package',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id', 'crm-report-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'crm-audit-id',
+    ]);
+  });
+
+  it('does not let a package replace an ideal-reference covered service', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'crm-audit-id',
+        packageId: null,
+        serviceName: 'Аудит CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'golden recommendation',
+        diagnosticSignals: ['ideal_reference:existing_department'],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'crm-silver-package-id',
+        serviceName: 'CRM Серебро',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'crm package',
+        diagnosticSignals: [],
+        score: 60,
+        coveredServiceIds: ['crm-audit-id', 'crm-report-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'crm-audit-id',
     ]);
   });
 
