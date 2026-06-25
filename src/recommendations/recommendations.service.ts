@@ -88,6 +88,16 @@ const LOGICAL_COVERAGE_RULES: LogicalCoverageRule[] = [
     ],
   },
   {
+    key: 'crm_audit',
+    variants: ['аудит crm'],
+    terms: ['аудит', 'crm'],
+  },
+  {
+    key: 'sales_dashboard',
+    variants: ['дашборд оп'],
+    terms: ['дашборд', 'оп'],
+  },
+  {
     key: 'sales_department_documents',
     variants: ['пакет документов отдела продаж', 'документы отдела продаж'],
     terms: ['документы', 'отдел продаж'],
@@ -1135,35 +1145,28 @@ export class RecommendationsService implements OnModuleInit {
           ),
         );
 
-        const shouldReplace = this.shouldReplaceOverlappingRecommendations(
-          item,
-          overlappingSelected,
-        );
-        const shouldKeepPartialPackage =
-          this.shouldKeepPartiallyOverlappingPackage(
+        if (
+          !this.shouldReplaceOverlappingRecommendations(
             item,
-            selectedCoveredServiceIds,
-          );
-
-        if (!shouldReplace && !shouldKeepPartialPackage) {
+            overlappingSelected,
+          )
+        ) {
           continue;
         }
 
-        if (shouldReplace) {
-          overlappingSelected.forEach((selectedItem) => {
-            const selectedTargetId =
-              this.getGeneratedRecommendationTargetId(selectedItem);
-            if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
-            const selectedIndex = selected.indexOf(selectedItem);
-            if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
-          });
-          selectedCoveredServiceIds.clear();
-          selected.forEach((selectedItem) => {
-            this.getGeneratedRecommendationCoveredServiceIds(
-              selectedItem,
-            ).forEach((serviceId) => selectedCoveredServiceIds.add(serviceId));
-          });
-        }
+        overlappingSelected.forEach((selectedItem) => {
+          const selectedTargetId =
+            this.getGeneratedRecommendationTargetId(selectedItem);
+          if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
+          const selectedIndex = selected.indexOf(selectedItem);
+          if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
+        });
+        selectedCoveredServiceIds.clear();
+        selected.forEach((selectedItem) => {
+          this.getGeneratedRecommendationCoveredServiceIds(
+            selectedItem,
+          ).forEach((serviceId) => selectedCoveredServiceIds.add(serviceId));
+        });
       }
 
       selected.push(item);
@@ -1216,32 +1219,7 @@ export class RecommendationsService implements OnModuleInit {
           this.getGeneratedRecommendationCoveredServiceIds(selectedItem).length,
       ),
     );
-    const maxSelectedScore = Math.max(
-      ...overlappingSelected.map((selectedItem) =>
-        Number(selectedItem.score || 0),
-      ),
-    );
-
-    return (
-      itemCoverageSize > maxSelectedCoverageSize &&
-      Number(item.score || 0) >= maxSelectedScore - 15
-    );
-  }
-
-  private shouldKeepPartiallyOverlappingPackage(
-    item: GeneratedRecommendationItem,
-    selectedCoveredServiceIds: Set<string>,
-  ): boolean {
-    if (!item.packageId) return false;
-
-    const uncoveredPublicCoverage =
-      this.getGeneratedRecommendationCoveredServiceIds(item).filter(
-        (serviceId) =>
-          !selectedCoveredServiceIds.has(serviceId) &&
-          !this.isInternalCoverageKey(serviceId),
-      );
-
-    return uncoveredPublicCoverage.length >= 2;
+    return itemCoverageSize > maxSelectedCoverageSize;
   }
 
   private getExistingCoveredServiceIdsExceptTarget(
