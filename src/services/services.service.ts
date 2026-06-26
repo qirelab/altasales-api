@@ -51,6 +51,7 @@ export class ServicesService {
     const service = this.serviceRepository.create({
       ...createServiceDto,
       skills: createServiceDto.skills ?? [],
+      imageCrop: createServiceDto.imageCrop ?? null,
     });
     return await this.serviceRepository.save(service);
   }
@@ -151,6 +152,7 @@ export class ServicesService {
       categoryId: string | null;
       price: number;
       image: string | null;
+      imageCrop: Service['imageCrop'];
       skills: string[];
       createdAt: Date;
       userId: string | null;
@@ -200,6 +202,7 @@ export class ServicesService {
       .addSelect('s."categoryId"', 'categoryId')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
+      .addSelect('s."imageCrop"', 'imageCrop')
       .addSelect('s.skills', 'skills')
       .addSelect('s."giftEligible"', 'giftEligible')
       .addSelect('s."createdAt"', 'createdAt')
@@ -219,6 +222,7 @@ export class ServicesService {
         categoryId: string | null;
         price: string;
         image: string | null;
+        imageCrop: Service['imageCrop'];
         skills: string[] | string;
         createdAt: Date;
         userId: string | null;
@@ -236,6 +240,7 @@ export class ServicesService {
         categoryId: row.categoryId,
         price: Number(row.price),
         image: row.image,
+        imageCrop: row.imageCrop,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
@@ -284,6 +289,12 @@ export class ServicesService {
 
     const service = await this.findOne(id);
     Object.assign(service, updateServiceDto);
+    if (updateServiceDto.image === null) {
+      service.imageCrop = null;
+    }
+    if (updateServiceDto.imageCrop !== undefined) {
+      service.imageCrop = updateServiceDto.imageCrop;
+    }
     if ('categoryId' in updateServiceDto) {
       service.category = updateServiceDto.categoryId
         ? ({ id: updateServiceDto.categoryId } as Category)
@@ -349,6 +360,7 @@ export class ServicesService {
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
+      imageCrop: dto.imageCrop ?? null,
       userId: dto.userId,
       contractorRatePerHour: dto.ratePerHour,
       contractorExperienceYears: dto.experienceYears,
@@ -496,7 +508,11 @@ export class ServicesService {
   }
 
   async findExpertProfile(userId: string): Promise<{
-    contractor: Service & { user: User | null; category?: Category | null };
+    contractor: Service & {
+      user: User | null;
+      category?: Category | null;
+      imageCrop: ExpertProfile['imageCrop'];
+    };
     stats: {
       totalProjects: number;
       activeOrders: number;
@@ -612,6 +628,7 @@ export class ServicesService {
       category: null,
       price: 0,
       image: expertProfile?.image ?? null,
+      imageCrop: expertProfile?.imageCrop ?? null,
       skills: expertProfile?.skills ?? [],
       contractorRatePerHour: null,
       contractorExperienceYears: expertProfile?.experienceYears ?? null,
@@ -633,6 +650,7 @@ export class ServicesService {
       category: string;
       price: number;
       image: string | null;
+      imageCrop: Service['imageCrop'];
       skills: string[];
       giftEligible: boolean;
       createdAt: Date;
@@ -708,6 +726,7 @@ export class ServicesService {
         category: service.category?.name ?? '',
         price: Number(service.price),
         image: service.image,
+        imageCrop: service.imageCrop,
         skills: service.skills,
         giftEligible: service.giftEligible,
         createdAt: service.createdAt,
@@ -731,7 +750,13 @@ export class ServicesService {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
-    if (dto.image !== undefined) contractor.image = dto.image ?? null;
+    if (dto.image !== undefined) {
+      contractor.image = dto.image ?? null;
+      if (dto.image === null) {
+        contractor.imageCrop = null;
+      }
+    }
+    if (dto.imageCrop !== undefined) contractor.imageCrop = dto.imageCrop;
     if (dto.ratePerHour !== undefined) {
       contractor.contractorRatePerHour = dto.ratePerHour;
       contractor.price = dto.ratePerHour;

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 
 export class PublicExpertProfileFieldsDto {
   @ApiProperty({ example: 'Эксперт по CRM интеграциям' })
@@ -9,6 +10,9 @@ export class PublicExpertProfileFieldsDto {
 
   @ApiPropertyOptional({ example: 'https://example.com/expert.jpg' })
   image: string | null;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  imageCrop: ImageCropDto | null;
 
   @ApiPropertyOptional({ example: 5 })
   experienceYears: number | null;
@@ -46,6 +50,9 @@ export class PublicExpertGroupDto {
 
   @ApiPropertyOptional({ example: 'https://example.com/group.jpg' })
   image: string | null;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  imageCrop: ImageCropDto | null;
 
   @ApiProperty({ type: [PublicExpertGroupServiceDto] })
   services: PublicExpertGroupServiceDto[];

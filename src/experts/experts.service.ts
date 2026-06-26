@@ -63,6 +63,7 @@ export interface ExpertPositionBase {
   name: string;
   description: string;
   image: string | null;
+  imageCrop: ExpertPosition['imageCrop'];
 }
 
 export interface ExpertPositionListItem extends ExpertPositionBase {
@@ -82,6 +83,7 @@ export interface ExpertExecutorDto {
   name: string;
   lastName: string;
   image: string | null;
+  imageCrop: ExpertProfile['imageCrop'];
   experienceYears: number | null;
   offerings: ExpertExecutorOfferingPrice[];
 }
@@ -107,6 +109,7 @@ export interface AdminExpertGroupsListItemDto {
   title: string;
   iconLabel: string | null;
   image: string | null;
+  imageCrop: ExpertPosition['imageCrop'];
   description: string;
   expertsCount: number;
   expertsPreview: AdminExpertGroupPreviewMember[];
@@ -120,12 +123,14 @@ export interface AdminExpertGroupDetailsDto {
   title: string;
   iconLabel: string | null;
   image: string | null;
+  imageCrop: ExpertPosition['imageCrop'];
   description: string;
   experts: Array<{
     id: string;
     name: string;
     lastName: string;
     image: string | null;
+    imageCrop: ExpertProfile['imageCrop'];
     email: string;
     phoneNumber: string;
     experienceYears: number | null;
@@ -187,6 +192,7 @@ export interface AdminExpertMemberProfile {
   description: string;
   skills: string[];
   image: string | null;
+  imageCrop: ExpertProfile['imageCrop'];
   experienceYears: number | null;
 }
 
@@ -195,6 +201,7 @@ interface FallbackExpertProfile {
   description: string;
   skills: string[];
   image: string | null;
+  imageCrop: Service['imageCrop'];
   experienceYears: number | null;
 }
 
@@ -224,6 +231,7 @@ export interface AdminExpertMemberDetails {
     title: string;
     description: string;
     image: string | null;
+    imageCrop: ExpertPosition['imageCrop'];
     services: Array<{
       id: string;
       name: string;
@@ -336,6 +344,7 @@ export class ExpertsService {
       name: position.name,
       description: position.description,
       image: position.image ?? null,
+      imageCrop: position.imageCrop ?? null,
       executorsCount: (position.members ?? []).filter((member) => !member.deletedAt).length,
       offeringsCount: (position.offerings ?? []).filter((offering) => !offering.deletedAt).length,
       minPrice: minPriceByPosition.get(position.id) ?? null,
@@ -401,6 +410,7 @@ export class ExpertsService {
             name: memberUser.name,
             lastName: memberUser.lastName,
             image: resolvedProfile.image,
+            imageCrop: resolvedProfile.imageCrop,
             experienceYears: resolvedProfile.experienceYears
               ?? fallbackExperienceByUserId.get(memberUser.id)
               ?? null,
@@ -414,6 +424,7 @@ export class ExpertsService {
       name: position.name,
       description: position.description,
       image: position.image ?? null,
+      imageCrop: position.imageCrop ?? null,
       offerings,
       executors: executors.filter(Boolean) as ExpertExecutorDto[],
     };
@@ -618,6 +629,7 @@ export class ExpertsService {
         title: group.name,
         iconLabel: group.iconLabel ?? null,
         image: group.image ?? null,
+        imageCrop: group.imageCrop ?? null,
         description: group.description,
         expertsCount: expertsCountByGroup.get(group.id) ?? 0,
         expertsPreview: expertsPreviewByGroup.get(group.id) ?? [],
@@ -679,6 +691,7 @@ export class ExpertsService {
         name: member.user!.name,
         lastName: member.user!.lastName,
         image: resolvedProfile.image,
+        imageCrop: resolvedProfile.imageCrop,
         email: member.user!.email,
         phoneNumber: member.user!.phoneNumber,
         experienceYears: resolvedProfile.experienceYears,
@@ -735,6 +748,7 @@ export class ExpertsService {
       title: group.name,
       iconLabel: group.iconLabel ?? null,
       image: group.image ?? null,
+      imageCrop: group.imageCrop ?? null,
       description: group.description,
       experts,
       services: services.map((service) => ({
@@ -837,6 +851,7 @@ export class ExpertsService {
       description: dto.description.trim(),
       iconLabel: dto.iconLabel?.trim() || null,
       image: dto.image?.trim() || null,
+      imageCrop: dto.imageCrop ?? null,
     });
     const saved = await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(saved.id);
@@ -860,7 +875,13 @@ export class ExpertsService {
     }
     if (dto.description !== undefined) group.description = dto.description.trim();
     if (dto.iconLabel !== undefined) group.iconLabel = dto.iconLabel?.trim() || null;
-    if (dto.image !== undefined) group.image = dto.image?.trim() || null;
+    if (dto.image !== undefined) {
+      group.image = dto.image?.trim() || null;
+      if (dto.image === null) {
+        group.imageCrop = null;
+      }
+    }
+    if (dto.imageCrop !== undefined) group.imageCrop = dto.imageCrop;
 
     await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(group.id);
@@ -1513,6 +1534,7 @@ export class ExpertsService {
         title: position.name,
         description: position.description,
         image: position.image ?? null,
+        imageCrop: position.imageCrop ?? null,
         services: services.map((service) => ({
           id: service.id,
           name: service.name,
@@ -1618,6 +1640,7 @@ export class ExpertsService {
       description: dto.description.trim(),
       skills: dto.skills,
       image: dto.image ?? null,
+      imageCrop: dto.imageCrop ?? null,
       experienceYears: dto.experienceYears,
     });
     await this.expertProfileRepository.save(profileEntity);
@@ -1663,7 +1686,13 @@ export class ExpertsService {
     }
     if (dto.description !== undefined) profileEntity.description = dto.description.trim();
     if (dto.skills !== undefined) profileEntity.skills = dto.skills;
-    if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.image !== undefined) {
+      profileEntity.image = dto.image;
+      if (dto.image === null) {
+        profileEntity.imageCrop = null;
+      }
+    }
+    if (dto.imageCrop !== undefined) profileEntity.imageCrop = dto.imageCrop;
     if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
     await this.expertProfileRepository.save(profileEntity);
 
@@ -1716,6 +1745,7 @@ export class ExpertsService {
       description: profile.description ?? '',
       skills: profile.skills ?? [],
       image: profile.image,
+      imageCrop: profile.imageCrop ?? null,
       experienceYears: profile.experienceYears,
     };
   }
@@ -1730,6 +1760,7 @@ export class ExpertsService {
       description: profile?.description ?? fallback?.description ?? '',
       skills: profile?.skills?.length ? profile.skills : (fallback?.skills ?? []),
       image: profile?.image ?? fallback?.image ?? null,
+      imageCrop: profile?.imageCrop ?? fallback?.imageCrop ?? null,
       experienceYears: profile?.experienceYears
         ?? fallback?.experienceYears
         ?? legacyUserExperienceYears
@@ -1752,6 +1783,7 @@ export class ExpertsService {
       .addSelect('service.description', 'description')
       .addSelect('service.skills', 'skills')
       .addSelect('service.image', 'image')
+      .addSelect('service."imageCrop"', 'imageCrop')
       .addSelect('service."contractorExperienceYears"', 'experienceYears')
       .where('service."userId" IN (:...userIds)', { userIds })
       .andWhere('service.type = :contractorType', { contractorType: ServiceType.Contractor })
@@ -1762,6 +1794,7 @@ export class ExpertsService {
         description: string | null;
         skills: string[] | null;
         image: string | null;
+        imageCrop: Service['imageCrop'];
         experienceYears: string | null;
       }>();
 
@@ -1771,6 +1804,7 @@ export class ExpertsService {
         description: row.description ?? '',
         skills: row.skills ?? [],
         image: row.image,
+        imageCrop: row.imageCrop ?? null,
         experienceYears: row.experienceYears === null ? null : Number(row.experienceYears),
       }]),
     );
@@ -1831,6 +1865,7 @@ export class ExpertsService {
         title: position.name,
         description: position.description,
         image: position.image ?? null,
+        imageCrop: position.imageCrop ?? null,
         services: services.map((service) => ({
           id: service.id,
           name: service.name,
@@ -1866,6 +1901,7 @@ export class ExpertsService {
         description: resolvedProfile.description,
         skills: resolvedProfile.skills,
         image: resolvedProfile.image,
+        imageCrop: resolvedProfile.imageCrop,
         experienceYears: resolvedProfile.experienceYears,
       },
       group,
@@ -1891,7 +1927,13 @@ export class ExpertsService {
     }
     if (dto.description !== undefined) profileEntity.description = dto.description.trim();
     if (dto.skills !== undefined) profileEntity.skills = dto.skills;
-    if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.image !== undefined) {
+      profileEntity.image = dto.image;
+      if (dto.image === null) {
+        profileEntity.imageCrop = null;
+      }
+    }
+    if (dto.imageCrop !== undefined) profileEntity.imageCrop = dto.imageCrop;
     if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
     await this.expertProfileRepository.save(profileEntity);
 

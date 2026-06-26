@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 
 export class CreatePackageDto {
   @ApiProperty({ example: 'CRM Start Pack', description: 'Package name' })
@@ -44,6 +55,12 @@ export class CreatePackageDto {
   @IsOptional()
   @IsString()
   image?: string | null;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 
   @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',

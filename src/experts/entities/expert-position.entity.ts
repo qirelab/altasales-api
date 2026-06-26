@@ -7,6 +7,8 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ImageCrop } from '../../common/types/image-crop.type';
 import { ExpertPositionOffering } from './expert-position-offering.entity';
 import { ExpertPositionMember } from './expert-position-member.entity';
 
@@ -31,6 +33,17 @@ export class ExpertPosition {
   @ApiProperty({ example: 'https://cdn.example.com/expert-groups/marketing.png', nullable: true })
   @Column({ type: 'varchar', length: 1024, nullable: true })
   image: string | null;
+
+  @ApiPropertyOptional({
+    example: {
+      x: 0,
+      y: 0,
+      zoom: 1.5,
+      croppedArea: { x: 120, y: 80, width: 400, height: 400 },
+    },
+  })
+  @Column({ type: 'json', nullable: true })
+  imageCrop: ImageCrop | null;
 
   @OneToMany(() => ExpertPositionOffering, (offering) => offering.position, { cascade: true })
   offerings: ExpertPositionOffering[];

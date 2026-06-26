@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ImageCrop } from '../../common/types/image-crop.type';
 import { User } from '../../users/entities/user.entity';
 
 @Entity('expert_profile')
@@ -35,6 +36,17 @@ export class ExpertProfile {
   @ApiPropertyOptional({ example: 'https://example.com/expert.jpg' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
+
+  @ApiPropertyOptional({
+    example: {
+      x: 0,
+      y: 0,
+      zoom: 1.5,
+      croppedArea: { x: 120, y: 80, width: 400, height: 400 },
+    },
+  })
+  @Column({ type: 'json', nullable: true })
+  imageCrop: ImageCrop | null;
 
   @ApiPropertyOptional({ example: 5 })
   @Column({ type: 'int', nullable: true })

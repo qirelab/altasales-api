@@ -11,7 +11,9 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 
 export class CreateAdminExpertMemberDto {
   @ApiProperty({ example: 'Анна' })
@@ -56,6 +58,12 @@ export class CreateAdminExpertMemberDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 }
 
 export class UpdateAdminExpertMemberDto {
@@ -102,4 +110,10 @@ export class UpdateAdminExpertMemberDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string | null;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 }

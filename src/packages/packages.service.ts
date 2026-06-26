@@ -22,6 +22,7 @@ export interface AdminPackageListItem {
   price: number;
   giftEligible: boolean;
   image: string | null;
+  imageCrop: ServicePackage['imageCrop'];
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   services: { id: string; name: string }[];
@@ -65,6 +66,7 @@ export class PackagesService {
       ...createPackageDto,
       tags: createPackageDto.tags ?? [],
       image: createPackageDto.image ?? null,
+      imageCrop: createPackageDto.imageCrop ?? null,
       services,
     });
 
@@ -109,6 +111,12 @@ export class PackagesService {
       ...packageFields,
       services,
     });
+    if (updatePackageDto.image === null) {
+      servicePackage.imageCrop = null;
+    }
+    if (updatePackageDto.imageCrop !== undefined) {
+      servicePackage.imageCrop = updatePackageDto.imageCrop;
+    }
 
     if ('categoryId' in packageFields) {
       servicePackage.category = packageFields.categoryId
@@ -285,6 +293,7 @@ export class PackagesService {
       price: Number(pkg.price),
       giftEligible: pkg.giftEligible,
       image: pkg.image,
+      imageCrop: pkg.imageCrop,
       categoryId: pkg.categoryId,
       category: pkg.category
         ? { id: pkg.category.id, name: pkg.category.name, slug: pkg.category.slug }

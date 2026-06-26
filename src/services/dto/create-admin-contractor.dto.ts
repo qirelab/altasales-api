@@ -1,5 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, IsUrl, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  IsUrl,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 
 export class CreateAdminContractorDto {
   @ApiProperty({ example: 'Иван Иванов — внедрение CRM', description: 'Display name shown in the catalog' })
@@ -11,6 +24,12 @@ export class CreateAdminContractorDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 
   @ApiProperty({ example: 2500, description: 'Contractor hourly rate' })
   @IsNumber()

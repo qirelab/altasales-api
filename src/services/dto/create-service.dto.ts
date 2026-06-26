@@ -1,5 +1,20 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID, IsInt, Min, IsEmail, IsBoolean } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsArray,
+  IsUrl,
+  IsEnum,
+  IsUUID,
+  IsInt,
+  Min,
+  IsEmail,
+  IsBoolean,
+  ValidateNested,
+} from 'class-validator';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 import { ServiceType } from '../entities/service-type.enum';
 
 export class CreateServiceDto {
@@ -35,6 +50,12 @@ export class CreateServiceDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 
   @ApiProperty({ example: ['AmoCRM', 'Bitrix24', 'API'], description: 'Array of skills', type: [String], required: false })
   @IsOptional()

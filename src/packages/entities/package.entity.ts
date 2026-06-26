@@ -11,6 +11,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
 import { Category } from '../../categories/entities/category.entity';
+import { ImageCrop } from '../../common/types/image-crop.type';
 
 @Entity()
 export class ServicePackage {
@@ -55,6 +56,17 @@ export class ServicePackage {
   @ApiPropertyOptional({ example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
+
+  @ApiPropertyOptional({
+    example: {
+      x: 0,
+      y: 0,
+      zoom: 1.5,
+      croppedArea: { x: 120, y: 80, width: 400, height: 400 },
+    },
+  })
+  @Column({ type: 'json', nullable: true })
+  imageCrop: ImageCrop | null;
 
   @ApiPropertyOptional({ description: 'Category ID for package' })
   @Column({ type: 'uuid', nullable: true })

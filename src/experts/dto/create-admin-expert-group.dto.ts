@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsNotEmpty, IsOptional, IsString, IsUrl, MaxLength, ValidateNested } from 'class-validator';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 
 export class CreateAdminExpertGroupDto {
   @ApiProperty({ example: 'Маркетолог' })
@@ -25,6 +27,12 @@ export class CreateAdminExpertGroupDto {
   @IsUrl({ require_protocol: true })
   @MaxLength(1024)
   image?: string | null;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 }
 
 export class UpdateAdminExpertGroupDto extends PartialType(CreateAdminExpertGroupDto) {}

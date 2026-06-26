@@ -8,7 +8,9 @@ import {
   IsUrl,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { ImageCropDto } from '../../common/dto/image-crop.dto';
 
 export class UpdateExpertProfileDto {
   @ApiPropertyOptional({ example: 'Эксперт по CRM интеграциям' })
@@ -26,6 +28,12 @@ export class UpdateExpertProfileDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string | null;
+
+  @ApiPropertyOptional({ type: ImageCropDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ImageCropDto)
+  imageCrop?: ImageCropDto | null;
 
   @ApiPropertyOptional({ example: 5, minimum: 0, maximum: 99 })
   @IsOptional()
