@@ -36,6 +36,13 @@ export class ExpertProfile {
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
 
+  @ApiPropertyOptional({
+    example: 'https://example.com/expert-original.jpg',
+    description: 'Original (uncropped) image URL, used for non-destructive re-crop',
+  })
+  @Column({ type: 'varchar', nullable: true })
+  imageOriginal: string | null;
+
   @ApiPropertyOptional({ example: 5 })
   @Column({ type: 'int', nullable: true })
   experienceYears: number | null;

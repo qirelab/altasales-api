@@ -22,6 +22,7 @@ export interface AdminPackageListItem {
   price: number;
   giftEligible: boolean;
   image: string | null;
+  imageOriginal: string | null;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   services: { id: string; name: string }[];
@@ -285,6 +286,7 @@ export class PackagesService {
       price: Number(pkg.price),
       giftEligible: pkg.giftEligible,
       image: pkg.image,
+      imageOriginal: pkg.imageOriginal,
       categoryId: pkg.categoryId,
       category: pkg.category
         ? { id: pkg.category.id, name: pkg.category.name, slug: pkg.category.slug }

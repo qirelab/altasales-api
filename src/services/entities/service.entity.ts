@@ -51,9 +51,16 @@ export class Service {
   @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
   price: number;
 
-  @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL' })
+  @ApiProperty({ example: 'https://example.com/image.jpg', description: 'Service image URL (cropped preview)' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/image-original.jpg',
+    description: 'Service original (uncropped) image URL, used for non-destructive re-crop',
+  })
+  @Column({ type: 'varchar', nullable: true })
+  imageOriginal: string | null;
 
   @ApiProperty({
     example: ['AmoCRM', 'Bitrix24', 'API'],

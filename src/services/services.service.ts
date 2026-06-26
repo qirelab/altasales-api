@@ -349,6 +349,7 @@ export class ServicesService {
       price: dto.ratePerHour,
       skills: dto.skills,
       image: dto.image ?? null,
+      imageOriginal: dto.imageOriginal ?? null,
       userId: dto.userId,
       contractorRatePerHour: dto.ratePerHour,
       contractorExperienceYears: dto.experienceYears,
@@ -612,6 +613,7 @@ export class ServicesService {
       category: null,
       price: 0,
       image: expertProfile?.image ?? null,
+      imageOriginal: expertProfile?.imageOriginal ?? null,
       skills: expertProfile?.skills ?? [],
       contractorRatePerHour: null,
       contractorExperienceYears: expertProfile?.experienceYears ?? null,
@@ -732,6 +734,7 @@ export class ServicesService {
     if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
+    if (dto.imageOriginal !== undefined) contractor.imageOriginal = dto.imageOriginal ?? null;
     if (dto.ratePerHour !== undefined) {
       contractor.contractorRatePerHour = dto.ratePerHour;
       contractor.price = dto.ratePerHour;

@@ -187,6 +187,7 @@ export interface AdminExpertMemberProfile {
   description: string;
   skills: string[];
   image: string | null;
+  imageOriginal: string | null;
   experienceYears: number | null;
 }
 
@@ -1618,6 +1619,7 @@ export class ExpertsService {
       description: dto.description.trim(),
       skills: dto.skills,
       image: dto.image ?? null,
+      imageOriginal: dto.imageOriginal ?? null,
       experienceYears: dto.experienceYears,
     });
     await this.expertProfileRepository.save(profileEntity);
@@ -1664,6 +1666,7 @@ export class ExpertsService {
     if (dto.description !== undefined) profileEntity.description = dto.description.trim();
     if (dto.skills !== undefined) profileEntity.skills = dto.skills;
     if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.imageOriginal !== undefined) profileEntity.imageOriginal = dto.imageOriginal;
     if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
     await this.expertProfileRepository.save(profileEntity);
 
@@ -1716,6 +1719,7 @@ export class ExpertsService {
       description: profile.description ?? '',
       skills: profile.skills ?? [],
       image: profile.image,
+      imageOriginal: profile.imageOriginal,
       experienceYears: profile.experienceYears,
     };
   }
@@ -1730,6 +1734,7 @@ export class ExpertsService {
       description: profile?.description ?? fallback?.description ?? '',
       skills: profile?.skills?.length ? profile.skills : (fallback?.skills ?? []),
       image: profile?.image ?? fallback?.image ?? null,
+      imageOriginal: profile?.imageOriginal ?? null,
       experienceYears: profile?.experienceYears
         ?? fallback?.experienceYears
         ?? legacyUserExperienceYears
@@ -1892,6 +1897,7 @@ export class ExpertsService {
     if (dto.description !== undefined) profileEntity.description = dto.description.trim();
     if (dto.skills !== undefined) profileEntity.skills = dto.skills;
     if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.imageOriginal !== undefined) profileEntity.imageOriginal = dto.imageOriginal;
     if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
     await this.expertProfileRepository.save(profileEntity);
 
