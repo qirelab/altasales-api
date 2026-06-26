@@ -112,7 +112,7 @@ export class AuthController {
   @Post('login-email')
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiResponse({ status: 200, description: 'Successful login' })
-  @ApiResponse({ status: 400, description: 'Invalid credentials' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async loginWithEmail(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
