@@ -602,8 +602,15 @@ export class ExpertsService {
       })
       : [];
     const expertImageByUserId = new Map(
-      expertProfiles.map((profile) => [profile.userId, profile.image]),
+      expertProfiles
+        .filter((profile) => profile.image)
+        .map((profile) => [profile.userId, profile.image]),
     );
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(previewUserIds);
+    const resolveExpertImage = (userId: string): string | null =>
+      expertImageByUserId.get(userId)
+      ?? fallbackProfileByUserId.get(userId)?.image
+      ?? null;
     const expertsPreviewByGroup = new Map<string, AdminExpertGroupPreviewMember[]>();
     for (const member of previewMembers) {
       if (!member.user || member.user.role !== UserRole.EXPERT) continue;
@@ -613,7 +620,7 @@ export class ExpertsService {
           id: member.user.id,
           name: member.user.name,
           lastName: member.user.lastName,
-          image: expertImageByUserId.get(member.user.id) ?? null,
+          image: resolveExpertImage(member.user.id),
         });
         expertsPreviewByGroup.set(member.positionId, list);
       }
