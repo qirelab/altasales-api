@@ -107,6 +107,7 @@ export interface AdminExpertGroupsListItemDto {
   title: string;
   iconLabel: string | null;
   image: string | null;
+  imageOriginal: string | null;
   description: string;
   expertsCount: number;
   expertsPreview: AdminExpertGroupPreviewMember[];
@@ -120,6 +121,7 @@ export interface AdminExpertGroupDetailsDto {
   title: string;
   iconLabel: string | null;
   image: string | null;
+  imageOriginal: string | null;
   description: string;
   experts: Array<{
     id: string;
@@ -619,6 +621,7 @@ export class ExpertsService {
         title: group.name,
         iconLabel: group.iconLabel ?? null,
         image: group.image ?? null,
+        imageOriginal: group.imageOriginal ?? null,
         description: group.description,
         expertsCount: expertsCountByGroup.get(group.id) ?? 0,
         expertsPreview: expertsPreviewByGroup.get(group.id) ?? [],
@@ -736,6 +739,7 @@ export class ExpertsService {
       title: group.name,
       iconLabel: group.iconLabel ?? null,
       image: group.image ?? null,
+      imageOriginal: group.imageOriginal ?? null,
       description: group.description,
       experts,
       services: services.map((service) => ({
@@ -838,6 +842,7 @@ export class ExpertsService {
       description: dto.description.trim(),
       iconLabel: dto.iconLabel?.trim() || null,
       image: dto.image?.trim() || null,
+      imageOriginal: dto.imageOriginal?.trim() || null,
     });
     const saved = await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(saved.id);
@@ -862,6 +867,9 @@ export class ExpertsService {
     if (dto.description !== undefined) group.description = dto.description.trim();
     if (dto.iconLabel !== undefined) group.iconLabel = dto.iconLabel?.trim() || null;
     if (dto.image !== undefined) group.image = dto.image?.trim() || null;
+    if (dto.imageOriginal !== undefined) {
+      group.imageOriginal = dto.imageOriginal?.trim() || null;
+    }
 
     await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(group.id);
@@ -1871,6 +1879,7 @@ export class ExpertsService {
         description: resolvedProfile.description,
         skills: resolvedProfile.skills,
         image: resolvedProfile.image,
+        imageOriginal: resolvedProfile.imageOriginal,
         experienceYears: resolvedProfile.experienceYears,
       },
       group,

@@ -10,6 +10,12 @@ export class PublicExpertProfileFieldsDto {
   @ApiPropertyOptional({ example: 'https://example.com/expert.jpg' })
   image: string | null;
 
+  @ApiPropertyOptional({
+    example: 'https://example.com/expert-original.jpg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  imageOriginal: string | null;
+
   @ApiPropertyOptional({ example: 5 })
   experienceYears: number | null;
 }

@@ -32,6 +32,14 @@ export class ExpertPosition {
   @Column({ type: 'varchar', length: 1024, nullable: true })
   image: string | null;
 
+  @ApiProperty({
+    example: 'https://cdn.example.com/expert-groups/marketing-original.png',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+    nullable: true,
+  })
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  imageOriginal: string | null;
+
   @OneToMany(() => ExpertPositionOffering, (offering) => offering.position, { cascade: true })
   offerings: ExpertPositionOffering[];
 
