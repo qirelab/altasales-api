@@ -11,6 +11,8 @@ import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyTokenDto } from './dto/verify-token.dto';
 
+const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -92,31 +94,31 @@ export class AuthService {
     try {
       const auth = this.firebaseService.getAuth();
 
-      const user = await auth.getUserByEmail(loginDto.email);
-      await this.validateFirebasePassword(loginDto.email, loginDto.password);
+      const firebaseUid = await this.validateFirebasePassword(loginDto.email, loginDto.password);
 
       const dbUser = await this.userRepository.findOne({
-        where: { firebaseUid: user.uid },
+        where: { firebaseUid },
       });
 
       if (!dbUser) {
-        throw new BadRequestException('User not found in database');
+        throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
       }
 
-      const customToken = await auth.createCustomToken(user.uid);
+      const firebaseUser = await auth.getUser(firebaseUid);
+      const customToken = await auth.createCustomToken(firebaseUid);
 
       return {
         id: dbUser.id,
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-        emailVerified: user.emailVerified,
+        uid: firebaseUid,
+        email: firebaseUser.email,
+        displayName: firebaseUser.displayName,
+        emailVerified: firebaseUser.emailVerified,
         role: dbUser.role,
         customToken,
       };
     } catch (error) {
-      if (error.code === 'auth/user-not-found') {
-        throw new BadRequestException('User with this email not found');
+      if (error instanceof UnauthorizedException) {
+        throw error;
       }
       if (error instanceof BadRequestException) {
         throw error;
@@ -125,7 +127,7 @@ export class AuthService {
     }
   }
 
-  private async validateFirebasePassword(email: string, password: string): Promise<void> {
+  private async validateFirebasePassword(email: string, password: string): Promise<string> {
     const firebaseApiKey = this.configService.get<string>('FIREBASE_WEB_API_KEY')
       || this.configService.get<string>('FIREBASE_API_KEY');
     if (!firebaseApiKey) {
@@ -148,16 +150,21 @@ export class AuthService {
     );
 
     if (response.ok) {
-      return;
+      const payload = await response.json().catch(() => null) as { localId?: string } | null;
+      if (!payload?.localId) {
+        throw new BadRequestException('Login error');
+      }
+      return payload.localId;
     }
 
     const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
     const firebaseError = payload?.error?.message;
-    if (firebaseError === 'INVALID_PASSWORD' || firebaseError === 'INVALID_LOGIN_CREDENTIALS') {
-      throw new BadRequestException('Invalid password');
-    }
-    if (firebaseError === 'EMAIL_NOT_FOUND') {
-      throw new BadRequestException('User with this email not found');
+    if (
+      firebaseError === 'INVALID_PASSWORD'
+      || firebaseError === 'INVALID_LOGIN_CREDENTIALS'
+      || firebaseError === 'EMAIL_NOT_FOUND'
+    ) {
+      throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
 
     throw new BadRequestException('Login error');
