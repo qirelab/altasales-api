@@ -117,16 +117,25 @@ export class LlmProxyService {
 
       effectiveDataClass =
         anonymizationResult?.dataClass ??
-        this.resolveDisabledModeDataClass(request.messages, declaredDataClass);
+        this.resolveUnanonymizedDataClass(
+          request.messages,
+          declaredDataClass,
+          anonymizationMode,
+        );
       anonymizationStats = anonymizationResult?.stats;
       const cacheEligible = this.isCacheEligible(
         request,
         declaredDataClass,
         effectiveDataClass,
+        anonymizationMode,
         anonymizationResult,
       );
 
-      this.assertProviderPolicy(effectiveDataClass, provider);
+      this.assertProviderPolicy(
+        effectiveDataClass,
+        provider,
+        anonymizationMode,
+      );
 
       currentStage = AiMonitoringStage.ProviderCall;
       const providerCallResult = await this.callProviderWithOptionalFallback(
@@ -134,6 +143,7 @@ export class LlmProxyService {
         provider,
         providerMessages,
         effectiveDataClass,
+        anonymizationMode,
         cacheEligible,
       );
       provider = providerCallResult.provider;
@@ -166,7 +176,10 @@ export class LlmProxyService {
       }
 
       currentStage = AiMonitoringStage.SafetyScan;
-      this.assertProviderResponsePolicy(providerResponse.content);
+      this.assertProviderResponsePolicy(
+        providerResponse.content,
+        anonymizationMode,
+      );
 
       currentStage = AiMonitoringStage.Restore;
       const restoredContent = this.restoreProviderResponse(
@@ -190,6 +203,7 @@ export class LlmProxyService {
         cacheHit,
         response,
         request.policy?.cacheTtlMs,
+        anonymizationMode,
       );
       this.logFlowSucceeded({
         request,
@@ -303,16 +317,29 @@ export class LlmProxyService {
     }
   }
 
-  private resolveDisabledModeDataClass(
+  private resolveUnanonymizedDataClass(
     messages: LlmMessage[],
     declaredDataClass: DataClass | undefined,
+    mode: AnonymizationMode,
   ): DataClass {
+    if (mode === AnonymizationMode.Disabled) {
+      if (this.piiAnonymizer.scanMessages(messages).hasPii) {
+        return DataClass.RawPii;
+      }
+
+      return declaredDataClass ?? DataClass.RawPii;
+    }
+
     const scan = this.piiAnonymizer.scanMessages(messages);
     if (scan.hasPii) {
       throw this.safePolicyError('policy_blocked');
     }
 
-    return declaredDataClass ?? DataClass.Unknown;
+    if (declaredDataClass) {
+      return declaredDataClass;
+    }
+
+    return DataClass.Unknown;
   }
 
   private buildProviderMessages(
@@ -441,7 +468,12 @@ export class LlmProxyService {
   private assertProviderPolicy(
     dataClass: DataClass,
     provider: LlmProviderAdapter,
+    mode: AnonymizationMode,
   ): void {
+    if (mode === AnonymizationMode.Disabled) {
+      return;
+    }
+
     if (dataClass === DataClass.Unknown || dataClass === DataClass.RawPii) {
       throw this.safePolicyError('policy_blocked');
     }
@@ -456,6 +488,7 @@ export class LlmProxyService {
     provider: LlmProviderAdapter,
     messages: LlmMessage[],
     effectiveDataClass: DataClass,
+    anonymizationMode: AnonymizationMode,
     cacheEligible: boolean,
   ): Promise<ProviderSelectionResult> {
     try {
@@ -497,7 +530,11 @@ export class LlmProxyService {
 
       try {
         const fallbackProvider = this.selectProvider(request, 'fallback');
-        this.assertProviderPolicy(effectiveDataClass, fallbackProvider);
+        this.assertProviderPolicy(
+          effectiveDataClass,
+          fallbackProvider,
+          anonymizationMode,
+        );
         const callResult = await this.callProvider(
           request,
           fallbackProvider,
@@ -692,7 +729,14 @@ export class LlmProxyService {
     }
   }
 
-  private assertProviderResponsePolicy(content: string): void {
+  private assertProviderResponsePolicy(
+    content: string,
+    mode: AnonymizationMode,
+  ): void {
+    if (mode === AnonymizationMode.Disabled) {
+      return;
+    }
+
     const scan = this.piiAnonymizer.scanText(content);
     if (scan.hasPii) {
       throw this.safePolicyError('policy_blocked');
@@ -870,10 +914,19 @@ export class LlmProxyService {
     request: LlmChatRequest,
     declaredDataClass: DataClass | undefined,
     effectiveDataClass: DataClass,
+    anonymizationMode: AnonymizationMode,
     anonymizationResult: AnonymizationResult | undefined,
   ): boolean {
+    if (
+      anonymizationMode === AnonymizationMode.Disabled &&
+      this.piiAnonymizer.scanMessages(request.messages).hasPii
+    ) {
+      return false;
+    }
+
     return (
       typeof request.policy?.cacheTtlMs === 'number' &&
+      Number.isFinite(request.policy.cacheTtlMs) &&
       request.policy.cacheTtlMs > 0 &&
       declaredDataClass === DataClass.NoPii &&
       effectiveDataClass === DataClass.NoPii &&
@@ -886,8 +939,16 @@ export class LlmProxyService {
     cacheHit: boolean | undefined,
     response: LlmChatResponse,
     ttlMs: number | undefined,
+    anonymizationMode: AnonymizationMode,
   ): void {
     if (!this.aiCache || !cacheKey || cacheHit) {
+      return;
+    }
+
+    if (
+      anonymizationMode === AnonymizationMode.Disabled &&
+      this.piiAnonymizer.scanText(response.content).hasPii
+    ) {
       return;
     }
 
