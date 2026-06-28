@@ -119,6 +119,12 @@ export class LlmProxyService {
         anonymizationResult?.dataClass ??
         this.resolveDisabledModeDataClass(request.messages, declaredDataClass);
       anonymizationStats = anonymizationResult?.stats;
+      const cacheEligible = this.isCacheEligible(
+        request,
+        declaredDataClass,
+        effectiveDataClass,
+        anonymizationResult,
+      );
 
       this.assertProviderPolicy(effectiveDataClass, provider);
 
@@ -128,6 +134,7 @@ export class LlmProxyService {
         provider,
         providerMessages,
         effectiveDataClass,
+        cacheEligible,
       );
       provider = providerCallResult.provider;
       fallbackUsed = providerCallResult.fallbackUsed;
@@ -449,6 +456,7 @@ export class LlmProxyService {
     provider: LlmProviderAdapter,
     messages: LlmMessage[],
     effectiveDataClass: DataClass,
+    cacheEligible: boolean,
   ): Promise<ProviderSelectionResult> {
     try {
       const callResult = await this.callProvider(
@@ -457,6 +465,7 @@ export class LlmProxyService {
         messages,
         effectiveDataClass,
         'primary',
+        cacheEligible,
       );
 
       return {
@@ -495,6 +504,7 @@ export class LlmProxyService {
           messages,
           effectiveDataClass,
           'fallback',
+          cacheEligible,
         );
         this.monitoring.log({
           eventName: AiMonitoringEventName.AiFallbackSucceeded,
@@ -544,6 +554,7 @@ export class LlmProxyService {
     messages: LlmMessage[],
     effectiveDataClass: DataClass,
     providerAlias: 'primary' | 'fallback',
+    cacheEligible: boolean,
   ): Promise<ProviderCallResult> {
     const providerCall = () =>
       this.executeProviderCall(
@@ -554,7 +565,7 @@ export class LlmProxyService {
         providerAlias,
       );
 
-    if (!this.aiCache || !request.policy?.cacheTtlMs) {
+    if (!this.aiCache || !cacheEligible) {
       return { response: await providerCall() };
     }
 
@@ -853,6 +864,21 @@ export class LlmProxyService {
       effectiveDataClass,
       messages,
     };
+  }
+
+  private isCacheEligible(
+    request: LlmChatRequest,
+    declaredDataClass: DataClass | undefined,
+    effectiveDataClass: DataClass,
+    anonymizationResult: AnonymizationResult | undefined,
+  ): boolean {
+    return (
+      typeof request.policy?.cacheTtlMs === 'number' &&
+      request.policy.cacheTtlMs > 0 &&
+      declaredDataClass === DataClass.NoPii &&
+      effectiveDataClass === DataClass.NoPii &&
+      !anonymizationResult
+    );
   }
 
   private writeSafeCachedResponse(
