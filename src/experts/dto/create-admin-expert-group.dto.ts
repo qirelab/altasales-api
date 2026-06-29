@@ -22,7 +22,7 @@ export class CreateAdminExpertGroupDto {
   @ApiPropertyOptional({ example: 'https://cdn.example.com/expert-groups/marketing.png' })
   @IsOptional()
   @IsString()
-  @IsUrl({ require_protocol: true })
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   @MaxLength(1024)
   image?: string | null;
 
@@ -32,7 +32,7 @@ export class CreateAdminExpertGroupDto {
   })
   @IsOptional()
   @IsString()
-  @IsUrl({ require_protocol: true })
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   @MaxLength(1024)
   imageOriginal?: string | null;
 }
