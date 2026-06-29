@@ -151,6 +151,7 @@ export class ServicesService {
       categoryId: string | null;
       price: number;
       image: string | null;
+      imageOriginal: string | null;
       skills: string[];
       createdAt: Date;
       userId: string | null;
@@ -200,6 +201,7 @@ export class ServicesService {
       .addSelect('s."categoryId"', 'categoryId')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
+      .addSelect('s."imageOriginal"', 'imageOriginal')
       .addSelect('s.skills', 'skills')
       .addSelect('s."giftEligible"', 'giftEligible')
       .addSelect('s."createdAt"', 'createdAt')
@@ -219,6 +221,7 @@ export class ServicesService {
         categoryId: string | null;
         price: string;
         image: string | null;
+        imageOriginal: string | null;
         skills: string[] | string;
         createdAt: Date;
         userId: string | null;
@@ -236,6 +239,7 @@ export class ServicesService {
         categoryId: row.categoryId,
         price: Number(row.price),
         image: row.image,
+        imageOriginal: row.imageOriginal,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
