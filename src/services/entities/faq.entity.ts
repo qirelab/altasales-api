@@ -32,6 +32,13 @@ export class FAQ {
   @Column({ type: 'uuid' })
   categoryId: string;
 
+  @ApiProperty({
+    example: 0,
+    description: 'Position within the category FAQ list (lower = earlier)',
+  })
+  @Column({ type: 'int', default: 0 })
+  sortOrder: number;
+
   @ManyToOne(() => Category, (category) => category.faqs, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'categoryId' })
   category: Category;
