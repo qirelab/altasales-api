@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   BadRequestException,
   ForbiddenException,
@@ -36,6 +37,7 @@ describe('LlmProxyService', () => {
   let fallbackOpenAICompatibleProvider: LlmProviderAdapter;
   let anonymizerProvider: { anonymize: jest.Mock };
   let piiAnonymizer: PiiAnonymizerService;
+  let aiCache: AiCacheService;
   let loggerLogSpy: jest.SpyInstance;
   let loggerWarnSpy: jest.SpyInstance;
   let loggerErrorSpy: jest.SpyInstance;
@@ -135,6 +137,7 @@ describe('LlmProxyService', () => {
     service = module.get(LlmProxyService);
     provider = module.get(MockLlmProvider);
     piiAnonymizer = module.get(PiiAnonymizerService);
+    aiCache = module.get(AiCacheService);
   });
 
   afterEach(() => {
@@ -174,6 +177,37 @@ describe('LlmProxyService', () => {
     expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
   });
 
+  it('mode disabled_for_no_pii blocks misdeclared no_pii PII before provider and cache', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.DisabledForNoPii;
+    const chatSpy = jest.spyOn(provider, 'chat');
+    const buildKeySpy = jest.spyOn(aiCache, 'buildKey');
+    const cacheReadSpy = jest.spyOn(aiCache, 'read');
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+
+    await expect(
+      service.chat({
+        ...baseRequest,
+        declaredDataClass: DataClass.NoPii,
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Contact user@example.com, +7 (999) 123-45-67, ИНН 7707083893',
+          },
+        ],
+        policy: { cacheTtlMs: 60_000 },
+      }),
+    ).rejects.toThrow(
+      new ForbiddenException('LLM request blocked by data policy'),
+    );
+
+    expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
+    expect(chatSpy).not.toHaveBeenCalled();
+    expect(buildKeySpy).not.toHaveBeenCalled();
+    expect(cacheReadSpy).not.toHaveBeenCalled();
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
   it('mode disabled_for_no_pii does not treat missing hint as no_pii', async () => {
     process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.DisabledForNoPii;
 
@@ -193,13 +227,264 @@ describe('LlmProxyService', () => {
     expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
   });
 
-  it('mode disabled does not treat missing hint as no_pii', async () => {
+  it('mode disabled allows missing hint without treating it as no_pii', async () => {
     process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
 
-    await expect(service.chat(baseRequest)).rejects.toThrow(
-      new ForbiddenException('LLM request blocked by data policy'),
-    );
+    const response = await service.chat(baseRequest);
+
+    expect(response.dataClass).toBe(DataClass.RawPii);
     expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
+  });
+
+  it('mode disabled allows PII input to reach trusted provider without anonymizer', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Trusted provider response',
+      usage: usage(),
+    });
+
+    const response = await service.chat({
+      ...baseRequest,
+      messages: [
+        {
+          role: 'user',
+          content:
+            'Contact user@example.com, +7 (999) 123-45-67, ИНН 7707083893',
+        },
+      ],
+    });
+
+    expect(response.content).toBe('Trusted provider response');
+    expect(response.dataClass).toBe(DataClass.RawPii);
+    expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
+    expect(chatSpy).toHaveBeenCalledWith(
+      [
+        {
+          role: 'user',
+          content:
+            'Contact user@example.com, +7 (999) 123-45-67, ИНН 7707083893',
+        },
+      ],
+      expect.any(Object),
+    );
+  });
+
+  it('mode disabled keeps misdeclared PII input out of cache without blocking provider', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Trusted provider response',
+      usage: usage(),
+    });
+    const buildKeySpy = jest.spyOn(aiCache, 'buildKey');
+    const cacheReadSpy = jest.spyOn(aiCache, 'read');
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+
+    const response = await service.chat({
+      ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
+      messages: [{ role: 'user', content: 'Email user@example.com' }],
+      policy: { cacheTtlMs: 60_000 },
+    });
+
+    expect(response.content).toBe('Trusted provider response');
+    expect(response.dataClass).toBe(DataClass.RawPii);
+    expect(response.cacheKey).toBeUndefined();
+    expect(response.cacheHit).toBeUndefined();
+    expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
+    expect(chatSpy).toHaveBeenCalledTimes(1);
+    expect(buildKeySpy).not.toHaveBeenCalled();
+    expect(cacheReadSpy).not.toHaveBeenCalled();
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+    const serializedLogs = serializeLogs();
+    expect(serializedLogs).toContain(DataClass.RawPii);
+    expect(serializedLogs).not.toContain(DataClass.NoPii);
+    expect(serializedLogs).not.toContain('user@example.com');
+  });
+
+  it('mode disabled allows provider response containing PII', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Email user@example.com',
+      usage: usage(),
+    });
+
+    const response = await service.chat(baseRequest);
+
+    expect(response.content).toBe('Email user@example.com');
+    expect(response.dataClass).toBe(DataClass.RawPii);
+  });
+
+  it('mode disabled returns provider PII but never caches it', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    const cachedRequest = {
+      ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
+      policy: { cacheTtlMs: 60_000 },
+    };
+    const chatSpy = jest
+      .spyOn(provider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Email first@example.com',
+        usage: usage(),
+      })
+      .mockResolvedValueOnce({
+        content: 'Email second@example.com',
+        usage: usage(),
+      });
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+
+    const first = await service.chat(cachedRequest);
+    const second = await service.chat(cachedRequest);
+
+    expect(first.content).toBe('Email first@example.com');
+    expect(second.content).toBe('Email second@example.com');
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(false);
+    expect(chatSpy).toHaveBeenCalledTimes(2);
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it('mode disabled logs safely without raw prompt or response PII', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Email user@example.com',
+      usage: usage(),
+    });
+
+    await service.chat({
+      ...baseRequest,
+      messages: [{ role: 'user', content: 'Phone +7 (999) 123-45-67' }],
+    });
+
+    const serializedLogs = serializeLogs();
+    expect(serializedLogs).toContain(DataClass.RawPii);
+    expect(serializedLogs).not.toContain('Phone +7 (999) 123-45-67');
+    expect(serializedLogs).not.toContain('Email user@example.com');
+    expect(serializedLogs).not.toContain('user@example.com');
+    expect(serializedLogs).not.toContain('+7 (999) 123-45-67');
+    expect(serializedLogs).not.toContain('placeholderMap');
+  });
+
+  it('mode disabled does not cache trusted missing-hint PII flows', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    const cachedRequest = {
+      ...baseRequest,
+      messages: [{ role: 'user' as const, content: 'Email user@example.com' }],
+      policy: { cacheTtlMs: 60_000 },
+    };
+    const chatSpy = jest
+      .spyOn(provider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Trusted response one',
+        usage: usage(),
+      })
+      .mockResolvedValueOnce({
+        content: 'Trusted response two',
+        usage: usage(),
+      });
+    const buildKeySpy = jest.spyOn(aiCache, 'buildKey');
+    const cacheReadSpy = jest.spyOn(aiCache, 'read');
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+
+    const first = await service.chat(cachedRequest);
+    const second = await service.chat(cachedRequest);
+
+    expect(first.cacheKey).toBeUndefined();
+    expect(first.cacheHit).toBeUndefined();
+    expect(second.cacheKey).toBeUndefined();
+    expect(second.cacheHit).toBeUndefined();
+    expect(second.content).toBe('Trusted response two');
+    expect(first.dataClass).toBe(DataClass.RawPii);
+    expect(second.dataClass).toBe(DataClass.RawPii);
+    expect(chatSpy).toHaveBeenCalledTimes(2);
+    expect(buildKeySpy).not.toHaveBeenCalled();
+    expect(cacheReadSpy).not.toHaveBeenCalled();
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it('mode disabled allows cache only for explicit no_pii trusted flows', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    const cachedRequest = {
+      ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
+      policy: { cacheTtlMs: 60_000 },
+    };
+    const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Cacheable trusted no_pii response',
+      usage: usage(),
+    });
+
+    const first = await service.chat(cachedRequest);
+    const second = await service.chat(cachedRequest);
+
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(true);
+    expect(second.content).toBe('Cacheable trusted no_pii response');
+    expect(chatSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('mode disabled still allows fallback on transient provider errors', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValueOnce(new TypeError('primary unavailable'));
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Fallback response with email user@example.com',
+        usage: usage(),
+      });
+
+    const response = await service.chat({
+      ...baseRequest,
+      messages: [{ role: 'user', content: 'Email user@example.com' }],
+    });
+
+    expect(response.content).toBe(
+      'Fallback response with email user@example.com',
+    );
+    expect(response.dataClass).toBe(DataClass.RawPii);
+    expect(response.providerId).toBe(LlmProvider.OpenAICompatible);
+    expect(response.modelId).toBe('chat-fallback');
+    expect(fallbackSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('mode disabled returns fallback PII but never caches it', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.Disabled;
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    const primarySpy = jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValue(new TypeError('primary unavailable'));
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Fallback email first@example.com',
+        usage: usage(),
+      })
+      .mockResolvedValueOnce({
+        content: 'Fallback email second@example.com',
+        usage: usage(),
+      });
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+    const request = {
+      ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
+      policy: { cacheTtlMs: 60_000 },
+    };
+
+    const first = await service.chat(request);
+    const second = await service.chat(request);
+
+    expect(first.content).toBe('Fallback email first@example.com');
+    expect(second.content).toBe('Fallback email second@example.com');
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(false);
+    expect(primarySpy).toHaveBeenCalledTimes(2);
+    expect(fallbackSpy).toHaveBeenCalledTimes(2);
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
   });
 
   it('anonymizer unavailable fails closed in required mode', async () => {
@@ -893,8 +1178,10 @@ describe('LlmProxyService', () => {
   });
 
   it('does not cache provider responses rejected by output PII scan', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.DisabledForNoPii;
     const cachedRequest = {
       ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
       policy: { cacheTtlMs: 60_000 },
     };
     const chatSpy = jest
@@ -907,6 +1194,7 @@ describe('LlmProxyService', () => {
         content: 'Safe response',
         usage: usage(),
       });
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
 
     await expect(service.chat(cachedRequest)).rejects.toThrow(
       new ForbiddenException('LLM request blocked by data policy'),
@@ -917,6 +1205,250 @@ describe('LlmProxyService', () => {
     expect(response.content).toBe('Safe response');
     expect(response.cacheHit).toBe(false);
     expect(chatSpy).toHaveBeenCalledTimes(2);
+    expect(cacheWriteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not leak restored PII across structurally identical anonymized requests', async () => {
+    const firstEmail = 'first.person@example.com';
+    const secondEmail = 'second.person@example.com';
+    anonymizerProvider.anonymize.mockImplementation(
+      ({ messages }: { messages: LlmMessage[] }) =>
+        anonymizedEmailResponse(
+          messages,
+          messages[0].content.includes(firstEmail) ? firstEmail : secondEmail,
+        ),
+    );
+    const chatSpy = jest
+      .spyOn(provider, 'chat')
+      .mockResolvedValueOnce({
+        content: 'Email: {{PII_EMAIL_0001}}',
+        usage: usage(),
+      })
+      .mockResolvedValueOnce({
+        content: 'Second email: {{PII_EMAIL_0001}}',
+        usage: usage(),
+      });
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+    const request = {
+      ...baseRequest,
+      policy: { cacheTtlMs: 60_000 },
+    };
+
+    const firstResponse = await service.chat({
+      ...request,
+      messages: [{ role: 'user', content: `Email ${firstEmail}` }],
+    });
+    const secondResponse = await service.chat({
+      ...request,
+      messages: [{ role: 'user', content: `Email ${secondEmail}` }],
+    });
+
+    expect(firstResponse.content).toBe(`Email: ${firstEmail}`);
+    expect(secondResponse.content).toBe(`Second email: ${secondEmail}`);
+    expect(secondResponse.content).not.toContain(firstEmail);
+    expect(firstResponse.cacheHit).toBeUndefined();
+    expect(secondResponse.cacheHit).toBeUndefined();
+    expect(chatSpy).toHaveBeenCalledTimes(2);
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips every cache operation for anonymized and restored PII', async () => {
+    anonymizerProvider.anonymize.mockResolvedValueOnce(
+      anonymizedEmailResponse(baseRequest.messages),
+    );
+    jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Email: {{PII_EMAIL_0001}}',
+      usage: usage(),
+    });
+    const buildKeySpy = jest.spyOn(aiCache, 'buildKey');
+    const cacheReadSpy = jest.spyOn(aiCache, 'read');
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+
+    const response = await service.chat({
+      ...baseRequest,
+      policy: { cacheTtlMs: 60_000 },
+    });
+
+    expect(response.content).toBe('Email: user@example.com');
+    expect(response.cacheKey).toBeUndefined();
+    expect(response.cacheHit).toBeUndefined();
+    expect(buildKeySpy).not.toHaveBeenCalled();
+    expect(cacheReadSpy).not.toHaveBeenCalled();
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([AnonymizationMode.DisabledForNoPii, AnonymizationMode.Disabled])(
+    'caches repeated explicit no_pii requests in %s mode',
+    async (anonymizationMode) => {
+      process.env.LLM_ANONYMIZATION_MODE = anonymizationMode;
+      const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValue({
+        content: 'Safe public response',
+        usage: usage(),
+      });
+      const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+      const request = {
+        ...baseRequest,
+        declaredDataClass: DataClass.NoPii,
+        policy: { cacheTtlMs: 60_000 },
+      };
+
+      const firstResponse = await service.chat(request);
+      const secondResponse = await service.chat(request);
+
+      expect(firstResponse.cacheHit).toBe(false);
+      expect(secondResponse.cacheHit).toBe(true);
+      expect(secondResponse.content).toBe('Safe public response');
+      expect(secondResponse.cacheKey).toBe(firstResponse.cacheKey);
+      expect(anonymizerProvider.anonymize).not.toHaveBeenCalled();
+      expect(chatSpy).toHaveBeenCalledTimes(1);
+      expect(cacheWriteSpy).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([undefined, 0, -1, Number.POSITIVE_INFINITY, Number.NaN])(
+    'does not cache explicit no_pii requests with unsafe TTL %s',
+    async (cacheTtlMs) => {
+      process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.DisabledForNoPii;
+      const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValue({
+        content: 'Safe public response',
+        usage: usage(),
+      });
+      const buildKeySpy = jest.spyOn(aiCache, 'buildKey');
+      const cacheReadSpy = jest.spyOn(aiCache, 'read');
+      const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+      const request = {
+        ...baseRequest,
+        declaredDataClass: DataClass.NoPii,
+        policy: { cacheTtlMs },
+      };
+
+      const firstResponse = await service.chat(request);
+      const secondResponse = await service.chat(request);
+
+      expect(firstResponse.cacheHit).toBeUndefined();
+      expect(secondResponse.cacheHit).toBeUndefined();
+      expect(chatSpy).toHaveBeenCalledTimes(2);
+      expect(buildKeySpy).not.toHaveBeenCalled();
+      expect(cacheReadSpy).not.toHaveBeenCalled();
+      expect(cacheWriteSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('disables cache in required mode even when anonymizer returns no_pii', async () => {
+    const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValue({
+      content: 'Safe public response',
+      usage: usage(),
+    });
+    const buildKeySpy = jest.spyOn(aiCache, 'buildKey');
+    const cacheReadSpy = jest.spyOn(aiCache, 'read');
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+    const request = {
+      ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
+      policy: { cacheTtlMs: 60_000 },
+    };
+
+    const firstResponse = await service.chat(request);
+    const secondResponse = await service.chat(request);
+
+    expect(firstResponse.dataClass).toBe(DataClass.NoPii);
+    expect(firstResponse.cacheHit).toBeUndefined();
+    expect(secondResponse.cacheHit).toBeUndefined();
+    expect(anonymizerProvider.anonymize).toHaveBeenCalledTimes(2);
+    expect(chatSpy).toHaveBeenCalledTimes(2);
+    expect(buildKeySpy).not.toHaveBeenCalled();
+    expect(cacheReadSpy).not.toHaveBeenCalled();
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not cache restore failures and calls provider again', async () => {
+    anonymizerProvider.anonymize.mockResolvedValue(
+      anonymizedEmailResponse(baseRequest.messages),
+    );
+    const chatSpy = jest.spyOn(provider, 'chat').mockResolvedValue({
+      content: 'Unknown {{PII_PHONE_0001}}',
+      usage: usage(),
+    });
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+    const request = {
+      ...baseRequest,
+      policy: { cacheTtlMs: 60_000 },
+    };
+
+    await expect(service.chat(request)).rejects.toThrow(
+      new BadRequestException('LLM response restore failed'),
+    );
+    await expect(service.chat(request)).rejects.toThrow(
+      new BadRequestException('LLM response restore failed'),
+    );
+
+    expect(chatSpy).toHaveBeenCalledTimes(2);
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
+  });
+
+  it('preserves fallback and safe cache behavior for explicit no_pii requests', async () => {
+    process.env.LLM_ANONYMIZATION_MODE = AnonymizationMode.DisabledForNoPii;
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    const primarySpy = jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValue(new TypeError('primary unavailable'));
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockResolvedValue({
+        content: 'Safe fallback response',
+        usage: usage(),
+      });
+    const request = {
+      ...baseRequest,
+      declaredDataClass: DataClass.NoPii,
+      policy: { cacheTtlMs: 60_000 },
+    };
+
+    const firstResponse = await service.chat(request);
+    const secondResponse = await service.chat(request);
+
+    expect(firstResponse.content).toBe('Safe fallback response');
+    expect(firstResponse.cacheHit).toBe(false);
+    expect(secondResponse.content).toBe('Safe fallback response');
+    expect(secondResponse.cacheHit).toBe(true);
+    expect(primarySpy).toHaveBeenCalledTimes(2);
+    expect(fallbackSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves fallback without caching anonymized PII responses', async () => {
+    process.env.LLM_PROVIDER_MAX_ATTEMPTS = '1';
+    process.env.LLM_FALLBACK_ENABLED = 'true';
+    anonymizerProvider.anonymize.mockImplementation(
+      ({ messages }: { messages: LlmMessage[] }) =>
+        anonymizedEmailResponse(messages),
+    );
+    const primarySpy = jest
+      .spyOn(provider, 'chat')
+      .mockRejectedValue(new TypeError('primary unavailable'));
+    const fallbackSpy = jest
+      .spyOn(fallbackOpenAICompatibleProvider, 'chat')
+      .mockResolvedValue({
+        content: 'Email: {{PII_EMAIL_0001}}',
+        usage: usage(),
+      });
+    const cacheWriteSpy = jest.spyOn(aiCache, 'write');
+    const request = {
+      ...baseRequest,
+      messages: [{ role: 'user' as const, content: 'Email user@example.com' }],
+      policy: { cacheTtlMs: 60_000 },
+    };
+
+    const firstResponse = await service.chat(request);
+    const secondResponse = await service.chat(request);
+
+    expect(firstResponse.content).toBe('Email: user@example.com');
+    expect(secondResponse.content).toBe('Email: user@example.com');
+    expect(firstResponse.cacheHit).toBeUndefined();
+    expect(secondResponse.cacheHit).toBeUndefined();
+    expect(primarySpy).toHaveBeenCalledTimes(2);
+    expect(fallbackSpy).toHaveBeenCalledTimes(2);
+    expect(cacheWriteSpy).not.toHaveBeenCalled();
   });
 
   it('uses generic validation errors', async () => {
@@ -928,7 +1460,24 @@ describe('LlmProxyService', () => {
     ).rejects.toThrow(new BadRequestException('LLM request validation failed'));
   });
 
-  function anonymizedEmailResponse(messages: LlmMessage[]): string {
+  it('.env.example documents anonymization modes and trusted-mode responsibility', () => {
+    const envExample = readFileSync('.env.example', 'utf8');
+
+    expect(envExample).toContain('LLM_ANONYMIZATION_MODE=required');
+    expect(envExample).toContain(
+      'required: strict mode for external/untrusted',
+    );
+    expect(envExample).toContain('disabled_for_no_pii: hybrid mode');
+    expect(envExample).toContain('disabled: trusted/internal/legal LLM only');
+    expect(envExample).toContain(
+      'customer accepts legal and infrastructure responsibility',
+    );
+  });
+
+  function anonymizedEmailResponse(
+    messages: LlmMessage[],
+    email = 'user@example.com',
+  ): string {
     return JSON.stringify({
       messages: messages.map((message) => ({
         ...message,
@@ -942,7 +1491,7 @@ describe('LlmProxyService', () => {
         },
       ],
       placeholderMap: {
-        '{{PII_EMAIL_0001}}': 'user@example.com',
+        '{{PII_EMAIL_0001}}': email,
       },
       stats: { email: 1 },
     });

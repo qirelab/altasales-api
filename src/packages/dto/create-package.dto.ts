@@ -46,6 +46,14 @@ export class CreatePackageDto {
   image?: string | null;
 
   @ApiPropertyOptional({
+    example: 'https://api.example.com/uploads/catalog/packages/uuid-original.jpeg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsString()
+  imageOriginal?: string | null;
+
+  @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',
     description: 'Category ID for package',
   })

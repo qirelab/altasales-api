@@ -710,16 +710,37 @@ export class OrdersService {
       .leftJoin(User, 'u', 'u.id = o."userId"');
 
     if (search) {
+      const searchPattern = `%${search}%`;
       baseQb.andWhere(
         new Brackets((qb) => {
           qb
-            .where('o.id::text ILIKE :search', { search: `%${search}%` })
-            .orWhere('o.status ILIKE :search', { search: `%${search}%` })
-            .orWhere('u.name ILIKE :search', { search: `%${search}%` })
-            .orWhere('u."lastName" ILIKE :search', { search: `%${search}%` })
+            .where('o.id::text ILIKE :search', { search: searchPattern })
+            .orWhere('o.status ILIKE :search', { search: searchPattern })
+            .orWhere('u.name ILIKE :search', { search: searchPattern })
+            .orWhere('u."lastName" ILIKE :search', { search: searchPattern })
             .orWhere(`CONCAT(u.name, ' ', u."lastName") ILIKE :search`, {
-              search: `%${search}%`,
-            });
+              search: searchPattern,
+            })
+            .orWhere(
+              `EXISTS (
+                SELECT 1 FROM order_item oi
+                LEFT JOIN service s ON s.id = oi."serviceId"
+                LEFT JOIN service_package sp ON sp.id = oi."packageId"
+                WHERE oi."orderId" = o.id
+                  AND (s.name ILIKE :search OR sp.name ILIKE :search)
+              )`,
+              { search: searchPattern },
+            )
+            .orWhere(
+              `EXISTS (
+                SELECT 1 FROM order_item oi2
+                INNER JOIN order_item_sub_item sub ON sub."orderItemId" = oi2.id
+                INNER JOIN expert_position_offering epo ON epo.id = sub."expertPositionOfferingId"
+                WHERE oi2."orderId" = o.id
+                  AND epo.name ILIKE :search
+              )`,
+              { search: searchPattern },
+            );
         }),
       );
     }

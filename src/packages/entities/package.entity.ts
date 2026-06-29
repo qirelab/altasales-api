@@ -56,6 +56,13 @@ export class ServicePackage {
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
 
+  @ApiPropertyOptional({
+    example: 'https://api.example.com/uploads/catalog/packages/uuid-original.jpeg',
+    description: 'Original (uncropped) image URL, used for non-destructive re-crop',
+  })
+  @Column({ type: 'varchar', nullable: true })
+  imageOriginal: string | null;
+
   @ApiPropertyOptional({ description: 'Category ID for package' })
   @Column({ type: 'uuid', nullable: true })
   categoryId: string | null;

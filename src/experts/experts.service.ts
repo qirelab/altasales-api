@@ -100,6 +100,7 @@ export interface AdminExpertGroupPreviewMember {
   id: string;
   name: string;
   lastName: string;
+  image: string | null;
 }
 
 export interface AdminExpertGroupsListItemDto {
@@ -107,6 +108,7 @@ export interface AdminExpertGroupsListItemDto {
   title: string;
   iconLabel: string | null;
   image: string | null;
+  imageOriginal: string | null;
   description: string;
   expertsCount: number;
   expertsPreview: AdminExpertGroupPreviewMember[];
@@ -120,6 +122,7 @@ export interface AdminExpertGroupDetailsDto {
   title: string;
   iconLabel: string | null;
   image: string | null;
+  imageOriginal: string | null;
   description: string;
   experts: Array<{
     id: string;
@@ -187,6 +190,7 @@ export interface AdminExpertMemberProfile {
   description: string;
   skills: string[];
   image: string | null;
+  imageOriginal: string | null;
   experienceYears: number | null;
 }
 
@@ -591,6 +595,25 @@ export class ExpertsService {
       .orderBy('member."positionId"')
       .addOrderBy('member."createdAt"', 'ASC')
       .getMany();
+    const previewUserIds = previewMembers
+      .map((member) => member.user?.id)
+      .filter((userId): userId is string => Boolean(userId));
+    const expertProfiles = previewUserIds.length > 0
+      ? await this.expertProfileRepository.find({
+        where: { userId: In(previewUserIds) },
+        select: ['userId', 'image'],
+      })
+      : [];
+    const expertImageByUserId = new Map(
+      expertProfiles
+        .filter((profile) => profile.image)
+        .map((profile) => [profile.userId, profile.image]),
+    );
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(previewUserIds);
+    const resolveExpertImage = (userId: string): string | null =>
+      expertImageByUserId.get(userId)
+      ?? fallbackProfileByUserId.get(userId)?.image
+      ?? null;
     const expertsPreviewByGroup = new Map<string, AdminExpertGroupPreviewMember[]>();
     for (const member of previewMembers) {
       if (!member.user || member.user.role !== UserRole.EXPERT) continue;
@@ -600,6 +623,7 @@ export class ExpertsService {
           id: member.user.id,
           name: member.user.name,
           lastName: member.user.lastName,
+          image: resolveExpertImage(member.user.id),
         });
         expertsPreviewByGroup.set(member.positionId, list);
       }
@@ -618,6 +642,7 @@ export class ExpertsService {
         title: group.name,
         iconLabel: group.iconLabel ?? null,
         image: group.image ?? null,
+        imageOriginal: group.imageOriginal ?? null,
         description: group.description,
         expertsCount: expertsCountByGroup.get(group.id) ?? 0,
         expertsPreview: expertsPreviewByGroup.get(group.id) ?? [],
@@ -735,6 +760,7 @@ export class ExpertsService {
       title: group.name,
       iconLabel: group.iconLabel ?? null,
       image: group.image ?? null,
+      imageOriginal: group.imageOriginal ?? null,
       description: group.description,
       experts,
       services: services.map((service) => ({
@@ -837,6 +863,7 @@ export class ExpertsService {
       description: dto.description.trim(),
       iconLabel: dto.iconLabel?.trim() || null,
       image: dto.image?.trim() || null,
+      imageOriginal: dto.imageOriginal?.trim() || null,
     });
     const saved = await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(saved.id);
@@ -861,6 +888,9 @@ export class ExpertsService {
     if (dto.description !== undefined) group.description = dto.description.trim();
     if (dto.iconLabel !== undefined) group.iconLabel = dto.iconLabel?.trim() || null;
     if (dto.image !== undefined) group.image = dto.image?.trim() || null;
+    if (dto.imageOriginal !== undefined) {
+      group.imageOriginal = dto.imageOriginal?.trim() || null;
+    }
 
     await this.positionRepository.save(group);
     return this.getAdminExpertGroupById(group.id);
@@ -1618,6 +1648,7 @@ export class ExpertsService {
       description: dto.description.trim(),
       skills: dto.skills,
       image: dto.image ?? null,
+      imageOriginal: dto.imageOriginal ?? null,
       experienceYears: dto.experienceYears,
     });
     await this.expertProfileRepository.save(profileEntity);
@@ -1664,6 +1695,7 @@ export class ExpertsService {
     if (dto.description !== undefined) profileEntity.description = dto.description.trim();
     if (dto.skills !== undefined) profileEntity.skills = dto.skills;
     if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.imageOriginal !== undefined) profileEntity.imageOriginal = dto.imageOriginal;
     if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
     await this.expertProfileRepository.save(profileEntity);
 
@@ -1716,6 +1748,7 @@ export class ExpertsService {
       description: profile.description ?? '',
       skills: profile.skills ?? [],
       image: profile.image,
+      imageOriginal: profile.imageOriginal,
       experienceYears: profile.experienceYears,
     };
   }
@@ -1730,6 +1763,7 @@ export class ExpertsService {
       description: profile?.description ?? fallback?.description ?? '',
       skills: profile?.skills?.length ? profile.skills : (fallback?.skills ?? []),
       image: profile?.image ?? fallback?.image ?? null,
+      imageOriginal: profile?.imageOriginal ?? null,
       experienceYears: profile?.experienceYears
         ?? fallback?.experienceYears
         ?? legacyUserExperienceYears
@@ -1866,6 +1900,7 @@ export class ExpertsService {
         description: resolvedProfile.description,
         skills: resolvedProfile.skills,
         image: resolvedProfile.image,
+        imageOriginal: resolvedProfile.imageOriginal,
         experienceYears: resolvedProfile.experienceYears,
       },
       group,
@@ -1892,6 +1927,7 @@ export class ExpertsService {
     if (dto.description !== undefined) profileEntity.description = dto.description.trim();
     if (dto.skills !== undefined) profileEntity.skills = dto.skills;
     if (dto.image !== undefined) profileEntity.image = dto.image;
+    if (dto.imageOriginal !== undefined) profileEntity.imageOriginal = dto.imageOriginal;
     if (dto.experienceYears !== undefined) profileEntity.experienceYears = dto.experienceYears;
     await this.expertProfileRepository.save(profileEntity);
 

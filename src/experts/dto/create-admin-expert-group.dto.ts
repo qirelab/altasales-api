@@ -25,6 +25,16 @@ export class CreateAdminExpertGroupDto {
   @IsUrl({ require_protocol: true })
   @MaxLength(1024)
   image?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'https://cdn.example.com/expert-groups/marketing-original.png',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsString()
+  @IsUrl({ require_protocol: true })
+  @MaxLength(1024)
+  imageOriginal?: string | null;
 }
 
 export class UpdateAdminExpertGroupDto extends PartialType(CreateAdminExpertGroupDto) {}
