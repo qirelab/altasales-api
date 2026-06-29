@@ -59,6 +59,14 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   ropProjectId: string | null;
 
+  @ApiProperty({
+    example: '88',
+    description: 'ROP CRM user ID',
+    nullable: true,
+  })
+  @Column({ type: 'varchar', nullable: true })
+  ropUserId: string | null;
+
   @ApiPropertyOptional({
     example: 12,
     description: 'Years of professional experience (for expert role)',

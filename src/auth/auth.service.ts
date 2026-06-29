@@ -5,6 +5,7 @@ import { UserRecord } from 'firebase-admin/auth';
 import { DataSource, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
+import { RopProvisioningService } from '../rop/rop-provisioning.service';
 import { FirebaseService } from './firebase/firebase.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -21,6 +22,7 @@ export class AuthService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly dataSource: DataSource,
+    private readonly ropProvisioningService: RopProvisioningService,
   ) { }
 
   // TODO: only for testing
@@ -60,6 +62,8 @@ export class AuthService {
       const savedUser = await queryRunner.manager.save(User, user);
 
       await queryRunner.commitTransaction();
+
+      this.ropProvisioningService.scheduleProvision(savedUser.id);
 
       const customToken = await auth.createCustomToken(firebaseUserRecord.uid);
 
@@ -280,6 +284,8 @@ export class AuthService {
         await queryRunner.release();
       }
     }
+
+    this.ropProvisioningService.scheduleProvision(dbUser.id);
 
     return {
       id: dbUser.id,
