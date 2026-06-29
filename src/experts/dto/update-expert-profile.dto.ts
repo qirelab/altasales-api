@@ -27,6 +27,14 @@ export class UpdateExpertProfileDto {
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string | null;
 
+  @ApiPropertyOptional({
+    example: 'https://example.com/expert-original.jpg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  imageOriginal?: string | null;
+
   @ApiPropertyOptional({ example: 5, minimum: 0, maximum: 99 })
   @IsOptional()
   @Type(() => Number)

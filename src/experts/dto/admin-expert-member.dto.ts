@@ -56,6 +56,14 @@ export class CreateAdminExpertMemberDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/expert-original.jpg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  imageOriginal?: string;
 }
 
 export class UpdateAdminExpertMemberDto {
@@ -102,4 +110,12 @@ export class UpdateAdminExpertMemberDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string | null;
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/expert-original.jpg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  imageOriginal?: string | null;
 }

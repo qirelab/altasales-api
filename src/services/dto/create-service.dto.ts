@@ -36,6 +36,14 @@ export class CreateServiceDto {
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
 
+  @ApiPropertyOptional({
+    example: 'https://example.com/image-original.jpg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  imageOriginal?: string;
+
   @ApiProperty({ example: ['AmoCRM', 'Bitrix24', 'API'], description: 'Array of skills', type: [String], required: false })
   @IsOptional()
   @IsArray()

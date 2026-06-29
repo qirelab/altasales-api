@@ -12,6 +12,14 @@ export class CreateAdminContractorDto {
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   image?: string;
 
+  @ApiPropertyOptional({
+    example: 'https://example.com/contractor-original.jpg',
+    description: 'Original (uncropped) image URL for non-destructive re-crop',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  imageOriginal?: string;
+
   @ApiProperty({ example: 2500, description: 'Contractor hourly rate' })
   @IsNumber()
   @Min(0)
