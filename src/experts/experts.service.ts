@@ -100,6 +100,7 @@ export interface AdminExpertGroupPreviewMember {
   id: string;
   name: string;
   lastName: string;
+  image: string | null;
 }
 
 export interface AdminExpertGroupsListItemDto {
@@ -591,6 +592,25 @@ export class ExpertsService {
       .orderBy('member."positionId"')
       .addOrderBy('member."createdAt"', 'ASC')
       .getMany();
+    const previewUserIds = previewMembers
+      .map((member) => member.user?.id)
+      .filter((userId): userId is string => Boolean(userId));
+    const expertProfiles = previewUserIds.length > 0
+      ? await this.expertProfileRepository.find({
+        where: { userId: In(previewUserIds) },
+        select: ['userId', 'image'],
+      })
+      : [];
+    const expertImageByUserId = new Map(
+      expertProfiles
+        .filter((profile) => profile.image)
+        .map((profile) => [profile.userId, profile.image]),
+    );
+    const fallbackProfileByUserId = await this.loadFallbackExpertProfileByUserIds(previewUserIds);
+    const resolveExpertImage = (userId: string): string | null =>
+      expertImageByUserId.get(userId)
+      ?? fallbackProfileByUserId.get(userId)?.image
+      ?? null;
     const expertsPreviewByGroup = new Map<string, AdminExpertGroupPreviewMember[]>();
     for (const member of previewMembers) {
       if (!member.user || member.user.role !== UserRole.EXPERT) continue;
@@ -600,6 +620,7 @@ export class ExpertsService {
           id: member.user.id,
           name: member.user.name,
           lastName: member.user.lastName,
+          image: resolveExpertImage(member.user.id),
         });
         expertsPreviewByGroup.set(member.positionId, list);
       }
