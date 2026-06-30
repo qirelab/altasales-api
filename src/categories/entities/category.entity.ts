@@ -28,6 +28,13 @@ export class Category {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  @ApiProperty({
+    example: 0,
+    description: 'Manual display order (lower = earlier)',
+  })
+  @Column({ type: 'int', default: 0 })
+  sortOrder: number;
+
   @OneToMany(() => Service, (service) => service.category)
   services: Service[];
 

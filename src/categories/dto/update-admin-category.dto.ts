@@ -2,10 +2,12 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsInt,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { UpdateCategoryFaqItemDto } from './update-category-faq-item.dto';
@@ -31,6 +33,15 @@ export class UpdateAdminCategoryDto {
   @IsOptional()
   @IsString()
   description?: string | null;
+
+  @ApiPropertyOptional({
+    example: 0,
+    description: 'Manual display order (lower = earlier)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sortOrder?: number;
 
   @ApiPropertyOptional({
     type: [UpdateCategoryFaqItemDto],
