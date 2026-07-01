@@ -30,8 +30,8 @@ export class CategoriesService {
 
   async findAll(): Promise<Category[]> {
     return this.categoryRepository.find({
-      order: { name: 'ASC' },
-      select: ['id', 'name', 'slug'],
+      order: { sortOrder: 'ASC', name: 'ASC' },
+      select: ['id', 'name', 'slug', 'sortOrder'],
     });
   }
 
@@ -91,7 +91,8 @@ export class CategoriesService {
     }
 
     const categories = await dataQb
-      .orderBy('c.name', 'ASC')
+      .orderBy('c."sortOrder"', 'ASC')
+      .addOrderBy('c.name', 'ASC')
       .skip(offset)
       .take(limit)
       .getMany();
@@ -124,6 +125,7 @@ export class CategoriesService {
     const name = dto.name.trim();
     const slug = this.normalizeSlug(dto.slug);
     const description = this.normalizeDescription(dto.description);
+    const sortOrder = dto.sortOrder ?? 0;
 
     await this.ensureUniqueNameAndSlug(name, slug);
 
@@ -132,7 +134,7 @@ export class CategoriesService {
       const faqRepo = manager.getRepository(FAQ);
 
       const category = await categoryRepo.save(
-        categoryRepo.create({ name, slug, description }),
+        categoryRepo.create({ name, slug, description, sortOrder }),
       );
 
       if (dto.faqs?.length) {
@@ -161,6 +163,7 @@ export class CategoriesService {
     const description = dto.description !== undefined
       ? this.normalizeDescription(dto.description)
       : category.description;
+    const sortOrder = dto.sortOrder !== undefined ? dto.sortOrder : category.sortOrder;
 
     if (name !== category.name || slug !== category.slug) {
       await this.ensureUniqueNameAndSlug(name, slug, id);
@@ -170,7 +173,7 @@ export class CategoriesService {
       const categoryRepo = manager.getRepository(Category);
       const faqRepo = manager.getRepository(FAQ);
 
-      await categoryRepo.update(id, { name, slug, description });
+      await categoryRepo.update(id, { name, slug, description, sortOrder });
 
       if (dto.faqs !== undefined) {
         await this.replaceFaqs(id, dto.faqs, faqRepo);
