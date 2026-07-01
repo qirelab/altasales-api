@@ -1,4 +1,3 @@
-import { randomBytes } from 'crypto';
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 
 export interface RopProject {
@@ -12,31 +11,6 @@ export interface RopDocument {
   name: string;
   link?: string;
   status?: string;
-}
-
-export interface RopUser {
-  id: string;
-  email: string;
-  first_name?: string | null;
-  last_name?: string | null;
-  phone_number?: string | null;
-  company_name?: string | null;
-  full_name?: string | null;
-  st_id?: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface CreateRopUserPayload {
-  email: string;
-  password: string;
-  first_name?: string | null;
-  last_name?: string | null;
-  phone_number?: string | null;
-  full_name?: string | null;
-  role?: string | null;
-  project_id: number;
-  project_role?: string | null;
 }
 
 @Injectable()
@@ -101,38 +75,6 @@ export class RopService {
       id: this.normalizeId(data.id),
       name: data.name,
     };
-  }
-
-  async createUser(payload: CreateRopUserPayload): Promise<RopUser | null> {
-    this.ensureConfigured();
-
-    const response = await fetch(`${this.apiUrl}/users`, {
-      method: 'POST',
-      headers: this.jsonHeaders,
-      body: JSON.stringify(payload),
-    });
-
-    if (response.status === 409) {
-      const error = await response.text();
-      this.logger.warn(`ROP user already exists for ${payload.email}: ${error}`);
-      return null;
-    }
-
-    if (!response.ok) {
-      const error = await response.text();
-      this.logRopFailure('create user', response, error);
-      throw new InternalServerErrorException('Failed to create user in ROP');
-    }
-
-    const data = await response.json() as { id: string | number; email: string } & Partial<RopUser>;
-    return {
-      ...data,
-      id: this.normalizeId(data.id),
-    };
-  }
-
-  generateUserPassword(): string {
-    return randomBytes(32).toString('base64url');
   }
 
   async createDocument(

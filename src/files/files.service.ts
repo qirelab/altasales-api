@@ -1,9 +1,9 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { User } from '../users/entities/user.entity';
+
 import { RopService } from '../rop/rop.service';
-import { RopProvisioningService } from '../rop/rop-provisioning.service';
+import { User } from '../users/entities/user.entity';
 import { FileEntity, FileSource } from './entities/file.entity';
 
 @Injectable()
@@ -14,7 +14,6 @@ export class FilesService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly ropService: RopService,
-    private readonly ropProvisioningService: RopProvisioningService,
   ) {}
 
   private async getRopProjectId(userId: string): Promise<string> {
@@ -25,16 +24,11 @@ export class FilesService {
       return user.ropProjectId;
     }
 
-    const projectId = await this.ropProvisioningService.ensureProvisioned(userId);
-    if (projectId) {
-      return projectId;
-    }
-
     if (!this.ropService.isConfigured()) {
       throw new InternalServerErrorException('ROP API not configured');
     }
 
-    throw new InternalServerErrorException('Failed to provision ROP project for user');
+    throw new BadRequestException('Сначала заполните анкету');
   }
 
   async create(

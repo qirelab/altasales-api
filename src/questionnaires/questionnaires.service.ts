@@ -17,6 +17,7 @@ import {
 import { UsersService } from '../users/users.service';
 import { UserRole } from '../users/entities/user-role.enum';
 import { MailService } from '../mail/mail.service';
+import { RopProvisioningService } from '../rop/rop-provisioning.service';
 
 @Injectable()
 export class QuestionnairesService {
@@ -30,6 +31,7 @@ export class QuestionnairesService {
     private readonly mailService: MailService,
     private readonly balanceService: BalanceService,
     private readonly websocketGateway: WebSocketGatewayService,
+    private readonly ropProvisioningService: RopProvisioningService,
   ) {}
 
   async create(
@@ -42,6 +44,7 @@ export class QuestionnairesService {
       existing.answers = this.dtoToAnswers(dto);
       const saved = await this.repo.save(existing);
       this.scheduleRecommendationGeneration(saved, userId);
+      this.ropProvisioningService.scheduleProjectCreation(userId, dto.companyName);
       return saved;
     }
 
@@ -51,6 +54,7 @@ export class QuestionnairesService {
     });
     const saved = await this.repo.save(questionnaire);
     this.scheduleRecommendationGeneration(saved, userId);
+    this.ropProvisioningService.scheduleProjectCreation(userId, dto.companyName);
 
     try {
       const user = await this.usersService.findOne(userId);
