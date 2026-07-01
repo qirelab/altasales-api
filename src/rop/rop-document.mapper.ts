@@ -1,0 +1,18 @@
+import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
+import { RopDocumentRecord } from './rop.types';
+
+export function mapRopDocument(document: RopDocumentRecord): RopDocumentResponseDto {
+  return {
+    id: String(document.id),
+    projectId: String(document.project_id),
+    name: document.name,
+    description: document.description ?? null,
+    comment: document.comment ?? null,
+    link: document.link ?? null,
+    categoryId: document.category_id ?? null,
+    statusId: document.status_id ?? null,
+    fileId: document.file_id ?? null,
+    createdAt: document.created_at,
+    updatedAt: document.updated_at,
+  };
+}
