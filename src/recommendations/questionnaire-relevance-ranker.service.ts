@@ -161,6 +161,8 @@ const DIVERSITY_LIMITS: Record<ServiceGroup, number> = {
 const URGENT_RANKER_SCORE = 70;
 const MEDIUM_RANKER_SCORE = 12;
 const EXPLICIT_COMPONENT_POINTS = 60;
+const AI_ANALYSIS_COMPONENT_POINTS = 80;
+const MIN_UNSELECTED_FALLBACK_SCORE = 25;
 
 const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   crm: ['CRM'],
@@ -300,9 +302,9 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
   ],
   callAnalysis: [
     {
-      catalogKeys: ['communicationQualityControl'],
-      points: EXPLICIT_COMPONENT_POINTS,
-      reason: 'анализ звонков выбран в анкете',
+      terms: ['ии анализ звонков и менеджеров'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'нужно оценивать звонки',
     },
     {
       catalogKeys: ['callAnalysis'],
@@ -341,6 +343,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
 > = {
   crm: [
     {
+      terms: ['ии анализ crm'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'в анкете указана существующая CRM, нужен ИИ-анализ',
+    },
+    {
       catalogKeys: ['crmAudit'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'в анкете указана существующая CRM, нужен аудит',
@@ -353,12 +360,22 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
   ],
   analytics: [
     {
+      terms: ['ии анализ дашборда'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'существующая аналитика выбрана для ИИ-анализа',
+    },
+    {
       catalogKeys: ['salesDashboard'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен анализ существующей аналитики',
     },
   ],
   salesDocuments: [
+    {
+      terms: ['ии анализ документов'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'существующие документы ОП выбраны для ИИ-анализа',
+    },
     {
       catalogKeys: ['documentAnalysis'],
       points: EXPLICIT_COMPONENT_POINTS,
@@ -367,9 +384,26 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
   ],
   telephony: [
     {
+      terms: ['ии анализ звонков и менеджеров'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'существующая телефония выбрана для ИИ-анализа звонков',
+    },
+    {
       catalogKeys: ['callAnalysis'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен анализ звонков существующей телефонии',
+    },
+  ],
+  callAnalysis: [
+    {
+      terms: ['ии анализ звонков и менеджеров'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'нужен анализ звонков и работы менеджеров',
+    },
+    {
+      catalogKeys: ['callAnalysis'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'нужен анализ звонков и работы менеджеров',
     },
   ],
   messenger: [
@@ -595,7 +629,13 @@ export class QuestionnaireRelevanceRankerService {
       );
       const llmBonus = fromRanked ? Math.max(8 - fromRanked.index, 1) : 0;
 
-      if (!fromRanked && fallback.score <= 0 && rulePoints <= 0) continue;
+      if (
+        !fromRanked &&
+        rulePoints <= 0 &&
+        fallback.score < MIN_UNSELECTED_FALLBACK_SCORE
+      ) {
+        continue;
+      }
 
       const base = fromRanked?.item ?? fallback;
       const score = Number(base.score || 0) + rulePoints + llmBonus;
@@ -622,7 +662,50 @@ export class QuestionnaireRelevanceRankerService {
       maxItems,
     );
 
-    return this.collapseConfiguredSolutions(diverse);
+    return this.collapseSupersededAnalysisRecommendations(
+      this.collapseAlternativeHiringFormats(diverse),
+    );
+  }
+
+  private collapseAlternativeHiringFormats(
+    items: GeneratedRecommendationItem[],
+  ): GeneratedRecommendationItem[] {
+    const hasOffice = items.some(
+      (item) => this.normalize(item.serviceName) === 'офис',
+    );
+    if (!hasOffice) return items;
+
+    return items.filter(
+      (item) =>
+        !['офис pro', 'стандарт online', 'стандарт online pro'].includes(
+          this.normalize(item.serviceName),
+        ),
+    );
+  }
+
+  private collapseSupersededAnalysisRecommendations(
+    items: GeneratedRecommendationItem[],
+  ): GeneratedRecommendationItem[] {
+    const replacementGroups = [
+      {
+        replacement: 'ии анализ звонков и менеджеров',
+        legacy: [
+          'отчет с оценкой прослушанных разговоров с клиентами',
+          'отчёт с оценкой прослушанных разговоров с клиентами',
+          'на контроле + рубичат',
+        ],
+      },
+    ];
+    const activeReplacements = replacementGroups.filter(({ replacement }) =>
+      items.some((item) => this.normalize(item.serviceName) === replacement),
+    );
+
+    if (activeReplacements.length === 0) return items;
+
+    return items.filter((item) => {
+      const name = this.normalize(item.serviceName);
+      return !activeReplacements.some(({ legacy }) => legacy.includes(name));
+    });
   }
 
   private compareRankedCandidates(
@@ -635,23 +718,6 @@ export class QuestionnaireRelevanceRankerService {
     if (aIsIdeal !== bIsIdeal) return aIsIdeal ? -1 : 1;
 
     return Number(b.score || 0) - Number(a.score || 0);
-  }
-
-  private collapseConfiguredSolutions(
-    items: GeneratedRecommendationItem[],
-  ): GeneratedRecommendationItem[] {
-    const targetIds = new Set(items.map((item) => this.getItemTargetId(item)));
-    if (!targetIds.has(RECOMMENDATION_CATALOG.communicationQualityControl.id)) {
-      return items;
-    }
-
-    const coveredByQualityControl = new Set<string>([
-      RECOMMENDATION_CATALOG.callAnalysis.id,
-      RECOMMENDATION_CATALOG.messengerAnalysis.id,
-    ]);
-    return items.filter(
-      (item) => !coveredByQualityControl.has(this.getItemTargetId(item)),
-    );
   }
 
   private detectStage(
@@ -1175,6 +1241,10 @@ export class QuestionnaireRelevanceRankerService {
       selectedComponents,
     } = profile;
 
+    if (this.includesAny(serviceText, ['на контроле', 'рубичат'])) {
+      return 'устаревшая услуга заменена ИИ-анализом';
+    }
+
     const duplicatedExistingComponent = existingComponents.find(
       (component) =>
         !selectedComponents.includes(component) &&
@@ -1491,6 +1561,7 @@ export class QuestionnaireRelevanceRankerService {
     const text = this.normalize(item.serviceName);
 
     if (text.includes('crm')) return 'crm';
+    if (text === 'ии анализ звонков и менеджеров') return 'quality';
     if (
       this.includesAny(text, ['телефони', 'мессенджер', 'звонк', 'разговор'])
     ) {

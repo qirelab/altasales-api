@@ -672,6 +672,154 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(aliases).not.toContain('ии анализ документов');
   });
 
+  it('replaces the legacy quality-control recommendation with AI call analysis', () => {
+    const aiAnalysisServices = [
+      service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+      service(
+        'calls-report',
+        'Отчёт с оценкой прослушанных разговоров с клиентами',
+      ),
+      service('quality', 'На Контроле + Рубичат'),
+    ];
+
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          components: components(),
+          componentsToAdd: components({ callAnalysis: true }),
+        },
+        persist: false,
+      },
+      aiAnalysisServices,
+      [],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(['ai-calls']);
+    expect(result.map((item) => item.serviceId)).not.toContain('quality');
+  });
+
+  it.each([
+    ['crm', 'ИИ анализ CRM'],
+    ['analytics', 'ИИ анализ дашборда'],
+    ['salesDocuments', 'ИИ анализ документов'],
+    ['telephony', 'ИИ анализ звонков и менеджеров'],
+  ])(
+    'adds %s AI analysis when that component already exists',
+    (component, expectedServiceName) => {
+      const result = ranker.rankRecommendations(
+        {
+          userId: 'user-id',
+          clientProfile: {
+            productStage: 'existing',
+            components: components({ [component]: true }),
+            componentsToAdd: components(),
+          },
+          persist: false,
+        },
+        [
+          service('ai-crm', 'ИИ анализ CRM'),
+          service('ai-dashboard', 'ИИ анализ дашборда'),
+          service('ai-documents', 'ИИ анализ документов'),
+          service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+        ],
+        [],
+        '',
+      );
+
+      expect(result.map((item) => item.serviceName)).toContain(
+        expectedServiceName,
+      );
+    },
+  );
+
+  it('keeps call analysis, telephony integration and messenger integration as separate recommendations', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          components: components({ callAnalysis: true }),
+          componentsToAdd: components({
+            telephony: true,
+            messenger: true,
+          }),
+        },
+        persist: false,
+      },
+      [
+        service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+        service('telephony', 'Интеграция телефонии'),
+        service('messenger', 'Интеграция мессенджера'),
+      ],
+      [],
+      '',
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'ai-calls',
+      'telephony',
+      'messenger',
+    ]);
+  });
+
+  it('keeps only the default Office hiring format when alternatives also match', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          components: components(),
+          componentsToAdd: components({ salesManager: true }),
+        },
+        persist: false,
+      },
+      [
+        service('office', 'Офис'),
+        service('office-pro', 'Офис PRO'),
+        service('online', 'Стандарт Online'),
+      ],
+      [],
+      '',
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(['office']);
+  });
+
+  it('filters weak unselected fallback matches', () => {
+    const weakFallbackRanker = new QuestionnaireRelevanceRankerService({
+      ...scoringService,
+      scoreService: (candidate: ServiceCandidate) => ({
+        serviceId: candidate.id,
+        serviceName: candidate.name,
+        priority: RecommendationPriority.Urgent,
+        rationale: 'generic diagnostic match',
+        diagnosticSignals: ['analytics_visibility'],
+        score: 21,
+      }),
+    } as any);
+
+    const result = weakFallbackRanker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          components: components(),
+          componentsToAdd: components(),
+        },
+        persist: false,
+      },
+      [service('report-setup', 'Настройка отчёта')],
+      [],
+      '',
+    );
+
+    expect(result).toEqual([]);
+  });
+
   it('keeps the exact golden reference despite conflicting optional answers', () => {
     const result = ranker.rankRecommendations(
       {
@@ -1503,9 +1651,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const serviceIds = result.map((item) => item.serviceId);
 
-    expect(serviceIds).toEqual(
-      expect.arrayContaining(['dashboard', 'quality']),
-    );
+    expect(serviceIds).toContain('dashboard');
+    expect(serviceIds).not.toContain('quality');
     expect(
       serviceIds.filter((id) => id?.startsWith('crm')).length,
     ).toBeLessThanOrEqual(2);
@@ -1542,9 +1689,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const serviceIds = result.map((item) => item.serviceId);
 
-    expect(serviceIds).toEqual(
-      expect.arrayContaining(['dashboard', 'quality']),
-    );
+    expect(serviceIds).toContain('dashboard');
+    expect(serviceIds).not.toContain('quality');
     expect(serviceIds).not.toEqual(
       expect.arrayContaining(['from-zero', 'crm-start', 'crm-bronze']),
     );
