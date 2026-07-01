@@ -46,6 +46,7 @@ import {
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
 const MIN_RECOMMENDATION_RANKING_SCORE = 20;
+const MIN_FALLBACK_RECOMMENDATION_SCORE = 25;
 const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
   RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
@@ -608,7 +609,7 @@ export class RecommendationsService implements OnModuleInit {
     if (ranked.length === 0) {
       ranked = services
         .map((service) => this.scoringService.scoreService(service, context))
-        .filter((item) => item.score > 0)
+        .filter((item) => item.score >= MIN_FALLBACK_RECOMMENDATION_SCORE)
         .sort((a, b) => b.score - a.score);
     }
 
@@ -1098,16 +1099,16 @@ export class RecommendationsService implements OnModuleInit {
     recommendations.forEach((recommendation) => {
       const targetId = this.getRecommendationTargetId(recommendation);
       if (!targetId) return;
-      const isReplaceableGeneratedRecommendation =
+      const isReplaceableRecommendation =
         recommendation.status === RecommendationStatus.Recommended &&
-        recommendation.generatedAt != null;
+        recommendation.orderId == null;
 
       coverage.push({
         targetId,
         coveredServiceIds: new Set(
           this.getRecommendationCoveredServiceIds(recommendation),
         ),
-        blocksOverlaps: !isReplaceableGeneratedRecommendation,
+        blocksOverlaps: !isReplaceableRecommendation,
       });
     });
 
@@ -1125,6 +1126,10 @@ export class RecommendationsService implements OnModuleInit {
     for (const item of items) {
       const targetId = this.getGeneratedRecommendationTargetId(item);
       if (!targetId || selectedTargetIds.has(targetId)) continue;
+      const targetIsAlreadyActive = existingCoverage.some(
+        (entry) => entry.blocksOverlaps && entry.targetId === targetId,
+      );
+      if (targetIsAlreadyActive) continue;
 
       const coveredServiceIds =
         this.getGeneratedRecommendationCoveredServiceIds(item);
