@@ -62,6 +62,13 @@ export class Service {
   @Column({ type: 'varchar', nullable: true })
   imageOriginal: string | null;
 
+  @ApiPropertyOptional({
+    example: 'https://ropsharing.dev/indicators/interim-report',
+    description: 'External tool URL revealed to the customer after purchase (AI services)',
+  })
+  @Column({ type: 'varchar', nullable: true })
+  externalUrl: string | null;
+
   @ApiProperty({
     example: ['AmoCRM', 'Bitrix24', 'API'],
     description: 'Array of skills for the service',

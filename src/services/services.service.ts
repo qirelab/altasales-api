@@ -22,6 +22,8 @@ import { ServiceType } from './entities/service-type.enum';
 import { applyActivePackageFilter } from '../packages/package-visibility';
 import { activeServiceWhere, applyActiveServiceFilter } from './service-visibility';
 
+const SALES_DASHBOARD_CATEGORY_SLUG = 'ai-analiz-prodazh';
+
 @Injectable()
 export class ServicesService {
   constructor(
@@ -279,6 +281,19 @@ export class ServicesService {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
     return service;
+  }
+
+  async findForSalesDashboard(): Promise<Service[]> {
+    const category = await this.categoryRepository.findOne({
+      where: { slug: SALES_DASHBOARD_CATEGORY_SLUG },
+    });
+    if (!category) {
+      return [];
+    }
+    return this.serviceRepository.find({
+      where: { categoryId: category.id, ...activeServiceWhere() },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async update(id: string, updateServiceDto: UpdateServiceDto): Promise<Service> {
@@ -618,6 +633,7 @@ export class ServicesService {
       price: 0,
       image: expertProfile?.image ?? null,
       imageOriginal: expertProfile?.imageOriginal ?? null,
+      externalUrl: null,
       skills: expertProfile?.skills ?? [],
       contractorRatePerHour: null,
       contractorExperienceYears: expertProfile?.experienceYears ?? null,

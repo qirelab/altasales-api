@@ -64,6 +64,16 @@ export class ServicesController {
     return this.servicesService.getAllSkills();
   }
 
+  @Get('for-sales-dashboard')
+  @ApiOperation({
+    summary: 'Get AI services shown on "Мой отдел продаж" dashboard',
+    description: 'Returns active services in the sales-dashboard AI category. Empty array if the category is missing.',
+  })
+  @ApiResponse({ status: 200, description: 'Active AI services for the dashboard shortcuts', type: [Service] })
+  async findForSalesDashboard(): Promise<Service[]> {
+    return this.servicesService.findForSalesDashboard();
+  }
+
   @Get('expert/profile')
   @UseGuards(SessionGuard, RolesGuard)
   @Roles(UserRole.EXPERT)
