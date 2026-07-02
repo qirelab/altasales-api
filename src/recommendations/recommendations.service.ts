@@ -1309,8 +1309,14 @@ export class RecommendationsService implements OnModuleInit {
         if (!this.isReplaceableRecommendation(recommendation)) return false;
         const targetId = this.getRecommendationTargetId(recommendation);
         if (targetId && currentTargetIds.has(targetId)) return false;
-        return this.getRecommendationCoveredServiceIds(recommendation).some(
-          (serviceId) => currentCoveredServiceIds.has(serviceId),
+        const coveredServiceIds = this.toPublicCoveredServiceIds(
+          this.getRecommendationCoveredServiceIds(recommendation),
+        );
+        return (
+          coveredServiceIds.length > 0 &&
+          coveredServiceIds.every((serviceId) =>
+            currentCoveredServiceIds.has(serviceId),
+          )
         );
       })
       .map((recommendation) => recommendation.id);

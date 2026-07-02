@@ -1137,6 +1137,70 @@ describe('RecommendationsService', () => {
     ]);
   });
 
+  it('keeps a manual package when generation covers only part of its services', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const manualPackageRecommendation = {
+      id: 'manual-package-recommendation-id',
+      serviceId: null,
+      packageId: 'manual-package-id',
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      generatedAt: null,
+      orderId: null,
+      package: {
+        name: 'Manual package',
+        description: null,
+        packageType: 'custom',
+        category: null,
+        tags: [],
+        services: [
+          {
+            id: 'service-a',
+            name: 'Service A',
+            description: null,
+            category: null,
+            skills: [],
+            deletedAt: null,
+          },
+          {
+            id: 'service-b',
+            name: 'Service B',
+            description: null,
+            category: null,
+            skills: [],
+            deletedAt: null,
+          },
+        ],
+      },
+    };
+    recommendationRepository.find
+      .mockResolvedValueOnce([manualPackageRecommendation])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([manualPackageRecommendation]);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'service-a',
+        packageId: null,
+        serviceName: 'Service A',
+        priority: 'medium',
+        rationale: 'partial package match',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-a'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(result.map((item) => item.serviceId)).toEqual(['service-a']);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
   it('keeps recommendations linked to an order from being replaced by overlapping packages', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
