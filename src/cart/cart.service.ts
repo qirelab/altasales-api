@@ -52,7 +52,7 @@ export class CartService {
         'service',
         'service.category',
         'package',
-        'package.category',
+        'package.categories',
         'package.services',
         ...EXPERT_RELATIONS,
       ],

@@ -1,4 +1,5 @@
 import {
+  AfterLoad,
   Column,
   CreateDateColumn,
   Entity,
@@ -63,14 +64,29 @@ export class ServicePackage {
   @Column({ type: 'varchar', nullable: true })
   imageOriginal: string | null;
 
-  @ApiPropertyOptional({ description: 'Category ID for package' })
-  @Column({ type: 'uuid', nullable: true })
+  @ApiPropertyOptional({
+    type: () => [Category],
+    description: 'Categories the package belongs to (many-to-many)',
+  })
+  @ManyToMany(() => Category, (category) => category.packages)
+  @JoinTable({
+    name: 'package_categories',
+    joinColumn: { name: 'packageId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'categoryId', referencedColumnName: 'id' },
+  })
+  categories: Category[];
+
+  @ApiPropertyOptional({ type: () => Category, description: 'Legacy first category (backward compat, computed from categories[0])' })
+  category: Category | null;
+
+  @ApiPropertyOptional({ description: 'Legacy first-category ID (backward compat)' })
   categoryId: string | null;
 
-  @ApiPropertyOptional({ type: () => Category, description: 'Linked category entity' })
-  @ManyToOne(() => Category, (category) => category.packages, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'categoryId' })
-  category: Category | null;
+  @AfterLoad()
+  protected assignLegacyCategoryFields(): void {
+    this.category = this.categories?.[0] ?? null;
+    this.categoryId = this.categories?.[0]?.id ?? null;
+  }
 
   @ApiPropertyOptional({ type: () => [Service], description: 'Services included in package' })
   @ManyToMany(() => Service, (service) => service.packages, { eager: true })

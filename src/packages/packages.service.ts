@@ -25,6 +25,8 @@ export interface AdminPackageListItem {
   imageOriginal: string | null;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
+  categoryIds: string[];
+  categories: Array<{ id: string; name: string; slug: string }>;
   services: { id: string; name: string }[];
   createdAt: Date;
   ordersCount: number;
@@ -37,6 +39,33 @@ export interface AdminPackageOrderRow {
   createdAt: Date;
   amount: number;
   status: string;
+}
+
+function resolvePackageCategoryIds(dto: {
+  categoryIds?: string[] | null;
+  categoryId?: string | null;
+}): string[] | null {
+  if (dto.categoryIds !== undefined) {
+    return dto.categoryIds ?? [];
+  }
+  if (dto.categoryId !== undefined) {
+    return dto.categoryId ? [dto.categoryId] : [];
+  }
+  return null;
+}
+
+function categoriesRefs(ids: string[]): Category[] {
+  return ids.map((id) => ({ id } as Category));
+}
+
+function attachLegacyPackageCategory<T extends { categories?: Category[] | null }>(
+  entity: T,
+): T & { category: Category | null; categoryId: string | null } {
+  const first = entity.categories?.[0] ?? null;
+  return Object.assign(entity, {
+    category: first,
+    categoryId: first?.id ?? null,
+  });
 }
 
 @Injectable()
@@ -56,50 +85,69 @@ export class PackagesService {
   ) { }
 
   async create(createPackageDto: CreatePackageDto): Promise<ServicePackage> {
-    if (createPackageDto.categoryId) {
-      await this.ensureCategoryExists(createPackageDto.categoryId);
-    }
+    const categoryIds = resolvePackageCategoryIds(createPackageDto) ?? [];
+    await this.ensureCategoriesExist(categoryIds);
 
     const services = await this.resolvePackageServices(createPackageDto.serviceIds);
 
+    const { categoryId: _legacyId, categoryIds: _newIds, ...rest } = createPackageDto;
     const servicePackage = this.packageRepository.create({
-      ...createPackageDto,
+      ...rest,
       tags: createPackageDto.tags ?? [],
       image: createPackageDto.image ?? null,
       services,
+      categories: categoriesRefs(categoryIds),
     });
 
-    return this.packageRepository.save(servicePackage);
+    const saved = await this.packageRepository.save(servicePackage);
+    return this.loadWithCategories(saved.id);
   }
 
   async findAll(): Promise<ServicePackage[]> {
     const packages = await this.packageRepository.find({
       where: activePackageWhere(),
-      relations: ['category'],
+      relations: ['categories'],
       order: { createdAt: 'DESC' },
     });
-    return packages.map((pkg) => this.withActivePackageServices(pkg));
+    return packages.map((pkg) => attachLegacyPackageCategory(this.withActivePackageServices(pkg)));
   }
 
   async findOne(id: string): Promise<ServicePackage> {
     const servicePackage = await this.packageRepository.findOne({
       where: { id, ...activePackageWhere() },
-      relations: ['category'],
+      relations: ['categories'],
     });
 
     if (!servicePackage) {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
-    return this.withActivePackageServices(servicePackage);
+    return attachLegacyPackageCategory(this.withActivePackageServices(servicePackage));
+  }
+
+  private async loadWithCategories(id: string): Promise<ServicePackage> {
+    const servicePackage = await this.packageRepository.findOne({
+      where: { id },
+      relations: ['categories'],
+    });
+    if (!servicePackage) {
+      throw new NotFoundException(`Пакет с ID ${id} не найден`);
+    }
+    return attachLegacyPackageCategory(servicePackage);
   }
 
   async update(id: string, updatePackageDto: UpdatePackageDto): Promise<ServicePackage> {
     const servicePackage = await this.findOne(id);
-    const { serviceIds, ...packageFields } = updatePackageDto;
+    const {
+      serviceIds,
+      categoryId: _legacyId,
+      categoryIds: _newIds,
+      ...packageFields
+    } = updatePackageDto;
 
-    if (packageFields.categoryId) {
-      await this.ensureCategoryExists(packageFields.categoryId);
+    const categoryIds = resolvePackageCategoryIds(updatePackageDto);
+    if (categoryIds !== null) {
+      await this.ensureCategoriesExist(categoryIds);
     }
 
     const services = serviceIds !== undefined
@@ -111,17 +159,16 @@ export class PackagesService {
       services,
     });
 
-    if ('categoryId' in packageFields) {
-      servicePackage.category = packageFields.categoryId
-        ? ({ id: packageFields.categoryId } as Category)
-        : null;
+    if (categoryIds !== null) {
+      servicePackage.categories = categoriesRefs(categoryIds);
     }
 
     if (updatePackageDto.tags === undefined && !servicePackage.tags) {
       servicePackage.tags = [];
     }
 
-    return this.packageRepository.save(servicePackage);
+    await this.packageRepository.save(servicePackage);
+    return this.loadWithCategories(id);
   }
 
   async remove(id: string): Promise<void> {
@@ -160,7 +207,7 @@ export class PackagesService {
     const qb = applyActivePackageFilter(
       this.packageRepository
         .createQueryBuilder('p')
-        .leftJoinAndSelect('p.category', 'c')
+        .leftJoinAndSelect('p.categories', 'c')
         .leftJoinAndSelect('p.services', 's'),
       'p',
     );
@@ -177,7 +224,10 @@ export class PackagesService {
       );
     }
 
-    const total = await qb.getCount();
+    const totalRaw = await qb.clone()
+      .select('COUNT(DISTINCT p.id)', 'count')
+      .getRawOne<{ count: string }>();
+    const total = Number(totalRaw?.count ?? 0);
 
     const packages = await qb
       .orderBy('p.createdAt', 'DESC')
@@ -204,7 +254,7 @@ export class PackagesService {
   }> {
     const servicePackage = await this.packageRepository.findOne({
       where: { id, ...activePackageWhere() },
-      relations: ['category', 'services', 'services.category'],
+      relations: ['categories', 'services', 'services.categories'],
     });
 
     if (!servicePackage) {
@@ -255,7 +305,7 @@ export class PackagesService {
     );
 
     return {
-      package: servicePackage,
+      package: attachLegacyPackageCategory(servicePackage),
       ordersCount,
       totalItemsAmount,
       orders,
@@ -277,6 +327,7 @@ export class PackagesService {
   }
 
   private mapPackageListItem(pkg: ServicePackage, ordersCount: number): AdminPackageListItem {
+    const first = pkg.categories?.[0] ?? null;
     return {
       id: pkg.id,
       name: pkg.name,
@@ -287,10 +338,12 @@ export class PackagesService {
       giftEligible: pkg.giftEligible,
       image: pkg.image,
       imageOriginal: pkg.imageOriginal,
-      categoryId: pkg.categoryId,
-      category: pkg.category
-        ? { id: pkg.category.id, name: pkg.category.name, slug: pkg.category.slug }
+      categoryId: first?.id ?? null,
+      category: first
+        ? { id: first.id, name: first.name, slug: first.slug }
         : null,
+      categoryIds: (pkg.categories ?? []).map((c) => c.id),
+      categories: (pkg.categories ?? []).map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
       services: filterActiveServices(pkg.services).map((service) => ({
         id: service.id,
         name: service.name,
@@ -300,10 +353,13 @@ export class PackagesService {
     };
   }
 
-  private async ensureCategoryExists(categoryId: string): Promise<void> {
-    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
-    if (!category) {
-      throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
+  private async ensureCategoriesExist(categoryIds: string[]): Promise<void> {
+    if (!categoryIds.length) return;
+    const found = await this.categoryRepository.find({ where: { id: In(categoryIds) } });
+    const foundIds = new Set(found.map((c) => c.id));
+    const missing = categoryIds.filter((id) => !foundIds.has(id));
+    if (missing.length > 0) {
+      throw new NotFoundException(`Категория с ID ${missing[0]} не найдена`);
     }
   }
 

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, ManyToMany, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { Service } from '../../services/entities/service.entity';
 import { FAQ } from '../../services/entities/faq.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
@@ -38,7 +38,7 @@ export class Category {
   @OneToMany(() => Service, (service) => service.category)
   services: Service[];
 
-  @OneToMany(() => ServicePackage, (servicePackage) => servicePackage.category)
+  @ManyToMany(() => ServicePackage, (servicePackage) => servicePackage.categories)
   packages: ServicePackage[];
 
   @OneToMany(() => FAQ, (faq) => faq.category)
