@@ -789,6 +789,48 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result.map((item) => item.serviceId)).toEqual(['office']);
   });
 
+  it('fills the limit after collapsing alternative hiring formats', () => {
+    const candidates = [
+      service('office', 'Офис'),
+      service('office-pro', 'Офис PRO'),
+      service('service-1', 'Услуга 1'),
+      service('service-2', 'Услуга 2'),
+      service('service-3', 'Услуга 3'),
+      service('service-4', 'Услуга 4'),
+    ];
+    const ranked = candidates.map((candidate, index) => ({
+      serviceId: candidate.id,
+      serviceName: candidate.name,
+      priority: RecommendationPriority.Medium,
+      rationale: 'llm',
+      diagnosticSignals: ['ai_generated'],
+      score: 100 - index,
+    }));
+
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          desiredResult: { description: 'Усилить продажи' },
+        },
+        persist: false,
+      },
+      candidates,
+      ranked,
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual([
+      'office',
+      'service-1',
+      'service-2',
+      'service-3',
+      'service-4',
+    ]);
+  });
+
   it('filters weak unselected fallback matches', () => {
     const weakFallbackRanker = new QuestionnaireRelevanceRankerService({
       ...scoringService,

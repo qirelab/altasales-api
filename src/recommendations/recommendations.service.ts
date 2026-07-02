@@ -7,7 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, IsNull, Not, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
@@ -1099,16 +1099,12 @@ export class RecommendationsService implements OnModuleInit {
     recommendations.forEach((recommendation) => {
       const targetId = this.getRecommendationTargetId(recommendation);
       if (!targetId) return;
-      const isReplaceableRecommendation =
-        recommendation.status === RecommendationStatus.Recommended &&
-        recommendation.orderId == null;
-
       coverage.push({
         targetId,
         coveredServiceIds: new Set(
           this.getRecommendationCoveredServiceIds(recommendation),
         ),
-        blocksOverlaps: !isReplaceableRecommendation,
+        blocksOverlaps: !this.isReplaceableRecommendation(recommendation),
       });
     });
 
@@ -1271,15 +1267,15 @@ export class RecommendationsService implements OnModuleInit {
         .map((item) => this.getGeneratedRecommendationTargetId(item))
         .filter((targetId): targetId is string => Boolean(targetId)),
     );
-    const generatedRecommendations = await this.recommendationRepository.find({
+    const recommendations = await this.recommendationRepository.find({
       where: {
         userId,
         status: RecommendationStatus.Recommended,
-        generatedAt: Not(IsNull()),
       },
     });
-    const staleIds = generatedRecommendations
+    const staleIds = recommendations
       .filter((recommendation) => {
+        if (!this.isReplaceableRecommendation(recommendation)) return false;
         const targetId = this.getRecommendationTargetId(recommendation);
         return !targetId || !currentTargetIds.has(targetId);
       })
@@ -1288,6 +1284,15 @@ export class RecommendationsService implements OnModuleInit {
     if (staleIds.length === 0) return;
 
     await this.recommendationRepository.delete(staleIds);
+  }
+
+  private isReplaceableRecommendation(
+    recommendation: Pick<Recommendation, 'status' | 'orderId'>,
+  ): boolean {
+    return (
+      recommendation.status === RecommendationStatus.Recommended &&
+      recommendation.orderId == null
+    );
   }
 
   private getGeneratedRecommendationTargetId(

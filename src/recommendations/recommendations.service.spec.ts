@@ -1084,6 +1084,45 @@ describe('RecommendationsService', () => {
     ]);
   });
 
+  it('removes a replaced manual recommendation when persisting its generated package', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const manualRecommendation = {
+      id: 'manual-service-recommendation-id',
+      serviceId: 'service-id',
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      generatedAt: null,
+      orderId: null,
+    };
+    recommendationRepository.find
+      .mockResolvedValueOnce([manualRecommendation])
+      .mockResolvedValueOnce([manualRecommendation]);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'manual-service-recommendation-id',
+    ]);
+  });
+
   it('keeps recommendations linked to an order from being replaced by overlapping packages', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
@@ -1116,6 +1155,43 @@ describe('RecommendationsService', () => {
     });
 
     expect(result).toEqual([]);
+  });
+
+  it('does not prune a stale generated recommendation linked to an order', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const orderedRecommendation = {
+      id: 'ordered-generated-recommendation-id',
+      serviceId: 'service-id',
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      orderId: 'order-id',
+    };
+    recommendationRepository.find
+      .mockResolvedValueOnce([orderedRecommendation])
+      .mockResolvedValueOnce([orderedRecommendation]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(result).toEqual([]);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
 
   it.each([
