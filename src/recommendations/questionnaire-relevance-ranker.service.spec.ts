@@ -614,7 +614,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'telephony',
       'messenger',
       'dashboard',
-      'sales-script',
     ]);
   });
 
@@ -700,6 +699,49 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     expect(result.map((item) => item.serviceId)).toEqual(['ai-calls']);
     expect(result.map((item) => item.serviceId)).not.toContain('quality');
+  });
+
+  it('keeps a strong legacy recommendation when its replacement is below the score threshold', () => {
+    const candidates = [
+      service('office', 'Офис'),
+      service('office-pro', 'Офис PRO'),
+    ];
+
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          components: components(),
+          componentsToAdd: components({ salesManager: true }),
+        },
+        persist: false,
+      },
+      candidates,
+      [
+        {
+          serviceId: 'office',
+          serviceName: 'Офис',
+          priority: RecommendationPriority.Low,
+          rationale: 'weak replacement',
+          diagnosticSignals: [],
+          score: -100,
+        },
+        {
+          serviceId: 'office-pro',
+          serviceName: 'Офис PRO',
+          priority: RecommendationPriority.Medium,
+          rationale: 'strong alternative',
+          diagnosticSignals: [],
+          score: 30,
+        },
+      ],
+      '',
+      5,
+    );
+
+    expect(result.map((item) => item.serviceId)).toEqual(['office-pro']);
+    expect(result[0].score).toBeGreaterThan(20);
   });
 
   it.each([

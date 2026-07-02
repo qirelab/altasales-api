@@ -163,6 +163,7 @@ const MEDIUM_RANKER_SCORE = 12;
 const EXPLICIT_COMPONENT_POINTS = 60;
 const AI_ANALYSIS_COMPONENT_POINTS = 80;
 const MIN_UNSELECTED_FALLBACK_SCORE = 25;
+export const MIN_RECOMMENDATION_RANKING_SCORE = 20;
 
 const COMPONENT_LABELS: Record<SelectedComponent, string[]> = {
   crm: ['CRM'],
@@ -573,14 +574,14 @@ export class QuestionnaireRelevanceRankerService {
       );
 
       if (defaultItems.length >= maxItems) {
-        return defaultItems;
+        return this.finalizeRankedCandidates(defaultItems, new Set(), maxItems);
       }
 
       if (
         normalizedProfile.selectedComponents.length === 0 &&
         ranked.length === 0
       ) {
-        return defaultItems;
+        return this.finalizeRankedCandidates(defaultItems, new Set(), maxItems);
       }
     }
 
@@ -655,12 +656,25 @@ export class QuestionnaireRelevanceRankerService {
       });
     }
 
+    return this.finalizeRankedCandidates(
+      rankedCandidates,
+      idealTargetIds,
+      maxItems,
+    );
+  }
+
+  private finalizeRankedCandidates(
+    candidates: GeneratedRecommendationItem[],
+    idealTargetIds: Set<string>,
+    maxItems: number,
+  ): GeneratedRecommendationItem[] {
+    const relevantCandidates = candidates
+      .filter(
+        (item) => Number(item.score || 0) >= MIN_RECOMMENDATION_RANKING_SCORE,
+      )
+      .sort((a, b) => this.compareRankedCandidates(a, b, idealTargetIds));
     const compactedCandidates = this.collapseSupersededAnalysisRecommendations(
-      this.collapseAlternativeHiringFormats(
-        rankedCandidates.sort((a, b) =>
-          this.compareRankedCandidates(a, b, idealTargetIds),
-        ),
-      ),
+      this.collapseAlternativeHiringFormats(relevantCandidates),
     );
 
     return this.applyDiversity(compactedCandidates, maxItems);

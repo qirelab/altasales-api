@@ -31,7 +31,10 @@ import {
   type RecommendationGenerationJobSummary,
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
-import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
+import {
+  MIN_RECOMMENDATION_RANKING_SCORE,
+  QuestionnaireRelevanceRankerService,
+} from './questionnaire-relevance-ranker.service';
 import { RecommendationSource } from './entities/recommendation-source.enum';
 import {
   RecommendationScoringService,
@@ -45,7 +48,6 @@ import {
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
-const MIN_RECOMMENDATION_RANKING_SCORE = 20;
 const MIN_FALLBACK_RECOMMENDATION_SCORE = 25;
 const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
