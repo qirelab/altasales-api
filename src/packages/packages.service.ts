@@ -254,7 +254,7 @@ export class PackagesService {
   }> {
     const servicePackage = await this.packageRepository.findOne({
       where: { id, ...activePackageWhere() },
-      relations: ['categories', 'services', 'services.categories'],
+      relations: ['categories', 'services', 'services.category'],
     });
 
     if (!servicePackage) {

@@ -55,7 +55,8 @@ export class CreatePackageDto {
 
   @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',
-    description: 'Legacy single-category field. Accepted for backward compatibility only — new clients should send categoryIds instead.',
+    description: 'Legacy single-category field. Accepted for backward compatibility only — '
+      + 'new clients should send categoryIds instead.',
     deprecated: true,
   })
   @IsOptional()

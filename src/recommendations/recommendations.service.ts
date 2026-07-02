@@ -760,7 +760,7 @@ export class RecommendationsService implements OnModuleInit {
           description: [
             servicePackage.description,
             servicePackage.packageType,
-            servicePackage.category?.name,
+            ...(servicePackage.categories ?? []).map((c) => c.name),
             ...activeServices.flatMap((service) => [
               service.name,
               service.description,
@@ -905,7 +905,7 @@ export class RecommendationsService implements OnModuleInit {
         servicePackage.name,
         servicePackage.description,
         servicePackage.packageType,
-        servicePackage.category?.name,
+        ...(servicePackage.categories ?? []).map((c) => c.name),
         ...(servicePackage.tags ?? []),
         ...activeServices.flatMap((service) => [
           service.name,

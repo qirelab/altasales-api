@@ -76,7 +76,10 @@ export class ServicePackage {
   })
   categories: Category[];
 
-  @ApiPropertyOptional({ type: () => Category, description: 'Legacy first category (backward compat, computed from categories[0])' })
+  @ApiPropertyOptional({
+    type: () => Category,
+    description: 'Legacy first category (backward compat, computed from categories[0])',
+  })
   category: Category | null;
 
   @ApiPropertyOptional({ description: 'Legacy first-category ID (backward compat)' })
