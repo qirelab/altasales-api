@@ -655,16 +655,15 @@ export class QuestionnaireRelevanceRankerService {
       });
     }
 
-    const diverse = this.applyDiversity(
-      rankedCandidates.sort((a, b) =>
-        this.compareRankedCandidates(a, b, idealTargetIds),
+    const compactedCandidates = this.collapseSupersededAnalysisRecommendations(
+      this.collapseAlternativeHiringFormats(
+        rankedCandidates.sort((a, b) =>
+          this.compareRankedCandidates(a, b, idealTargetIds),
+        ),
       ),
-      maxItems,
     );
 
-    return this.collapseSupersededAnalysisRecommendations(
-      this.collapseAlternativeHiringFormats(diverse),
-    );
+    return this.applyDiversity(compactedCandidates, maxItems);
   }
 
   private collapseAlternativeHiringFormats(
