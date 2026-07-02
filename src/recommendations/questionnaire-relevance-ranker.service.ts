@@ -3,7 +3,7 @@ import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import {
   RECOMMENDATION_CATALOG,
-  RECOMMENDATION_CATALOG_ENTRIES,
+  REQUIRED_RECOMMENDATION_CATALOG_ENTRIES,
   RecommendationCatalogKey,
 } from './recommendation-catalog.registry';
 import {
@@ -910,12 +910,12 @@ export class QuestionnaireRelevanceRankerService {
     const candidateById = new Map(
       services.map((service) => [this.getCandidateTargetId(service), service]),
     );
-    const usesConfiguredCatalog = RECOMMENDATION_CATALOG_ENTRIES.some((entry) =>
-      candidateById.has(entry.id),
+    const usesConfiguredCatalog = REQUIRED_RECOMMENDATION_CATALOG_ENTRIES.some(
+      (entry) => candidateById.has(entry.id),
     );
     if (!usesConfiguredCatalog) return false;
 
-    for (const entry of RECOMMENDATION_CATALOG_ENTRIES) {
+    for (const entry of REQUIRED_RECOMMENDATION_CATALOG_ENTRIES) {
       const candidate = candidateById.get(entry.id);
       if (!candidate) {
         throw new InternalServerErrorException(
