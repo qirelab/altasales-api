@@ -5,6 +5,7 @@ export type RecommendationCatalogEntry = {
   kind: RecommendationCatalogItemKind;
   displayName: string;
   legacyAliases: string[];
+  requiredForValidation?: boolean;
 };
 
 export const RECOMMENDATION_CATALOG = {
@@ -107,12 +108,14 @@ export const RECOMMENDATION_CATALOG = {
   communicationQualityControl: {
     id: '35e58eac-be7c-49b5-a483-d1a3e526e9b7',
     kind: 'service',
+    requiredForValidation: false,
     displayName: 'На Контроле + Рубичат',
     legacyAliases: ['на контроле + рубичат', 'на контроле'],
   },
   callAnalysis: {
     id: '3d82eea7-ce89-42d7-8a7f-1c825b648c84',
     kind: 'service',
+    requiredForValidation: false,
     displayName: 'Отчёт с оценкой прослушанных разговоров с клиентами',
     legacyAliases: ['отчет с оценкой прослушанных разговоров с клиентами'],
   },
@@ -153,3 +156,8 @@ export type RecommendationCatalogKey = keyof typeof RECOMMENDATION_CATALOG;
 export const RECOMMENDATION_CATALOG_ENTRIES = Object.values(
   RECOMMENDATION_CATALOG,
 ) as RecommendationCatalogEntry[];
+
+export const REQUIRED_RECOMMENDATION_CATALOG_ENTRIES =
+  RECOMMENDATION_CATALOG_ENTRIES.filter(
+    (entry) => entry.requiredForValidation !== false,
+  );
