@@ -1267,13 +1267,14 @@ export class RecommendationsService implements OnModuleInit {
         .map((item) => this.getGeneratedRecommendationTargetId(item))
         .filter((targetId): targetId is string => Boolean(targetId)),
     );
-    const recommendations = await this.recommendationRepository.find({
+    const generatedRecommendations = await this.recommendationRepository.find({
       where: {
         userId,
         status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
       },
     });
-    const staleIds = recommendations
+    const staleGeneratedIds = generatedRecommendations
       .filter((recommendation) => {
         if (!this.isReplaceableRecommendation(recommendation)) return false;
         const targetId = this.getRecommendationTargetId(recommendation);
@@ -1281,9 +1282,41 @@ export class RecommendationsService implements OnModuleInit {
       })
       .map((recommendation) => recommendation.id);
 
-    if (staleIds.length === 0) return;
+    const currentCoveredServiceIds = new Set(
+      currentItems.flatMap((item) =>
+        this.getGeneratedRecommendationCoveredServiceIds(item),
+      ),
+    );
+    const manualRecommendations = await this.recommendationRepository.find({
+      where: {
+        userId,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+      },
+      relations: [
+        'service',
+        'service.category',
+        'package',
+        'package.category',
+        'package.services',
+        'package.services.category',
+      ],
+    });
+    const replacedManualIds = manualRecommendations
+      .filter((recommendation) => {
+        if (!this.isReplaceableRecommendation(recommendation)) return false;
+        const targetId = this.getRecommendationTargetId(recommendation);
+        if (targetId && currentTargetIds.has(targetId)) return false;
+        return this.getRecommendationCoveredServiceIds(recommendation).some(
+          (serviceId) => currentCoveredServiceIds.has(serviceId),
+        );
+      })
+      .map((recommendation) => recommendation.id);
+    const idsToDelete = [...staleGeneratedIds, ...replacedManualIds];
 
-    await this.recommendationRepository.delete(staleIds);
+    if (idsToDelete.length === 0) return;
+
+    await this.recommendationRepository.delete(idsToDelete);
   }
 
   private isReplaceableRecommendation(
