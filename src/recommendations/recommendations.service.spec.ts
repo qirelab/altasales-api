@@ -1084,10 +1084,10 @@ describe('RecommendationsService', () => {
     ]);
   });
 
-  it('removes a replaced manual recommendation when persisting its generated package', async () => {
+  it('removes only overlapping manual recommendations when persisting a generated package', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
-    const manualRecommendation = {
+    const replacedManualRecommendation = {
       id: 'manual-service-recommendation-id',
       serviceId: 'service-id',
       packageId: null,
@@ -1096,9 +1096,23 @@ describe('RecommendationsService', () => {
       generatedAt: null,
       orderId: null,
     };
+    const unrelatedManualRecommendation = {
+      id: 'unrelated-manual-recommendation-id',
+      serviceId: 'unrelated-service-id',
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      generatedAt: null,
+      orderId: null,
+    };
+    const manualRecommendations = [
+      replacedManualRecommendation,
+      unrelatedManualRecommendation,
+    ];
     recommendationRepository.find
-      .mockResolvedValueOnce([manualRecommendation])
-      .mockResolvedValueOnce([manualRecommendation]);
+      .mockResolvedValueOnce(manualRecommendations)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(manualRecommendations);
     recommendationRepository.findOne.mockResolvedValue(null);
     relevanceRanker.rankRecommendations.mockReturnValue([
       {
