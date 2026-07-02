@@ -256,12 +256,10 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect(
         `COALESCE(
           serviceCategory.name,
-          (SELECT c.name
+          (SELECT string_agg(c.name, ', ' ORDER BY c."sortOrder" ASC, c.name ASC)
            FROM package_categories pc
            JOIN category c ON c.id = pc."categoryId"
-           WHERE pc."packageId" = package.id
-           ORDER BY c."sortOrder" ASC, c.name ASC
-           LIMIT 1),
+           WHERE pc."packageId" = package.id),
           ''
         )`,
         'category',
@@ -392,12 +390,10 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect(
         `COALESCE(
           serviceCategory.name,
-          (SELECT c.name
+          (SELECT string_agg(c.name, ', ' ORDER BY c."sortOrder" ASC, c.name ASC)
            FROM package_categories pc
            JOIN category c ON c.id = pc."categoryId"
-           WHERE pc."packageId" = package.id
-           ORDER BY c."sortOrder" ASC, c.name ASC
-           LIMIT 1),
+           WHERE pc."packageId" = package.id),
           ''
         )`,
         'category',
