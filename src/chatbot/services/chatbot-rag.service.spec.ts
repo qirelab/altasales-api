@@ -31,25 +31,36 @@ function buildResultItem(overrides: Partial<{
 
 function buildService(overrides: {
   searchResults?: ReturnType<typeof buildResultItem>[];
+  searchError?: Error;
   llmContent?: string;
+  llmError?: Error;
+  configOverrides?: Record<string, number | string>;
 } = {}) {
   const knowledgeSearch = {
-    search: jest.fn().mockResolvedValue({
-      results: overrides.searchResults ?? [buildResultItem()],
-    }),
+    search: overrides.searchError
+      ? jest.fn().mockRejectedValue(overrides.searchError)
+      : jest.fn().mockResolvedValue({
+        results: overrides.searchResults ?? [buildResultItem()],
+      }),
   };
   const llmProxy = {
-    chat: jest.fn().mockResolvedValue({
-      providerId: 'mock',
-      modelId: 'mock',
-      content: overrides.llmContent ?? 'Готовый ответ от бота.',
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      dataClass: 'raw_pii',
-    }),
+    chat: overrides.llmError
+      ? jest.fn().mockRejectedValue(overrides.llmError)
+      : jest.fn().mockResolvedValue({
+        providerId: 'mock',
+        modelId: 'mock',
+        content: overrides.llmContent ?? 'Готовый ответ от бота.',
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        dataClass: 'raw_pii',
+      }),
   };
+  const configService = overrides.configOverrides
+    ? { get: jest.fn((key: string) => overrides.configOverrides?.[key]) }
+    : undefined;
   const service = new ChatbotRagService(
     knowledgeSearch as never,
     llmProxy as never,
+    configService as never,
   );
   return { service, knowledgeSearch, llmProxy };
 }
@@ -82,6 +93,7 @@ describe('ChatbotRagService', () => {
 
     expect(result.hasContext).toBe(true);
     expect(result.answer).toBe('Готовый ответ от бота.');
+    expect(result.refusalReason).toBeUndefined();
     expect(result.sources).toHaveLength(2);
     expect(result.sources[0]).toEqual({
       documentId: 'doc-1',
@@ -91,18 +103,18 @@ describe('ChatbotRagService', () => {
     });
   });
 
-  it('refuses when knowledge search returns nothing without calling LLM', async () => {
+  it('refuses with no_results when knowledge search returns nothing without calling LLM', async () => {
     const { service, llmProxy } = buildService({ searchResults: [] });
 
     const result = await service.askQuestion({ question: 'Странный вопрос' });
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.hasContext).toBe(false);
-    expect(result.sources).toEqual([]);
+    expect(result.refusalReason).toBe('no_results');
     expect(result.answer).toContain('Я не нашёл информации');
   });
 
-  it('refuses when all results are below the relevance threshold without calling LLM', async () => {
+  it('refuses with below_threshold when all results are below the relevance threshold', async () => {
     const { service, llmProxy } = buildService({
       searchResults: [
         buildResultItem({ score: 0.2 }),
@@ -113,26 +125,48 @@ describe('ChatbotRagService', () => {
     const result = await service.askQuestion({ question: 'Что-то нерелевантное' });
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
-    expect(result.hasContext).toBe(false);
+    expect(result.refusalReason).toBe('below_threshold');
   });
 
-  it('refuses on empty question and skips retrieval', async () => {
+  it('refuses with empty_question on empty question and skips retrieval', async () => {
     const { service, knowledgeSearch, llmProxy } = buildService();
 
     const result = await service.askQuestion({ question: '   ' });
 
     expect(knowledgeSearch.search).not.toHaveBeenCalled();
     expect(llmProxy.chat).not.toHaveBeenCalled();
-    expect(result.hasContext).toBe(false);
-    expect(result.answer).toContain('Я не нашёл информации');
+    expect(result.refusalReason).toBe('empty_question');
   });
 
-  it('falls back to the refusal message when the LLM returns an empty answer', async () => {
+  it('refuses with empty_llm_response when the LLM returns whitespace', async () => {
     const { service } = buildService({ llmContent: '   ' });
 
     const result = await service.askQuestion({ question: 'Что такое CRM?' });
 
+    expect(result.refusalReason).toBe('empty_llm_response');
     expect(result.hasContext).toBe(false);
+  });
+
+  it('refuses with retrieval_failed when knowledge search throws', async () => {
+    const { service, llmProxy } = buildService({
+      searchError: new Error('Qdrant down'),
+    });
+
+    const result = await service.askQuestion({ question: 'Что такое CRM?' });
+
+    expect(llmProxy.chat).not.toHaveBeenCalled();
+    expect(result.refusalReason).toBe('retrieval_failed');
+    expect(result.answer).toContain('Я не нашёл информации');
+  });
+
+  it('refuses with generation_failed when LLM proxy throws', async () => {
+    const { service } = buildService({
+      llmError: new Error('LLM timeout'),
+    });
+
+    const result = await service.askQuestion({ question: 'Что такое CRM?' });
+
+    expect(result.refusalReason).toBe('generation_failed');
     expect(result.answer).toContain('Я не нашёл информации');
   });
 
@@ -148,5 +182,47 @@ describe('ChatbotRagService', () => {
     const result = await service.askQuestion({ question: 'CRM?' });
 
     expect(result.sources.map((source) => source.chunkIndex)).toEqual([0, 2]);
+  });
+
+  it('trims oversized context: keeps highest-score chunks under the char budget', async () => {
+    const bigText = 'x'.repeat(4000);
+    const { service, llmProxy } = buildService({
+      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 5000 },
+      searchResults: [
+        buildResultItem({ chunkId: 'top', score: 0.95, chunkIndex: 0, text: bigText }),
+        buildResultItem({ chunkId: 'mid', score: 0.85, chunkIndex: 1, text: bigText }),
+        buildResultItem({ chunkId: 'low', score: 0.75, chunkIndex: 2, text: bigText }),
+      ],
+    });
+
+    const result = await service.askQuestion({ question: 'Ok' });
+
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    expect(result.sources).toHaveLength(1);
+    expect(result.sources[0].chunkIndex).toBe(0);
+    expect(chatArg.messages[1].content.length).toBeLessThan(10_000);
+  });
+
+  it('respects env overrides for retrieval limit and threshold', async () => {
+    const { service, knowledgeSearch, llmProxy } = buildService({
+      configOverrides: {
+        CHATBOT_RAG_RETRIEVAL_LIMIT: 3,
+        CHATBOT_RAG_MIN_SCORE: 0.5,
+      },
+      searchResults: [
+        buildResultItem({ chunkId: 'a', score: 0.6 }),
+        buildResultItem({ chunkId: 'b', score: 0.4 }),
+      ],
+    });
+
+    const result = await service.askQuestion({ question: 'Q' });
+
+    expect(knowledgeSearch.search).toHaveBeenCalledWith({
+      purpose: KnowledgeBasePurpose.QA_CHATBOT,
+      query: 'Q',
+      limit: 3,
+    });
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    expect(result.sources.map((s) => s.score)).toEqual([0.6]);
   });
 });
