@@ -1,5 +1,6 @@
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
+import { RecommendationSource } from './entities/recommendation-source.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { RECOMMENDATION_CATALOG } from './recommendation-catalog.registry';
 import { RecommendationsService } from './recommendations.service';
@@ -964,13 +965,15 @@ describe('RecommendationsService', () => {
     expect(result[0].coveredServiceIds).toEqual([]);
   });
 
-  it('keeps the same existing package but skips separate services already covered by it', async () => {
+  it('does not let replaceable existing package coverage affect new selection', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     recommendationRepository.find.mockResolvedValue([
       {
         serviceId: null,
         packageId: 'package-id',
+        status: RecommendationStatus.Recommended,
+        orderId: null,
         package: {
           services: [{ id: 'service-id', deletedAt: null }],
         },
@@ -1005,7 +1008,7 @@ describe('RecommendationsService', () => {
     });
 
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
-      'package-id',
+      'service-id',
     ]);
   });
 
@@ -1044,16 +1047,18 @@ describe('RecommendationsService', () => {
     ]);
   });
 
-  it('keeps protected existing recommendations from being replaced by overlapping packages', async () => {
+  it('allows a generated package to replace a manual recommended service without generatedAt', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     recommendationRepository.find.mockResolvedValue([
       {
-        id: 'planned-service-recommendation-id',
+        id: 'manual-service-recommendation-id',
         serviceId: 'service-id',
         packageId: null,
-        status: RecommendationStatus.Planned,
-        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+        generatedAt: null,
+        orderId: null,
       },
     ]);
     relevanceRanker.rankRecommendations.mockReturnValue([
@@ -1066,6 +1071,311 @@ describe('RecommendationsService', () => {
         diagnosticSignals: [],
         score: 30,
         coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'package-id',
+    ]);
+  });
+
+  it('removes only overlapping manual recommendations when persisting a generated package', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const replacedManualRecommendation = {
+      id: 'manual-service-recommendation-id',
+      serviceId: 'service-id',
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      generatedAt: null,
+      orderId: null,
+    };
+    const unrelatedManualRecommendation = {
+      id: 'unrelated-manual-recommendation-id',
+      serviceId: 'unrelated-service-id',
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      generatedAt: null,
+      orderId: null,
+    };
+    const manualRecommendations = [
+      replacedManualRecommendation,
+      unrelatedManualRecommendation,
+    ];
+    recommendationRepository.find
+      .mockResolvedValueOnce(manualRecommendations)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(manualRecommendations);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'manual-service-recommendation-id',
+    ]);
+  });
+
+  it('keeps a manual package when generation covers only part of its services', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const manualPackageRecommendation = {
+      id: 'manual-package-recommendation-id',
+      serviceId: null,
+      packageId: 'manual-package-id',
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      generatedAt: null,
+      orderId: null,
+      package: {
+        name: 'Manual package',
+        description: null,
+        packageType: 'custom',
+        category: null,
+        tags: [],
+        services: [
+          {
+            id: 'service-a',
+            name: 'Service A',
+            description: null,
+            category: null,
+            skills: [],
+            deletedAt: null,
+          },
+          {
+            id: 'service-b',
+            name: 'Service B',
+            description: null,
+            category: null,
+            skills: [],
+            deletedAt: null,
+          },
+        ],
+      },
+    };
+    recommendationRepository.find
+      .mockResolvedValueOnce([manualPackageRecommendation])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([manualPackageRecommendation]);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'service-a',
+        packageId: null,
+        serviceName: 'Service A',
+        priority: 'medium',
+        rationale: 'partial package match',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-a'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(result.map((item) => item.serviceId)).toEqual(['service-a']);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('keeps recommendations linked to an order from being replaced by overlapping packages', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'purchased-service-recommendation-id',
+        serviceId: 'service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        generatedAt: null,
+        orderId: 'order-id',
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it('does not prune a stale generated recommendation linked to an order', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const orderedRecommendation = {
+      id: 'ordered-generated-recommendation-id',
+      serviceId: 'service-id',
+      packageId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      orderId: 'order-id',
+    };
+    recommendationRepository.find
+      .mockResolvedValueOnce([orderedRecommendation])
+      .mockResolvedValueOnce([orderedRecommendation]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 30,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(result).toEqual([]);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    RecommendationStatus.Planned,
+    RecommendationStatus.InProgress,
+    RecommendationStatus.Completed,
+  ])(
+    'keeps %s recommendations from being replaced by overlapping packages',
+    async (status) => {
+      const { service, recommendationRepository, relevanceRanker } =
+        createService();
+      recommendationRepository.find.mockResolvedValue([
+        {
+          id: 'protected-service-recommendation-id',
+          serviceId: 'service-id',
+          packageId: null,
+          status,
+          generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ]);
+      relevanceRanker.rankRecommendations.mockReturnValue([
+        {
+          serviceId: null,
+          packageId: 'package-id',
+          serviceName: 'CRM package',
+          priority: 'medium',
+          rationale: 'package fit',
+          diagnosticSignals: [],
+          score: 30,
+          coveredServiceIds: ['service-id', 'service-b'],
+        },
+      ]);
+
+      const result = await service.generateForUser({
+        userId,
+        persist: false,
+      });
+
+      expect(result).toEqual([]);
+    },
+  );
+
+  it.each([
+    RecommendationStatus.Planned,
+    RecommendationStatus.InProgress,
+    RecommendationStatus.Completed,
+  ])(
+    'filters the exact %s recommendation target out of new generation',
+    async (status) => {
+      const { service, recommendationRepository, relevanceRanker } =
+        createService();
+      recommendationRepository.find.mockResolvedValue([
+        {
+          id: 'active-recommendation-id',
+          serviceId: 'service-id',
+          packageId: null,
+          status,
+          generatedAt: null,
+          orderId: null,
+        },
+      ]);
+      relevanceRanker.rankRecommendations.mockReturnValue([
+        {
+          serviceId: 'service-id',
+          packageId: null,
+          serviceName: 'Already active service',
+          priority: 'urgent',
+          rationale: 'fit',
+          diagnosticSignals: [],
+          score: 100,
+          coveredServiceIds: ['service-id'],
+        },
+      ]);
+
+      const result = await service.generateForUser({
+        userId,
+        persist: false,
+      });
+
+      expect(result).toEqual([]);
+    },
+  );
+
+  it('filters an exact recommendation target linked to an order out of new generation', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'ordered-recommendation-id',
+        serviceId: 'service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        generatedAt: null,
+        orderId: 'order-id',
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'service-id',
+        packageId: null,
+        serviceName: 'Purchased service',
+        priority: 'urgent',
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 100,
+        coveredServiceIds: ['service-id'],
       },
     ]);
 
