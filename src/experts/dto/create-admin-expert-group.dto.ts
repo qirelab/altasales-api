@@ -11,6 +11,7 @@ export class CreateAdminExpertGroupDto {
   @ApiProperty({ example: 'Стратегия, реклама и аналитика продаж' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(500)
   description: string;
 
   @ApiPropertyOptional({ example: 'MRK' })
