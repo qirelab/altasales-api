@@ -1,4 +1,5 @@
 import { AgentId } from '../../ai/enums/agent-id.enum';
+import { DataClass } from '../../ai/enums/data-class.enum';
 import { LlmTask } from '../../ai/enums/llm-task.enum';
 import { KnowledgeBasePurpose } from '../../knowledge/enums/knowledge-base-purpose.enum';
 import { ChatbotRagService } from './chatbot-rag.service';
@@ -51,7 +52,7 @@ function buildService(overrides: {
         modelId: 'mock',
         content: overrides.llmContent ?? 'Готовый ответ от бота.',
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-        dataClass: 'raw_pii',
+        dataClass: 'no_pii',
       }),
   };
   const configService = overrides.configOverrides
@@ -85,6 +86,7 @@ describe('ChatbotRagService', () => {
     const chatArg = llmProxy.chat.mock.calls[0][0];
     expect(chatArg.agentId).toBe(AgentId.Chatbot);
     expect(chatArg.task).toBe(LlmTask.Reason);
+    expect(chatArg.declaredDataClass).toBe(DataClass.NoPii);
     expect(chatArg.messages[0].role).toBe('system');
     expect(chatArg.messages[1].role).toBe('user');
     expect(chatArg.messages[1].content).toContain('Пакет CRM Silver стоит 100 000 ₽.');
@@ -103,7 +105,7 @@ describe('ChatbotRagService', () => {
     });
   });
 
-  it('refuses with no_results when knowledge search returns nothing without calling LLM', async () => {
+  it('refuses with no_results and shows the no-info message when knowledge search returns nothing', async () => {
     const { service, llmProxy } = buildService({ searchResults: [] });
 
     const result = await service.askQuestion({ question: 'Странный вопрос' });
@@ -112,6 +114,7 @@ describe('ChatbotRagService', () => {
     expect(result.hasContext).toBe(false);
     expect(result.refusalReason).toBe('no_results');
     expect(result.answer).toContain('Я не нашёл информации');
+    expect(result.answer).toContain('чат «Помощь»');
   });
 
   it('refuses with below_threshold when all results are below the relevance threshold', async () => {
@@ -126,6 +129,7 @@ describe('ChatbotRagService', () => {
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('below_threshold');
+    expect(result.answer).toContain('Я не нашёл информации');
   });
 
   it('refuses with empty_question on empty question and skips retrieval', async () => {
@@ -136,18 +140,20 @@ describe('ChatbotRagService', () => {
     expect(knowledgeSearch.search).not.toHaveBeenCalled();
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('empty_question');
+    expect(result.answer).toContain('Я не нашёл информации');
   });
 
-  it('refuses with empty_llm_response when the LLM returns whitespace', async () => {
+  it('refuses with empty_llm_response and shows the infra message when the LLM returns whitespace', async () => {
     const { service } = buildService({ llmContent: '   ' });
 
     const result = await service.askQuestion({ question: 'Что такое CRM?' });
 
     expect(result.refusalReason).toBe('empty_llm_response');
     expect(result.hasContext).toBe(false);
+    expect(result.answer).toContain('Сервис временно недоступен');
   });
 
-  it('refuses with retrieval_failed when knowledge search throws', async () => {
+  it('refuses with retrieval_failed and shows the infra message when knowledge search throws', async () => {
     const { service, llmProxy } = buildService({
       searchError: new Error('Qdrant down'),
     });
@@ -156,10 +162,11 @@ describe('ChatbotRagService', () => {
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('retrieval_failed');
-    expect(result.answer).toContain('Я не нашёл информации');
+    expect(result.answer).toContain('Сервис временно недоступен');
+    expect(result.answer).toContain('Попробуйте задать вопрос ещё раз');
   });
 
-  it('refuses with generation_failed when LLM proxy throws', async () => {
+  it('refuses with generation_failed and shows the infra message when LLM proxy throws', async () => {
     const { service } = buildService({
       llmError: new Error('LLM timeout'),
     });
@@ -167,7 +174,7 @@ describe('ChatbotRagService', () => {
     const result = await service.askQuestion({ question: 'Что такое CRM?' });
 
     expect(result.refusalReason).toBe('generation_failed');
-    expect(result.answer).toContain('Я не нашёл информации');
+    expect(result.answer).toContain('Сервис временно недоступен');
   });
 
   it('picks only strong results but keeps them in original score order', async () => {
@@ -203,6 +210,31 @@ describe('ChatbotRagService', () => {
     expect(chatArg.messages[1].content.length).toBeLessThan(10_000);
   });
 
+  it('refuses with context_too_large when the char budget cannot fit any chunk', async () => {
+    const { service, llmProxy } = buildService({
+      // System prompt alone is well over 200 chars; a 200-char budget can't fit a chunk.
+      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 200 },
+      searchResults: [
+        buildResultItem({ chunkId: 'top', score: 0.95, text: 'x'.repeat(1000) }),
+      ],
+    });
+
+    const result = await service.askQuestion({ question: 'Q' });
+
+    expect(llmProxy.chat).not.toHaveBeenCalled();
+    expect(result.refusalReason).toBe('context_too_large');
+    expect(result.answer).toContain('Сервис временно недоступен');
+  });
+
+  it('clips an oversize question to the max length before retrieval', async () => {
+    const { service, knowledgeSearch } = buildService();
+
+    await service.askQuestion({ question: 'a'.repeat(5_000) });
+
+    const call = knowledgeSearch.search.mock.calls[0][0];
+    expect(call.query.length).toBe(2_000);
+  });
+
   it('respects env overrides for retrieval limit and threshold', async () => {
     const { service, knowledgeSearch, llmProxy } = buildService({
       configOverrides: {
@@ -224,5 +256,32 @@ describe('ChatbotRagService', () => {
     });
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
     expect(result.sources.map((s) => s.score)).toEqual([0.6]);
+  });
+
+  it('accepts MIN_SCORE=0 as a valid threshold that disables filtering', async () => {
+    const { service, llmProxy } = buildService({
+      configOverrides: { CHATBOT_RAG_MIN_SCORE: 0 },
+      searchResults: [
+        buildResultItem({ chunkId: 'a', score: 0.02 }),
+        buildResultItem({ chunkId: 'b', score: 0.0 }),
+      ],
+    });
+
+    const result = await service.askQuestion({ question: 'Q' });
+
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    expect(result.hasContext).toBe(true);
+    expect(result.sources).toHaveLength(2);
+  });
+
+  it('forwards CHATBOT_RAG_CACHE_TTL_MS into the LLM policy', async () => {
+    const { service, llmProxy } = buildService({
+      configOverrides: { CHATBOT_RAG_CACHE_TTL_MS: 30_000 },
+    });
+
+    await service.askQuestion({ question: 'Q' });
+
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    expect(chatArg.policy?.cacheTtlMs).toBe(30_000);
   });
 });
