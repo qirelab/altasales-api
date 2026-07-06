@@ -44,6 +44,14 @@ export class CreateServiceDto {
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   imageOriginal?: string;
 
+  @ApiPropertyOptional({
+    example: 'https://ropsharing.dev/indicators/interim-report',
+    description: 'External tool URL revealed to the customer after purchase (AI services)',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
+  externalUrl?: string;
+
   @ApiProperty({ example: ['AmoCRM', 'Bitrix24', 'API'], description: 'Array of skills', type: [String], required: false })
   @IsOptional()
   @IsArray()

@@ -22,6 +22,8 @@ import { ServiceType } from './entities/service-type.enum';
 import { applyActivePackageFilter } from '../packages/package-visibility';
 import { activeServiceWhere, applyActiveServiceFilter } from './service-visibility';
 
+const SALES_DASHBOARD_CATEGORY_SLUG = 'ai-analiz-prodazh';
+
 @Injectable()
 export class ServicesService {
   constructor(
@@ -105,12 +107,19 @@ export class ServicesService {
     const packageQb = applyActivePackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.category', 'category'),
+        .leftJoinAndSelect('sp.categories', 'category'),
       'sp',
     );
 
     if (categoryIds.length > 0) {
-      packageQb.andWhere('sp."categoryId" IN (:...categoryIds)', { categoryIds });
+      packageQb.andWhere((sqb) => {
+        const sub = sqb.subQuery()
+          .select('pc."packageId"')
+          .from('package_categories', 'pc')
+          .where('pc."categoryId" IN (:...categoryIds)')
+          .getQuery();
+        return `sp.id IN ${sub}`;
+      }, { categoryIds });
     }
     if (query.name?.trim()) {
       packageQb.andWhere('sp.name ILIKE :name', {
@@ -151,6 +160,7 @@ export class ServicesService {
       categoryId: string | null;
       price: number;
       image: string | null;
+      imageOriginal: string | null;
       skills: string[];
       createdAt: Date;
       userId: string | null;
@@ -200,6 +210,7 @@ export class ServicesService {
       .addSelect('s."categoryId"', 'categoryId')
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
+      .addSelect('s."imageOriginal"', 'imageOriginal')
       .addSelect('s.skills', 'skills')
       .addSelect('s."giftEligible"', 'giftEligible')
       .addSelect('s."createdAt"', 'createdAt')
@@ -219,6 +230,7 @@ export class ServicesService {
         categoryId: string | null;
         price: string;
         image: string | null;
+        imageOriginal: string | null;
         skills: string[] | string;
         createdAt: Date;
         userId: string | null;
@@ -236,6 +248,7 @@ export class ServicesService {
         categoryId: row.categoryId,
         price: Number(row.price),
         image: row.image,
+        imageOriginal: row.imageOriginal,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
@@ -275,6 +288,19 @@ export class ServicesService {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
     return service;
+  }
+
+  async findForSalesDashboard(): Promise<Service[]> {
+    const category = await this.categoryRepository.findOne({
+      where: { slug: SALES_DASHBOARD_CATEGORY_SLUG },
+    });
+    if (!category) {
+      return [];
+    }
+    return this.serviceRepository.find({
+      where: { categoryId: category.id, ...activeServiceWhere() },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async update(id: string, updateServiceDto: UpdateServiceDto): Promise<Service> {
@@ -614,6 +640,7 @@ export class ServicesService {
       price: 0,
       image: expertProfile?.image ?? null,
       imageOriginal: expertProfile?.imageOriginal ?? null,
+      externalUrl: null,
       skills: expertProfile?.skills ?? [],
       contractorRatePerHour: null,
       contractorExperienceYears: expertProfile?.experienceYears ?? null,
