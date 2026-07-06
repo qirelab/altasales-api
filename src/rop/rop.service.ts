@@ -1,4 +1,6 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+
+import { RopDocumentRecord } from './rop.types';
 
 export interface RopProject {
   id: string;
@@ -7,7 +9,7 @@ export interface RopProject {
 
 export interface RopDocument {
   id: string;
-  project_id?: string;
+  project_id: string;
   name: string;
   link?: string;
   status?: string;
@@ -75,6 +77,47 @@ export class RopService {
       id: this.normalizeId(data.id),
       name: data.name,
     };
+  }
+
+  async listDocuments(projectId: string): Promise<RopDocumentRecord[]> {
+    this.ensureConfigured();
+
+    const response = await fetch(`${this.apiUrl}/projects/${projectId}/documents`, {
+      method: 'GET',
+      headers: this.jsonHeaders,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('list documents', response, error);
+      throw new InternalServerErrorException('Failed to list documents from ROP');
+    }
+
+    return response.json() as Promise<RopDocumentRecord[]>;
+  }
+
+  async getDocument(projectId: string, documentId: string): Promise<RopDocumentRecord> {
+    this.ensureConfigured();
+
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/documents/${documentId}`,
+      {
+        method: 'GET',
+        headers: this.jsonHeaders,
+      },
+    );
+
+    if (response.status === 404) {
+      throw new NotFoundException('Документ не найден');
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get document', response, error);
+      throw new InternalServerErrorException('Failed to get document from ROP');
+    }
+
+    return response.json() as Promise<RopDocumentRecord>;
   }
 
   async createDocument(
