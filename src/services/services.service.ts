@@ -107,12 +107,19 @@ export class ServicesService {
     const packageQb = applyActivePackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.category', 'category'),
+        .leftJoinAndSelect('sp.categories', 'category'),
       'sp',
     );
 
     if (categoryIds.length > 0) {
-      packageQb.andWhere('sp."categoryId" IN (:...categoryIds)', { categoryIds });
+      packageQb.andWhere((sqb) => {
+        const sub = sqb.subQuery()
+          .select('pc."packageId"')
+          .from('package_categories', 'pc')
+          .where('pc."categoryId" IN (:...categoryIds)')
+          .getQuery();
+        return `sp.id IN ${sub}`;
+      }, { categoryIds });
     }
     if (query.name?.trim()) {
       packageQb.andWhere('sp.name ILIKE :name', {
