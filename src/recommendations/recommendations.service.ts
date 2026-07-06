@@ -233,7 +233,7 @@ export class RecommendationsService implements OnModuleInit {
       .createQueryBuilder('recommendation')
       .leftJoinAndSelect('recommendation.service', 'service')
       .leftJoinAndSelect('recommendation.package', 'package')
-      .leftJoinAndSelect('package.category', 'packageCategory')
+      .leftJoinAndSelect('package.categories', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
@@ -250,7 +250,6 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
       .leftJoin('recommendation.package', 'package')
-      .leftJoin('package.category', 'packageCategory')
       .select('recommendation.id', 'id')
       .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('recommendation."packageId"', 'packageId')
@@ -258,7 +257,14 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
       .addSelect(
-        "COALESCE(serviceCategory.name, packageCategory.name, '')",
+        `COALESCE(
+          serviceCategory.name,
+          (SELECT string_agg(c.name, ', ' ORDER BY c."sortOrder" ASC, c.name ASC)
+           FROM package_categories pc
+           JOIN category c ON c.id = pc."categoryId"
+           WHERE pc."packageId" = package.id),
+          ''
+        )`,
         'category',
       )
       .addSelect('COALESCE(service.price, package.price)', 'price')
@@ -380,13 +386,19 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
       .leftJoin('recommendation.package', 'package')
-      .leftJoin('package.category', 'packageCategory')
       .select('recommendation.id', 'id')
       .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('recommendation."packageId"', 'packageId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(
-        "COALESCE(serviceCategory.name, packageCategory.name, '')",
+        `COALESCE(
+          serviceCategory.name,
+          (SELECT string_agg(c.name, ', ' ORDER BY c."sortOrder" ASC, c.name ASC)
+           FROM package_categories pc
+           JOIN category c ON c.id = pc."categoryId"
+           WHERE pc."packageId" = package.id),
+          ''
+        )`,
         'category',
       )
       .addSelect('COALESCE(service.price, package.price)', 'price')
@@ -700,7 +712,7 @@ export class RecommendationsService implements OnModuleInit {
         'service',
         'service.category',
         'package',
-        'package.category',
+        'package.categories',
         'order',
       ],
     });
@@ -724,7 +736,7 @@ export class RecommendationsService implements OnModuleInit {
         .getMany(),
       this.packageRepository.find({
         where: activePackageWhere(),
-        relations: ['category', 'services', 'services.category'],
+        relations: ['categories', 'services', 'services.category'],
         order: { createdAt: 'DESC' },
       }),
     ]);
@@ -747,7 +759,7 @@ export class RecommendationsService implements OnModuleInit {
           description: [
             servicePackage.description,
             servicePackage.packageType,
-            servicePackage.category?.name,
+            ...(servicePackage.categories ?? []).map((c) => c.name),
             ...activeServices.flatMap((service) => [
               service.name,
               service.description,
@@ -892,7 +904,7 @@ export class RecommendationsService implements OnModuleInit {
         servicePackage.name,
         servicePackage.description,
         servicePackage.packageType,
-        servicePackage.category?.name,
+        ...(servicePackage.categories ?? []).map((c) => c.name),
         ...(servicePackage.tags ?? []),
         ...activeServices.flatMap((service) => [
           service.name,
@@ -1091,7 +1103,7 @@ export class RecommendationsService implements OnModuleInit {
         'service',
         'service.category',
         'package',
-        'package.category',
+        'package.categories',
         'package.services',
         'package.services.category',
       ],
