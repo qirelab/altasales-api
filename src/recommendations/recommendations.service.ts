@@ -127,6 +127,7 @@ const LOGICAL_COVERAGE_RULES: LogicalCoverageRule[] = [
 export type PackageInnerServiceItem = {
   id: string;
   name: string;
+  description: string;
   type: ServiceType;
   price: number;
   giftEligible: boolean;
@@ -156,6 +157,7 @@ export type UserRecommendationListItem = {
   serviceId: string | null;
   packageId: string | null;
   name: string;
+  description: string;
   type: ServiceType | 'Пакет услуг';
   category: string;
   price: number;
@@ -255,6 +257,10 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."packageId"', 'packageId')
       .addSelect('recommendation."orderId"', 'orderId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
+      .addSelect(
+        "COALESCE(service.description, package.description, '')",
+        'description',
+      )
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
       .addSelect(
         `COALESCE(
@@ -314,6 +320,7 @@ export class RecommendationsService implements OnModuleInit {
         filterActiveServices(pkg.services).map((service) => ({
           id: service.id,
           name: service.name,
+          description: service.description ?? '',
           type: service.type,
           price: Number(service.price),
           giftEligible: service.giftEligible,
