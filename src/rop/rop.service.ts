@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 
 export interface RopProject {
   id: string;
@@ -23,63 +23,83 @@ export class RopService {
     this.apiUrl = process.env.ROP_API_URL || '';
     this.apiKey = process.env.ROP_API_KEY || '';
 
-    if (!this.apiUrl || !this.apiKey) {
-      this.logger.warn('ROP API credentials not configured. File storage will not work.');
+    if (!this.isConfigured()) {
+      this.logger.warn('ROP API credentials not configured. ROP integration is disabled.');
     }
   }
 
-  private get headers(): Record<string, string> {
+  isConfigured(): boolean {
+    return Boolean(this.apiUrl && this.apiKey);
+  }
+
+  private get jsonHeaders(): Record<string, string> {
     return {
       'X-API-Key': this.apiKey,
       'Content-Type': 'application/json',
     };
   }
 
-  private isConfigured(): boolean {
-    return Boolean(this.apiUrl && this.apiKey);
+  private normalizeId(value: string | number): string {
+    return String(value);
   }
 
-  async createProject(name: string): Promise<RopProject> {
+  private logRopFailure(action: string, response: Response, body: string): void {
+    const requestId = response.headers.get('X-Request-ID');
+    const suffix = requestId ? ` [X-Request-ID: ${requestId}]` : '';
+    this.logger.error(`ROP ${action} failed (${response.status}): ${body}${suffix}`);
+  }
+
+  private ensureConfigured(): void {
     if (!this.isConfigured()) {
       throw new InternalServerErrorException('ROP API not configured');
     }
+  }
+
+  async createProject(name: string): Promise<RopProject> {
+    this.ensureConfigured();
 
     const response = await fetch(`${this.apiUrl}/projects`, {
       method: 'POST',
-      headers: this.headers,
+      headers: this.jsonHeaders,
       body: JSON.stringify({ name }),
     });
 
     if (!response.ok) {
       const error = await response.text();
-      this.logger.error(`Failed to create ROP project: ${error}`);
+      this.logRopFailure('create project', response, error);
       throw new InternalServerErrorException('Failed to create project in ROP');
     }
 
-    return response.json();
+    const data = await response.json() as { id: string | number; name: string };
+    return {
+      id: this.normalizeId(data.id),
+      name: data.name,
+    };
   }
 
   async createDocument(
     projectId: string,
     name: string,
   ): Promise<RopDocument> {
-    if (!this.isConfigured()) {
-      throw new InternalServerErrorException('ROP API not configured');
-    }
+    this.ensureConfigured();
 
     const response = await fetch(`${this.apiUrl}/projects/${projectId}/documents`, {
       method: 'POST',
-      headers: this.headers,
+      headers: this.jsonHeaders,
       body: JSON.stringify({ name }),
     });
 
     if (!response.ok) {
       const error = await response.text();
-      this.logger.error(`Failed to create ROP document: ${error}`);
+      this.logRopFailure('create document', response, error);
       throw new InternalServerErrorException('Failed to create document in ROP');
     }
 
-    return response.json();
+    const data = await response.json() as { id: string | number } & RopDocument;
+    return {
+      ...data,
+      id: this.normalizeId(data.id),
+    };
   }
 
   async uploadFile(
@@ -87,9 +107,7 @@ export class RopService {
     documentId: string,
     file: Express.Multer.File,
   ): Promise<RopDocument> {
-    if (!this.isConfigured()) {
-      throw new InternalServerErrorException('ROP API not configured');
-    }
+    this.ensureConfigured();
 
     const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
     const formData = new FormData();
@@ -108,33 +126,35 @@ export class RopService {
 
     if (!response.ok) {
       const error = await response.text();
-      this.logger.error(`Failed to upload file to ROP: ${error}`);
+      this.logRopFailure('upload file', response, error);
       throw new InternalServerErrorException('Failed to upload file to ROP');
     }
 
-    return response.json();
+    const data = await response.json() as { id: string | number } & RopDocument;
+    return {
+      ...data,
+      id: this.normalizeId(data.id),
+    };
   }
 
   async getDownloadUrl(projectId: string, documentId: string): Promise<string> {
-    if (!this.isConfigured()) {
-      throw new InternalServerErrorException('ROP API not configured');
-    }
+    this.ensureConfigured();
 
     const response = await fetch(
       `${this.apiUrl}/projects/${projectId}/documents/${documentId}/download-url`,
       {
         method: 'GET',
-        headers: this.headers,
+        headers: this.jsonHeaders,
       },
     );
 
     if (!response.ok) {
       const error = await response.text();
-      this.logger.error(`Failed to get download URL from ROP: ${error}`);
+      this.logRopFailure('get download URL', response, error);
       throw new InternalServerErrorException('Failed to get download URL from ROP');
     }
 
-    const data = await response.json();
+    const data = await response.json() as { download_url: string };
     return data.download_url;
   }
 }
