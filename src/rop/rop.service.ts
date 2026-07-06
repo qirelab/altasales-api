@@ -1,7 +1,6 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 
-import { RopDocumentRecord } from './rop.types';
-
+import { RopDocumentRecord, RopTaskListFilters, RopTaskRecord } from './rop.types';
 export interface RopProject {
   id: string;
   name: string;
@@ -199,5 +198,57 @@ export class RopService {
 
     const data = await response.json() as { download_url: string };
     return data.download_url;
+  }
+
+  async listTasks(projectId: string, filters: RopTaskListFilters = {}): Promise<RopTaskRecord[]> {
+    this.ensureConfigured();
+
+    const params = new URLSearchParams();
+    if (filters.startDate) {
+      params.set('start_date', filters.startDate);
+    }
+    if (filters.endDate) {
+      params.set('end_date', filters.endDate);
+    }
+
+    const query = params.toString();
+    const url = `${this.apiUrl}/projects/${projectId}/tasks${query ? `?${query}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.jsonHeaders,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('list tasks', response, error);
+      throw new InternalServerErrorException('Failed to list tasks from ROP');
+    }
+
+    return response.json() as Promise<RopTaskRecord[]>;
+  }
+
+  async getTask(projectId: string, taskId: string): Promise<RopTaskRecord> {
+    this.ensureConfigured();
+
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/tasks/${taskId}`,
+      {
+        method: 'GET',
+        headers: this.jsonHeaders,
+      },
+    );
+
+    if (response.status === 404) {
+      throw new NotFoundException('Задача не найдена');
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get task', response, error);
+      throw new InternalServerErrorException('Failed to get task from ROP');
+    }
+
+    return response.json() as Promise<RopTaskRecord>;
   }
 }

@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Param,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -11,14 +12,20 @@ import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
+import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
+import { RopTaskResponseDto } from './dto/rop-task-response.dto';
 import { RopDocumentsService } from './rop-documents.service';
+import { RopTasksService } from './rop-tasks.service';
 
 @ApiTags('rop')
 @Controller('rop')
 @UseGuards(SessionGuard)
 export class RopController {
-  constructor(private readonly ropDocumentsService: RopDocumentsService) {}
+  constructor(
+    private readonly ropDocumentsService: RopDocumentsService,
+    private readonly ropTasksService: RopTasksService,
+  ) {}
 
   @Get('documents')
   @ApiOperation({ summary: 'List ROP project documents for the current user' })
@@ -49,5 +56,26 @@ export class RopController {
     @Param('documentId') documentId: string,
   ): Promise<RopDocumentResponseDto> {
     return this.ropDocumentsService.getForUser(user.id, documentId);
+  }
+
+  @Get('tasks')
+  @ApiOperation({ summary: 'List ROP project tasks for the current user' })
+  @ApiOkResponse({ type: RopTaskResponseDto, isArray: true })
+  async listTasks(
+    @CurrentUser() user: CurrentUserData,
+    @Query() query: ListRopTasksQueryDto,
+  ): Promise<RopTaskResponseDto[]> {
+    return this.ropTasksService.listForUser(user.id, query);
+  }
+
+  @Get('tasks/:taskId')
+  @ApiOperation({ summary: 'Get a ROP project task by ID' })
+  @ApiParam({ name: 'taskId', description: 'ROP task ID' })
+  @ApiOkResponse({ type: RopTaskResponseDto })
+  async getTask(
+    @CurrentUser() user: CurrentUserData,
+    @Param('taskId') taskId: string,
+  ): Promise<RopTaskResponseDto> {
+    return this.ropTasksService.getForUser(user.id, taskId);
   }
 }
