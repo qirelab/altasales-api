@@ -30,8 +30,8 @@ export class CategoriesService {
 
   async findAll(): Promise<Category[]> {
     return this.categoryRepository.find({
-      order: { name: 'ASC' },
-      select: ['id', 'name', 'slug'],
+      order: { sortOrder: 'ASC', name: 'ASC' },
+      select: ['id', 'name', 'slug', 'sortOrder'],
     });
   }
 
@@ -39,7 +39,8 @@ export class CategoriesService {
     const normalizedSlug = this.normalizeSlug(slug);
     const category = await this.categoryRepository.findOne({
       where: { slug: normalizedSlug },
-      relations: ['faqs'],
+      relations: { faqs: true },
+      order: { faqs: { sortOrder: 'ASC' } },
     });
 
     if (!category) {
@@ -91,7 +92,8 @@ export class CategoriesService {
     }
 
     const categories = await dataQb
-      .orderBy('c.name', 'ASC')
+      .orderBy('c."sortOrder"', 'ASC')
+      .addOrderBy('c.name', 'ASC')
       .skip(offset)
       .take(limit)
       .getMany();
@@ -109,7 +111,8 @@ export class CategoriesService {
       .loadRelationCountAndMap('c.packagesCount', 'c.packages')
       .loadRelationCountAndMap('c.faqsCount', 'c.faqs')
       .where('c.id = :id', { id })
-      .orderBy('service.name', 'ASC')
+      .orderBy('faq."sortOrder"', 'ASC')
+      .addOrderBy('service.name', 'ASC')
       .addOrderBy('pkg.name', 'ASC')
       .getOne();
 
@@ -124,6 +127,7 @@ export class CategoriesService {
     const name = dto.name.trim();
     const slug = this.normalizeSlug(dto.slug);
     const description = this.normalizeDescription(dto.description);
+    const sortOrder = dto.sortOrder ?? 0;
 
     await this.ensureUniqueNameAndSlug(name, slug);
 
@@ -132,7 +136,7 @@ export class CategoriesService {
       const faqRepo = manager.getRepository(FAQ);
 
       const category = await categoryRepo.save(
-        categoryRepo.create({ name, slug, description }),
+        categoryRepo.create({ name, slug, description, sortOrder }),
       );
 
       if (dto.faqs?.length) {
@@ -141,7 +145,8 @@ export class CategoriesService {
 
       return categoryRepo.findOneOrFail({
         where: { id: category.id },
-        relations: ['faqs'],
+        relations: { faqs: true },
+        order: { faqs: { sortOrder: 'ASC' } },
       });
     });
   }
@@ -149,7 +154,8 @@ export class CategoriesService {
   async updateForAdmin(id: string, dto: UpdateAdminCategoryDto): Promise<Category> {
     const category = await this.categoryRepository.findOne({
       where: { id },
-      relations: ['faqs'],
+      relations: { faqs: true },
+      order: { faqs: { sortOrder: 'ASC' } },
     });
 
     if (!category) {
@@ -161,6 +167,7 @@ export class CategoriesService {
     const description = dto.description !== undefined
       ? this.normalizeDescription(dto.description)
       : category.description;
+    const sortOrder = dto.sortOrder !== undefined ? dto.sortOrder : category.sortOrder;
 
     if (name !== category.name || slug !== category.slug) {
       await this.ensureUniqueNameAndSlug(name, slug, id);
@@ -170,7 +177,7 @@ export class CategoriesService {
       const categoryRepo = manager.getRepository(Category);
       const faqRepo = manager.getRepository(FAQ);
 
-      await categoryRepo.update(id, { name, slug, description });
+      await categoryRepo.update(id, { name, slug, description, sortOrder });
 
       if (dto.faqs !== undefined) {
         await this.replaceFaqs(id, dto.faqs, faqRepo);
@@ -178,7 +185,8 @@ export class CategoriesService {
 
       return categoryRepo.findOneOrFail({
         where: { id },
-        relations: ['faqs'],
+        relations: { faqs: true },
+        order: { faqs: { sortOrder: 'ASC' } },
       });
     });
   }
@@ -248,7 +256,8 @@ export class CategoriesService {
       await faqRepo.remove(toRemove);
     }
 
-    for (const item of faqs) {
+    for (let index = 0; index < faqs.length; index += 1) {
+      const item = faqs[index];
       const question = item.question.trim();
       const answer = item.answer.trim();
 
@@ -260,6 +269,7 @@ export class CategoriesService {
 
         faq.question = question;
         faq.answer = answer;
+        faq.sortOrder = index;
         await faqRepo.save(faq);
         continue;
       }
@@ -269,6 +279,7 @@ export class CategoriesService {
           categoryId,
           question,
           answer,
+          sortOrder: index,
         }),
       );
     }

@@ -55,11 +55,23 @@ export class CreatePackageDto {
 
   @ApiPropertyOptional({
     example: '550e8400-e29b-41d4-a716-446655440000',
-    description: 'Category ID for package',
+    description: 'Legacy single-category field. Accepted for backward compatibility only — '
+      + 'new clients should send categoryIds instead.',
+    deprecated: true,
   })
   @IsOptional()
   @IsUUID()
   categoryId?: string | null;
+
+  @ApiPropertyOptional({
+    example: ['550e8400-e29b-41d4-a716-446655440000'],
+    description: 'Category IDs the package belongs to (many-to-many)',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
 
   @ApiPropertyOptional({
     type: [String],

@@ -1,7 +1,6 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 
 import { RopDocumentRecord, RopTaskListFilters, RopTaskRecord } from './rop.types';
-
 export interface RopProject {
   id: string;
   name: string;
