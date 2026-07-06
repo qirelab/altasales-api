@@ -30,6 +30,7 @@ export class CategoriesService {
 
   async findAll(): Promise<Category[]> {
     return this.categoryRepository.find({
+      where: { isHidden: false },
       order: { sortOrder: 'ASC', name: 'ASC' },
       select: ['id', 'name', 'slug', 'sortOrder'],
     });
@@ -38,7 +39,7 @@ export class CategoriesService {
   async findBySlug(slug: string): Promise<Category> {
     const normalizedSlug = this.normalizeSlug(slug);
     const category = await this.categoryRepository.findOne({
-      where: { slug: normalizedSlug },
+      where: { slug: normalizedSlug, isHidden: false },
       relations: { faqs: true },
       order: { faqs: { sortOrder: 'ASC' } },
     });
@@ -128,6 +129,7 @@ export class CategoriesService {
     const slug = this.normalizeSlug(dto.slug);
     const description = this.normalizeDescription(dto.description);
     const sortOrder = dto.sortOrder ?? 0;
+    const isHidden = dto.isHidden ?? false;
 
     await this.ensureUniqueNameAndSlug(name, slug);
 
@@ -136,7 +138,7 @@ export class CategoriesService {
       const faqRepo = manager.getRepository(FAQ);
 
       const category = await categoryRepo.save(
-        categoryRepo.create({ name, slug, description, sortOrder }),
+        categoryRepo.create({ name, slug, description, sortOrder, isHidden }),
       );
 
       if (dto.faqs?.length) {
@@ -168,6 +170,7 @@ export class CategoriesService {
       ? this.normalizeDescription(dto.description)
       : category.description;
     const sortOrder = dto.sortOrder !== undefined ? dto.sortOrder : category.sortOrder;
+    const isHidden = dto.isHidden !== undefined ? dto.isHidden : category.isHidden;
 
     if (name !== category.name || slug !== category.slug) {
       await this.ensureUniqueNameAndSlug(name, slug, id);
@@ -177,7 +180,7 @@ export class CategoriesService {
       const categoryRepo = manager.getRepository(Category);
       const faqRepo = manager.getRepository(FAQ);
 
-      await categoryRepo.update(id, { name, slug, description, sortOrder });
+      await categoryRepo.update(id, { name, slug, description, sortOrder, isHidden });
 
       if (dto.faqs !== undefined) {
         await this.replaceFaqs(id, dto.faqs, faqRepo);
@@ -199,6 +202,21 @@ export class CategoriesService {
     }
 
     await this.categoryRepository.remove(category);
+  }
+
+  async setVisibilityForAdmin(id: string, isHidden: boolean): Promise<Category> {
+    const category = await this.categoryRepository.findOne({
+      where: { id },
+      relations: { faqs: true },
+      order: { faqs: { sortOrder: 'ASC' } },
+    });
+
+    if (!category) {
+      throw new NotFoundException(`Категория с ID ${id} не найдена`);
+    }
+
+    category.isHidden = isHidden;
+    return this.categoryRepository.save(category);
   }
 
   private normalizeSlug(slug: string): string {
