@@ -22,6 +22,7 @@ import { CatalogStorageModule } from './catalog-storage/catalog-storage.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
 import { ExpertsModule } from './experts/experts.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { ChatbotReferenceAnswersModule } from './chatbot/reference-answers/chatbot-reference-answers.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { FeedbackModule } from './feedback/feedback.module';
     ChatbotModule,
     ExpertsModule,
     FeedbackModule,
+    ChatbotReferenceAnswersModule,
   ],
 })
 export class AppModule {}
