@@ -7,7 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, IsNull, Not, Repository } from 'typeorm';
+import { Brackets, IsNull, Repository } from 'typeorm';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
@@ -31,7 +31,10 @@ import {
   type RecommendationGenerationJobSummary,
 } from './recommendation-generation-job.service';
 import { RecommendationNotificationService } from './recommendation-notification.service';
-import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
+import {
+  MIN_RECOMMENDATION_RANKING_SCORE,
+  QuestionnaireRelevanceRankerService,
+} from './questionnaire-relevance-ranker.service';
 import { RecommendationSource } from './entities/recommendation-source.enum';
 import {
   RecommendationScoringService,
@@ -45,7 +48,7 @@ import {
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
-const MIN_RECOMMENDATION_RANKING_SCORE = 20;
+const MIN_FALLBACK_RECOMMENDATION_SCORE = 25;
 const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
   RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
@@ -124,6 +127,7 @@ const LOGICAL_COVERAGE_RULES: LogicalCoverageRule[] = [
 export type PackageInnerServiceItem = {
   id: string;
   name: string;
+  description: string;
   type: ServiceType;
   price: number;
   giftEligible: boolean;
@@ -153,6 +157,7 @@ export type UserRecommendationListItem = {
   serviceId: string | null;
   packageId: string | null;
   name: string;
+  description: string;
   type: ServiceType | 'Пакет услуг';
   category: string;
   price: number;
@@ -230,7 +235,7 @@ export class RecommendationsService implements OnModuleInit {
       .createQueryBuilder('recommendation')
       .leftJoinAndSelect('recommendation.service', 'service')
       .leftJoinAndSelect('recommendation.package', 'package')
-      .leftJoinAndSelect('package.category', 'packageCategory')
+      .leftJoinAndSelect('package.categories', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
       .andWhere(this.visibleRecommendationTargetFilter())
@@ -247,15 +252,25 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
       .leftJoin('recommendation.package', 'package')
-      .leftJoin('package.category', 'packageCategory')
       .select('recommendation.id', 'id')
       .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('recommendation."packageId"', 'packageId')
       .addSelect('recommendation."orderId"', 'orderId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
+      .addSelect(
+        "COALESCE(service.description, package.description, '')",
+        'description',
+      )
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
       .addSelect(
-        "COALESCE(serviceCategory.name, packageCategory.name, '')",
+        `COALESCE(
+          serviceCategory.name,
+          (SELECT string_agg(c.name, ', ' ORDER BY c."sortOrder" ASC, c.name ASC)
+           FROM package_categories pc
+           JOIN category c ON c.id = pc."categoryId"
+           WHERE pc."packageId" = package.id),
+          ''
+        )`,
         'category',
       )
       .addSelect('COALESCE(service.price, package.price)', 'price')
@@ -305,6 +320,7 @@ export class RecommendationsService implements OnModuleInit {
         filterActiveServices(pkg.services).map((service) => ({
           id: service.id,
           name: service.name,
+          description: service.description ?? '',
           type: service.type,
           price: Number(service.price),
           giftEligible: service.giftEligible,
@@ -377,13 +393,19 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoin('recommendation.service', 'service')
       .leftJoin('service.category', 'serviceCategory')
       .leftJoin('recommendation.package', 'package')
-      .leftJoin('package.category', 'packageCategory')
       .select('recommendation.id', 'id')
       .addSelect('recommendation."serviceId"', 'serviceId')
       .addSelect('recommendation."packageId"', 'packageId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(
-        "COALESCE(serviceCategory.name, packageCategory.name, '')",
+        `COALESCE(
+          serviceCategory.name,
+          (SELECT string_agg(c.name, ', ' ORDER BY c."sortOrder" ASC, c.name ASC)
+           FROM package_categories pc
+           JOIN category c ON c.id = pc."categoryId"
+           WHERE pc."packageId" = package.id),
+          ''
+        )`,
         'category',
       )
       .addSelect('COALESCE(service.price, package.price)', 'price')
@@ -608,7 +630,7 @@ export class RecommendationsService implements OnModuleInit {
     if (ranked.length === 0) {
       ranked = services
         .map((service) => this.scoringService.scoreService(service, context))
-        .filter((item) => item.score > 0)
+        .filter((item) => item.score >= MIN_FALLBACK_RECOMMENDATION_SCORE)
         .sort((a, b) => b.score - a.score);
     }
 
@@ -697,7 +719,7 @@ export class RecommendationsService implements OnModuleInit {
         'service',
         'service.category',
         'package',
-        'package.category',
+        'package.categories',
         'order',
       ],
     });
@@ -721,7 +743,7 @@ export class RecommendationsService implements OnModuleInit {
         .getMany(),
       this.packageRepository.find({
         where: activePackageWhere(),
-        relations: ['category', 'services', 'services.category'],
+        relations: ['categories', 'services', 'services.category'],
         order: { createdAt: 'DESC' },
       }),
     ]);
@@ -744,7 +766,7 @@ export class RecommendationsService implements OnModuleInit {
           description: [
             servicePackage.description,
             servicePackage.packageType,
-            servicePackage.category?.name,
+            ...(servicePackage.categories ?? []).map((c) => c.name),
             ...activeServices.flatMap((service) => [
               service.name,
               service.description,
@@ -889,7 +911,7 @@ export class RecommendationsService implements OnModuleInit {
         servicePackage.name,
         servicePackage.description,
         servicePackage.packageType,
-        servicePackage.category?.name,
+        ...(servicePackage.categories ?? []).map((c) => c.name),
         ...(servicePackage.tags ?? []),
         ...activeServices.flatMap((service) => [
           service.name,
@@ -1088,7 +1110,7 @@ export class RecommendationsService implements OnModuleInit {
         'service',
         'service.category',
         'package',
-        'package.category',
+        'package.categories',
         'package.services',
         'package.services.category',
       ],
@@ -1098,16 +1120,12 @@ export class RecommendationsService implements OnModuleInit {
     recommendations.forEach((recommendation) => {
       const targetId = this.getRecommendationTargetId(recommendation);
       if (!targetId) return;
-      const isReplaceableGeneratedRecommendation =
-        recommendation.status === RecommendationStatus.Recommended &&
-        recommendation.generatedAt != null;
-
       coverage.push({
         targetId,
         coveredServiceIds: new Set(
           this.getRecommendationCoveredServiceIds(recommendation),
         ),
-        blocksOverlaps: !isReplaceableGeneratedRecommendation,
+        blocksOverlaps: !this.isReplaceableRecommendation(recommendation),
       });
     });
 
@@ -1125,6 +1143,10 @@ export class RecommendationsService implements OnModuleInit {
     for (const item of items) {
       const targetId = this.getGeneratedRecommendationTargetId(item);
       if (!targetId || selectedTargetIds.has(targetId)) continue;
+      const targetIsAlreadyActive = existingCoverage.some(
+        (entry) => entry.blocksOverlaps && entry.targetId === targetId,
+      );
+      if (targetIsAlreadyActive) continue;
 
       const coveredServiceIds =
         this.getGeneratedRecommendationCoveredServiceIds(item);
@@ -1270,19 +1292,67 @@ export class RecommendationsService implements OnModuleInit {
       where: {
         userId,
         status: RecommendationStatus.Recommended,
-        generatedAt: Not(IsNull()),
+        source: RecommendationSource.AI,
       },
     });
-    const staleIds = generatedRecommendations
+    const staleGeneratedIds = generatedRecommendations
       .filter((recommendation) => {
+        if (!this.isReplaceableRecommendation(recommendation)) return false;
         const targetId = this.getRecommendationTargetId(recommendation);
         return !targetId || !currentTargetIds.has(targetId);
       })
       .map((recommendation) => recommendation.id);
 
-    if (staleIds.length === 0) return;
+    const currentCoveredServiceIds = new Set(
+      currentItems.flatMap((item) =>
+        this.getGeneratedRecommendationCoveredServiceIds(item),
+      ),
+    );
+    const manualRecommendations = await this.recommendationRepository.find({
+      where: {
+        userId,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+      },
+      relations: [
+        'service',
+        'service.category',
+        'package',
+        'package.category',
+        'package.services',
+        'package.services.category',
+      ],
+    });
+    const replacedManualIds = manualRecommendations
+      .filter((recommendation) => {
+        if (!this.isReplaceableRecommendation(recommendation)) return false;
+        const targetId = this.getRecommendationTargetId(recommendation);
+        if (targetId && currentTargetIds.has(targetId)) return false;
+        const coveredServiceIds = this.toPublicCoveredServiceIds(
+          this.getRecommendationCoveredServiceIds(recommendation),
+        );
+        return (
+          coveredServiceIds.length > 0 &&
+          coveredServiceIds.every((serviceId) =>
+            currentCoveredServiceIds.has(serviceId),
+          )
+        );
+      })
+      .map((recommendation) => recommendation.id);
+    const idsToDelete = [...staleGeneratedIds, ...replacedManualIds];
 
-    await this.recommendationRepository.delete(staleIds);
+    if (idsToDelete.length === 0) return;
+
+    await this.recommendationRepository.delete(idsToDelete);
+  }
+
+  private isReplaceableRecommendation(
+    recommendation: Pick<Recommendation, 'status' | 'orderId'>,
+  ): boolean {
+    return (
+      recommendation.status === RecommendationStatus.Recommended &&
+      recommendation.orderId == null
+    );
   }
 
   private getGeneratedRecommendationTargetId(
