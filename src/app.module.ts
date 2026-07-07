@@ -23,6 +23,7 @@ import { ChatbotModule } from './chatbot/chatbot.module';
 import { ExpertsModule } from './experts/experts.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { SettingsModule } from './settings/settings.module';
+import { ChatbotReferenceAnswersModule } from './chatbot/reference-answers/chatbot-reference-answers.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SettingsModule } from './settings/settings.module';
     ExpertsModule,
     FeedbackModule,
     SettingsModule,
+    ChatbotReferenceAnswersModule,
   ],
 })
 export class AppModule {}
