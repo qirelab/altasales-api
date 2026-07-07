@@ -47,16 +47,25 @@ function buildDocumentRepoMock(exists = true) {
   };
 }
 
+function buildIndexerMock() {
+  return {
+    safeIndex: jest.fn().mockResolvedValue(undefined),
+    safeRemove: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 function buildService(hasPii = false, documentExists = true) {
   const repository = buildRepositoryMock();
   const documentRepository = buildDocumentRepoMock(documentExists);
   const scanner = buildScannerMock(hasPii);
+  const indexer = buildIndexerMock();
   const service = new ChatbotReferenceAnswersService(
     repository as never,
     documentRepository as never,
     scanner as never,
+    indexer as never,
   );
-  return { service, repository, documentRepository, scanner };
+  return { service, repository, documentRepository, scanner, indexer };
 }
 
 const validDto = () => ({
@@ -174,6 +183,76 @@ describe('ChatbotReferenceAnswersService', () => {
 
     await expect(service.update('id-1', { answer: 'my email a@b.ru' })).rejects.toThrow(
       BadRequestException,
+    );
+  });
+
+  it('calls indexer.safeIndex on create', async () => {
+    const { service, indexer } = buildService();
+    const result = await service.create(validDto(), 'user-1');
+    expect(indexer.safeIndex).toHaveBeenCalledWith(
+      expect.objectContaining({ id: result.id, status: ReferenceAnswerStatus.ACTIVE }),
+    );
+  });
+
+  it('calls indexer.safeIndex on update of active record', async () => {
+    const { service, repository, indexer } = buildService();
+    repository.store.set('id-1', {
+      id: 'id-1',
+      question: 'q',
+      answer: 'a',
+      topic: 't',
+      status: ReferenceAnswerStatus.ACTIVE,
+    });
+    await service.update('id-1', { topic: 'Цены' });
+    expect(indexer.safeIndex).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'id-1', topic: 'Цены' }),
+    );
+  });
+
+  it('skips indexer.safeIndex on update of archived record', async () => {
+    const { service, repository, indexer } = buildService();
+    repository.store.set('id-1', {
+      id: 'id-1',
+      question: 'q',
+      answer: 'a',
+      topic: 't',
+      status: ReferenceAnswerStatus.ARCHIVED,
+    });
+    await service.update('id-1', { topic: 'Цены' });
+    expect(indexer.safeIndex).not.toHaveBeenCalled();
+  });
+
+  it('does not call indexer when archive/restore is a no-op (status unchanged)', async () => {
+    const { service, repository, indexer } = buildService();
+    repository.store.set('id-1', {
+      id: 'id-1',
+      question: 'q',
+      answer: 'a',
+      topic: 't',
+      status: ReferenceAnswerStatus.ARCHIVED,
+    });
+
+    await service.archive('id-1');
+    expect(indexer.safeRemove).not.toHaveBeenCalled();
+    expect(indexer.safeIndex).not.toHaveBeenCalled();
+  });
+
+  it('calls indexer.safeRemove on archive and safeIndex on restore', async () => {
+    const { service, repository, indexer } = buildService();
+    repository.store.set('id-1', {
+      id: 'id-1',
+      question: 'q',
+      answer: 'a',
+      topic: 't',
+      status: ReferenceAnswerStatus.ACTIVE,
+    });
+
+    await service.archive('id-1');
+    expect(indexer.safeRemove).toHaveBeenCalledWith('id-1');
+
+    await service.restore('id-1');
+    expect(indexer.safeIndex).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'id-1', status: ReferenceAnswerStatus.ACTIVE }),
     );
   });
 

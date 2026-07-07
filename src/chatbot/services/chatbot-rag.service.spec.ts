@@ -36,6 +36,11 @@ function buildService(overrides: {
   llmContent?: string;
   llmError?: Error;
   configOverrides?: Record<string, number | string>;
+  injection?: {
+    block: string | null;
+    usedCount: number;
+    topScore?: number;
+  };
 } = {}) {
   const knowledgeSearch = {
     search: overrides.searchError
@@ -55,15 +60,21 @@ function buildService(overrides: {
         dataClass: 'no_pii',
       }),
   };
+  const referenceInjection = {
+    getInjection: jest.fn().mockResolvedValue(
+      overrides.injection ?? { block: null, usedCount: 0 },
+    ),
+  };
   const configService = overrides.configOverrides
     ? { get: jest.fn((key: string) => overrides.configOverrides?.[key]) }
     : undefined;
   const service = new ChatbotRagService(
     knowledgeSearch as never,
     llmProxy as never,
+    referenceInjection as never,
     configService as never,
   );
-  return { service, knowledgeSearch, llmProxy };
+  return { service, knowledgeSearch, llmProxy, referenceInjection };
 }
 
 describe('ChatbotRagService', () => {
@@ -283,5 +294,31 @@ describe('ChatbotRagService', () => {
 
     const chatArg = llmProxy.chat.mock.calls[0][0];
     expect(chatArg.policy?.cacheTtlMs).toBe(30_000);
+  });
+
+  it('injects reference-answer few-shot block into system prompt when provided', async () => {
+    const injectionBlock = 'Примеры ответов менеджеров на похожие вопросы:\n\nПример 1:\nQ: q\nA: a';
+    const { service, llmProxy, referenceInjection } = buildService({
+      injection: { block: injectionBlock, usedCount: 1, topScore: 0.85 },
+    });
+
+    await service.askQuestion({ question: 'Q' });
+
+    expect(referenceInjection.getInjection).toHaveBeenCalledWith('Q');
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    expect(chatArg.messages[0].role).toBe('system');
+    expect(chatArg.messages[0].content).toContain('AltaSales');
+    expect(chatArg.messages[0].content).toContain(injectionBlock);
+  });
+
+  it('does not modify system prompt when injection returns null block', async () => {
+    const { service, llmProxy } = buildService({
+      injection: { block: null, usedCount: 0 },
+    });
+
+    await service.askQuestion({ question: 'Q' });
+
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    expect(chatArg.messages[0].content).not.toContain('Примеры ответов');
   });
 });

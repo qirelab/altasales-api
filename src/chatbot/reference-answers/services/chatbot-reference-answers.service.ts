@@ -12,6 +12,7 @@ import { ListReferenceAnswersDto, SortDir } from '../dto/list-reference-answers.
 import { UpdateReferenceAnswerDto } from '../dto/update-reference-answer.dto';
 import { ChatbotReferenceAnswer } from '../entities/chatbot-reference-answer.entity';
 import { ReferenceAnswerStatus } from '../enums/reference-answer-status.enum';
+import { ChatbotReferenceAnswerIndexerService } from './chatbot-reference-answer-indexer.service';
 
 export type ListReferenceAnswersResult = {
   items: ChatbotReferenceAnswer[];
@@ -34,6 +35,7 @@ export class ChatbotReferenceAnswersService {
     @InjectRepository(KnowledgeDocument)
     private readonly documentRepository: Repository<KnowledgeDocument>,
     private readonly piiAnonymizer: PiiAnonymizerService,
+    private readonly indexer: ChatbotReferenceAnswerIndexerService,
   ) {}
 
   async create(
@@ -53,7 +55,9 @@ export class ChatbotReferenceAnswersService {
       createdById,
       status: ReferenceAnswerStatus.ACTIVE,
     });
-    return this.repository.save(entity);
+    const saved = await this.repository.save(entity);
+    await this.indexer.safeIndex(saved);
+    return saved;
   }
 
   async update(
@@ -80,7 +84,11 @@ export class ChatbotReferenceAnswersService {
       existing.sourceDocumentId = dto.sourceDocumentId;
     }
 
-    return this.repository.save(existing);
+    const saved = await this.repository.save(existing);
+    if (saved.status === ReferenceAnswerStatus.ACTIVE) {
+      await this.indexer.safeIndex(saved);
+    }
+    return saved;
   }
 
   async findAll(query: ListReferenceAnswersDto): Promise<ListReferenceAnswersResult> {
@@ -134,7 +142,13 @@ export class ChatbotReferenceAnswersService {
     const existing = await this.findOne(id);
     if (existing.status === status) return existing;
     existing.status = status;
-    return this.repository.save(existing);
+    const saved = await this.repository.save(existing);
+    if (saved.status === ReferenceAnswerStatus.ARCHIVED) {
+      await this.indexer.safeRemove(saved.id);
+    } else {
+      await this.indexer.safeIndex(saved);
+    }
+    return saved;
   }
 
   // PII scan is regex-only (email/phone/INN/SNILS/passport/bank_card/birth_date).
