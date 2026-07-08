@@ -38,6 +38,14 @@ export class CreatePackageDto {
   giftEligible?: boolean;
 
   @ApiPropertyOptional({
+    example: false,
+    description: 'Скрыт ли пакет в публичном каталоге',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isHidden?: boolean;
+
+  @ApiPropertyOptional({
     example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg',
     description: 'Package image URL',
   })

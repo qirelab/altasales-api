@@ -66,6 +66,14 @@ export class CreateServiceDto {
   @IsBoolean()
   giftEligible?: boolean;
 
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Скрыта ли услуга в публичном каталоге',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isHidden?: boolean;
+
   @ApiPropertyOptional({ description: 'Associated user ID (for contractors)' })
   @IsOptional()
   @IsUUID()

@@ -35,6 +35,13 @@ export class Category {
   @Column({ type: 'int', default: 0 })
   sortOrder: number;
 
+  @ApiProperty({
+    example: false,
+    description: 'Hidden from public catalog when true',
+  })
+  @Column({ type: 'boolean', default: false })
+  isHidden: boolean;
+
   @OneToMany(() => Service, (service) => service.category)
   services: Service[];
 

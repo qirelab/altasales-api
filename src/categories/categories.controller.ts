@@ -20,6 +20,7 @@ import { UserRole } from '../users/entities/user-role.enum';
 import { CategoriesService } from './categories.service';
 import { CreateAdminCategoryDto } from './dto/create-admin-category.dto';
 import { GetAdminCategoriesQueryDto } from './dto/get-admin-categories-query.dto';
+import { SetCategoryVisibilityDto } from './dto/set-category-visibility.dto';
 import { UpdateAdminCategoryDto } from './dto/update-admin-category.dto';
 import { Category } from './entities/category.entity';
 
@@ -74,6 +75,20 @@ export class CategoriesController {
     @Body() dto: UpdateAdminCategoryDto,
   ): Promise<Category> {
     return this.categoriesService.updateForAdmin(id, dto);
+  }
+
+  @Patch('admin/:id/visibility')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Set category visibility (admin)' })
+  @ApiParam({ name: 'id', description: 'Category ID' })
+  @ApiResponse({ status: 200, description: 'Category visibility updated', type: Category })
+  @ApiResponse({ status: 404, description: 'Category not found' })
+  async setVisibilityForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCategoryVisibilityDto,
+  ): Promise<Category> {
+    return this.categoriesService.setVisibilityForAdmin(id, dto.isHidden);
   }
 
   @Delete('admin/:id')

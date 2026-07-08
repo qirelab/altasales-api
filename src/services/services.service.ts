@@ -19,8 +19,14 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
-import { applyActivePackageFilter } from '../packages/package-visibility';
-import { activeServiceWhere, applyActiveServiceFilter } from './service-visibility';
+import { applyPublicPackageFilter } from '../packages/package-visibility';
+import {
+  activeServiceWhere,
+  applyActiveServiceFilter,
+  applyPublicServiceFilter,
+  filterActiveServices,
+  publicServiceWhere,
+} from './service-visibility';
 
 const SALES_DASHBOARD_CATEGORY_SLUG = 'ai-analiz-prodazh';
 
@@ -73,11 +79,12 @@ export class ServicesService {
   }> {
     const categoryIds = query.categoryIds ?? [];
 
-    const qb = applyActiveServiceFilter(
+    const qb = applyPublicServiceFilter(
       this.serviceRepository
         .createQueryBuilder('service')
-        .leftJoinAndSelect('service.category', 'category'),
+        .leftJoinAndSelect('service.category', 'category', 'category."isHidden" = false'),
     );
+    qb.andWhere('(service."categoryId" IS NULL OR category.id IS NOT NULL)');
 
     if (query.name?.trim()) {
       qb.andWhere('service.name ILIKE :name', {
@@ -104,18 +111,24 @@ export class ServicesService {
       }
     }
 
-    const packageQb = applyActivePackageFilter(
+    const packageQb = applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category'),
+        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false'),
       'sp',
     );
+    packageQb.andWhere(`
+      NOT EXISTS (
+        SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
+      ) OR category.id IS NOT NULL
+    `);
 
     if (categoryIds.length > 0) {
       packageQb.andWhere((sqb) => {
         const sub = sqb.subQuery()
           .select('pc."packageId"')
           .from('package_categories', 'pc')
+          .innerJoin(Category, 'fc', 'fc.id = pc."categoryId" AND fc."isHidden" = false')
           .where('pc."categoryId" IN (:...categoryIds)')
           .getQuery();
         return `sp.id IN ${sub}`;
@@ -143,6 +156,10 @@ export class ServicesService {
       this.getCategoryContentForFilter(categoryIds),
     ]);
 
+    for (const pkg of packages) {
+      pkg.services = filterActiveServices(pkg.services).filter((service) => !service.isHidden);
+    }
+
     return {
       packages,
       services,
@@ -161,6 +178,7 @@ export class ServicesService {
       price: number;
       image: string | null;
       imageOriginal: string | null;
+      isHidden: boolean;
       skills: string[];
       createdAt: Date;
       userId: string | null;
@@ -211,6 +229,7 @@ export class ServicesService {
       .addSelect('s.price', 'price')
       .addSelect('s.image', 'image')
       .addSelect('s."imageOriginal"', 'imageOriginal')
+      .addSelect('s."isHidden"', 'isHidden')
       .addSelect('s.skills', 'skills')
       .addSelect('s."giftEligible"', 'giftEligible')
       .addSelect('s."createdAt"', 'createdAt')
@@ -231,6 +250,7 @@ export class ServicesService {
         price: string;
         image: string | null;
         imageOriginal: string | null;
+        isHidden: boolean;
         skills: string[] | string;
         createdAt: Date;
         userId: string | null;
@@ -249,6 +269,7 @@ export class ServicesService {
         price: Number(row.price),
         image: row.image,
         imageOriginal: row.imageOriginal,
+        isHidden: row.isHidden,
         skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
@@ -264,11 +285,14 @@ export class ServicesService {
   }
 
   async getAllSkills(): Promise<string[]> {
-    const services = await applyActiveServiceFilter(
+    const services = await applyPublicServiceFilter(
       this.serviceRepository
         .createQueryBuilder('service')
+        .leftJoin('service.category', 'category', 'category."isHidden" = false')
         .select('service.skills'),
-    ).getMany();
+    )
+      .andWhere('(service."categoryId" IS NULL OR category.id IS NOT NULL)')
+      .getMany();
 
     const skillsSet = new Set<string>();
     for (const service of services) {
@@ -280,10 +304,14 @@ export class ServicesService {
   }
 
   async findOne(id: string): Promise<Service> {
-    const service = await this.serviceRepository.findOne({
-      where: { id, ...activeServiceWhere() },
-      relations: ['category'],
-    });
+    const service = await applyPublicServiceFilter(
+      this.serviceRepository
+        .createQueryBuilder('service')
+        .leftJoinAndSelect('service.category', 'category', 'category."isHidden" = false'),
+    )
+      .where('service.id = :id', { id })
+      .andWhere('(service."categoryId" IS NULL OR category.id IS NOT NULL)')
+      .getOne();
     if (!service) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
@@ -292,13 +320,13 @@ export class ServicesService {
 
   async findForSalesDashboard(): Promise<Service[]> {
     const category = await this.categoryRepository.findOne({
-      where: { slug: SALES_DASHBOARD_CATEGORY_SLUG },
+      where: { slug: SALES_DASHBOARD_CATEGORY_SLUG, isHidden: false },
     });
     if (!category) {
       return [];
     }
     return this.serviceRepository.find({
-      where: { categoryId: category.id, ...activeServiceWhere() },
+      where: { categoryId: category.id, ...publicServiceWhere() },
       order: { createdAt: 'ASC' },
     });
   }
@@ -308,7 +336,7 @@ export class ServicesService {
       await this.ensureCategoryExists(updateServiceDto.categoryId);
     }
 
-    const service = await this.findOne(id);
+    const service = await this.findOneEntityForAdmin(id);
     Object.assign(service, updateServiceDto);
     if ('categoryId' in updateServiceDto) {
       service.category = updateServiceDto.categoryId
@@ -319,7 +347,7 @@ export class ServicesService {
   }
 
   async remove(id: string): Promise<void> {
-    const service = await this.findOne(id);
+    const service = await this.findOneEntityForAdmin(id);
 
     if (await this.serviceHasOrderReferences(id)) {
       service.deletedAt = new Date();
@@ -340,6 +368,12 @@ export class ServicesService {
     await this.serviceRepository.remove(service);
   }
 
+  async setVisibilityForAdmin(id: string, isHidden: boolean): Promise<Service> {
+    const service = await this.findOneEntityForAdmin(id);
+    service.isHidden = isHidden;
+    return this.serviceRepository.save(service);
+  }
+
   private async serviceHasOrderReferences(serviceId: string): Promise<boolean> {
     const [directOrderItems, subItemRows] = await Promise.all([
       this.orderItemRepository.count({ where: { serviceId } }),
@@ -350,6 +384,17 @@ export class ServicesService {
     ]);
 
     return directOrderItems > 0 || Number(subItemRows[0]?.count ?? 0) > 0;
+  }
+
+  private async findOneEntityForAdmin(id: string): Promise<Service> {
+    const service = await this.serviceRepository.findOne({
+      where: { id, ...activeServiceWhere() },
+      relations: ['category'],
+    });
+    if (!service) {
+      throw new NotFoundException(`Услуга с ID ${id} не найдена`);
+    }
+    return service;
   }
 
   async createContractor(dto: CreateAdminContractorDto): Promise<Service> {
@@ -647,6 +692,7 @@ export class ServicesService {
       userId: user.id,
       user,
       giftEligible: false,
+      isHidden: false,
       deletedAt: null,
       createdAt: user.createdAt,
       packages: [],
@@ -664,6 +710,7 @@ export class ServicesService {
       image: string | null;
       skills: string[];
       giftEligible: boolean;
+      isHidden: boolean;
       createdAt: Date;
     };
     stats: {
@@ -739,6 +786,7 @@ export class ServicesService {
         image: service.image,
         skills: service.skills,
         giftEligible: service.giftEligible,
+        isHidden: service.isHidden,
         createdAt: service.createdAt,
       },
       stats: {
@@ -864,7 +912,7 @@ export class ServicesService {
 
     const [categoryId] = categoryIds;
     const category = await this.categoryRepository.findOne({
-      where: { id: categoryId },
+      where: { id: categoryId, isHidden: false },
       relations: ['faqs'],
     });
 

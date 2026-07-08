@@ -53,6 +53,13 @@ export class ServicePackage {
   @Column({ type: 'boolean', default: false })
   giftEligible: boolean;
 
+  @ApiProperty({
+    example: false,
+    description: 'Hidden from public catalog when true',
+  })
+  @Column({ type: 'boolean', default: false })
+  isHidden: boolean;
+
   @ApiPropertyOptional({ example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg' })
   @Column({ type: 'varchar', nullable: true })
   image: string | null;
