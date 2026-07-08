@@ -21,6 +21,7 @@ import { TranscriptionModule } from './transcription/transcription.module';
 import { CatalogStorageModule } from './catalog-storage/catalog-storage.module';
 import { ExpertsModule } from './experts/experts.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { FeedbackModule } from './feedback/feedback.module';
     CatalogStorageModule,
     ExpertsModule,
     FeedbackModule,
+    SettingsModule,
   ],
 })
 export class AppModule {}
