@@ -11,7 +11,11 @@ import { GetAdminPackagesQueryDto } from './dto/get-admin-packages-query.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
 import { filterActiveServices } from '../services/service-visibility';
-import { activePackageWhere, applyActivePackageFilter } from './package-visibility';
+import {
+  activePackageWhere,
+  applyActivePackageFilter,
+  applyPublicPackageFilter,
+} from './package-visibility';
 
 export interface AdminPackageListItem {
   id: string;
@@ -23,6 +27,7 @@ export interface AdminPackageListItem {
   giftEligible: boolean;
   image: string | null;
   imageOriginal: string | null;
+  isHidden: boolean;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   categoryIds: string[];
@@ -104,25 +109,42 @@ export class PackagesService {
   }
 
   async findAll(): Promise<ServicePackage[]> {
-    const packages = await this.packageRepository.find({
-      where: activePackageWhere(),
-      relations: ['categories'],
-      order: { createdAt: 'DESC' },
-    });
-    return packages.map((pkg) => attachLegacyPackageCategory(this.withActivePackageServices(pkg)));
+    const packages = await applyPublicPackageFilter(
+      this.packageRepository
+        .createQueryBuilder('sp')
+        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false'),
+      'sp',
+    )
+      .andWhere(`
+        NOT EXISTS (
+          SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
+        ) OR category.id IS NOT NULL
+      `)
+      .orderBy('sp."createdAt"', 'DESC')
+      .getMany();
+    return packages.map((pkg) => attachLegacyPackageCategory(this.withPublicPackageServices(pkg)));
   }
 
   async findOne(id: string): Promise<ServicePackage> {
-    const servicePackage = await this.packageRepository.findOne({
-      where: { id, ...activePackageWhere() },
-      relations: ['categories'],
-    });
+    const servicePackage = await applyPublicPackageFilter(
+      this.packageRepository
+        .createQueryBuilder('sp')
+        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false'),
+      'sp',
+    )
+      .andWhere('sp.id = :id', { id })
+      .andWhere(`
+        NOT EXISTS (
+          SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
+        ) OR category.id IS NOT NULL
+      `)
+      .getOne();
 
     if (!servicePackage) {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
-    return attachLegacyPackageCategory(this.withActivePackageServices(servicePackage));
+    return attachLegacyPackageCategory(this.withPublicPackageServices(servicePackage));
   }
 
   private async loadWithCategories(id: string): Promise<ServicePackage> {
@@ -172,7 +194,7 @@ export class PackagesService {
   }
 
   async remove(id: string): Promise<void> {
-    const servicePackage = await this.findOne(id);
+    const servicePackage = await this.findOneEntityForAdmin(id);
     const hasOrders = await this.packageHasOrderReferences(id);
 
     if (hasOrders) {
@@ -338,6 +360,7 @@ export class PackagesService {
       giftEligible: pkg.giftEligible,
       image: pkg.image,
       imageOriginal: pkg.imageOriginal,
+      isHidden: pkg.isHidden,
       categoryId: first?.id ?? null,
       category: first
         ? { id: first.id, name: first.name, slug: first.slug }
@@ -396,6 +419,30 @@ export class PackagesService {
 
   private withActivePackageServices(servicePackage: ServicePackage): ServicePackage {
     servicePackage.services = filterActiveServices(servicePackage.services);
+    return servicePackage;
+  }
+
+  async setVisibilityForAdmin(id: string, isHidden: boolean): Promise<ServicePackage> {
+    const servicePackage = await this.findOneEntityForAdmin(id);
+    servicePackage.isHidden = isHidden;
+    return this.packageRepository.save(servicePackage);
+  }
+
+  private async findOneEntityForAdmin(id: string): Promise<ServicePackage> {
+    const servicePackage = await this.packageRepository.findOne({
+      where: { id, ...activePackageWhere() },
+      relations: ['categories'],
+    });
+
+    if (!servicePackage) {
+      throw new NotFoundException(`Пакет с ID ${id} не найден`);
+    }
+
+    return servicePackage;
+  }
+
+  private withPublicPackageServices(servicePackage: ServicePackage): ServicePackage {
+    servicePackage.services = filterActiveServices(servicePackage.services).filter((service) => !service.isHidden);
     return servicePackage;
   }
 }

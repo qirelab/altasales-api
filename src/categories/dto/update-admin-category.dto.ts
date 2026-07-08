@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -42,6 +43,14 @@ export class UpdateAdminCategoryDto {
   @IsInt()
   @Min(0)
   sortOrder?: number;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Скрыта ли категория в публичном каталоге',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isHidden?: boolean;
 
   @ApiPropertyOptional({
     type: [UpdateCategoryFaqItemDto],

@@ -84,6 +84,13 @@ export class Service {
   @Column({ type: 'boolean', default: false })
   giftEligible: boolean;
 
+  @ApiProperty({
+    example: false,
+    description: 'Hidden from public catalog when true',
+  })
+  @Column({ type: 'boolean', default: false })
+  isHidden: boolean;
+
   @ApiPropertyOptional({ example: 2500, description: 'Contractor hourly rate' })
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
   contractorRatePerHour: number | null;
