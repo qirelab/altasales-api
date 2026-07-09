@@ -1,13 +1,10 @@
 import { Module } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
-import { AuthModule } from '../auth/auth.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
-import { ChatbotController } from './chatbot.controller';
 import { ChatbotRagService } from './services/chatbot-rag.service';
 
 @Module({
-  imports: [AiModule, AuthModule, KnowledgeModule],
-  controllers: [ChatbotController],
+  imports: [AiModule, KnowledgeModule],
   providers: [ChatbotRagService],
   exports: [ChatbotRagService],
 })
