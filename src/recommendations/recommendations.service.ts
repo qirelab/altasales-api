@@ -1318,7 +1318,7 @@ export class RecommendationsService implements OnModuleInit {
         'service',
         'service.category',
         'package',
-        'package.category',
+        'package.categories',
         'package.services',
         'package.services.category',
       ],
