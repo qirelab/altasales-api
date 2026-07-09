@@ -23,6 +23,7 @@ import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { GetAdminContractorsQueryDto } from './dto/get-admin-contractors-query.dto';
 import { GetAdminServicesQueryDto } from './dto/get-admin-services-query.dto';
+import { SetServiceVisibilityDto } from './dto/set-service-visibility.dto';
 import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
@@ -198,6 +199,20 @@ export class ServicesController {
     @Body() updateServiceDto: UpdateServiceDto,
   ): Promise<Service> {
     return this.servicesService.update(id, updateServiceDto);
+  }
+
+  @Patch('admin/:id/visibility')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Set service visibility (admin)' })
+  @ApiParam({ name: 'id', description: 'Service ID' })
+  @ApiResponse({ status: 200, description: 'Service visibility updated', type: Service })
+  @ApiResponse({ status: 404, description: 'Service not found' })
+  async setVisibilityForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetServiceVisibilityDto,
+  ): Promise<Service> {
+    return this.servicesService.setVisibilityForAdmin(id, dto.isHidden);
   }
 
   @Delete('admin/:id')

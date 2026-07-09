@@ -5,11 +5,25 @@ export const activeServiceWhere = (): FindOptionsWhere<Service> => ({
   deletedAt: IsNull(),
 });
 
+export const publicServiceWhere = (): FindOptionsWhere<Service> => ({
+  deletedAt: IsNull(),
+  isHidden: false,
+});
+
 export function applyActiveServiceFilter(
   qb: SelectQueryBuilder<Service>,
   alias = 'service',
 ): SelectQueryBuilder<Service> {
   return qb.andWhere(`${alias}."deletedAt" IS NULL`);
+}
+
+export function applyPublicServiceFilter(
+  qb: SelectQueryBuilder<Service>,
+  alias = 'service',
+): SelectQueryBuilder<Service> {
+  return qb
+    .andWhere(`${alias}."deletedAt" IS NULL`)
+    .andWhere(`${alias}."isHidden" = false`);
 }
 
 export function isServiceActive(service: Service | null | undefined): boolean {

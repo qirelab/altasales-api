@@ -19,6 +19,7 @@ import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { GetAdminPackagesQueryDto } from './dto/get-admin-packages-query.dto';
+import { SetPackageVisibilityDto } from './dto/set-package-visibility.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
 import { PackagesService } from './packages.service';
@@ -69,6 +70,20 @@ export class PackagesController {
     @Body() updatePackageDto: UpdatePackageDto,
   ): Promise<ServicePackage> {
     return this.packagesService.update(id, updatePackageDto);
+  }
+
+  @Patch('admin/:id/visibility')
+  @UseGuards(SessionGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Set package visibility (admin)' })
+  @ApiParam({ name: 'id', description: 'Package ID' })
+  @ApiResponse({ status: 200, description: 'Package visibility updated', type: ServicePackage })
+  @ApiResponse({ status: 404, description: 'Package not found' })
+  async setVisibilityForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetPackageVisibilityDto,
+  ): Promise<ServicePackage> {
+    return this.packagesService.setVisibilityForAdmin(id, dto.isHidden);
   }
 
   @Delete('admin/:id')
