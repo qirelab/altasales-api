@@ -34,7 +34,7 @@ export class CreateAdminExpertMemberDto {
 
   @ApiProperty({ example: 'secret123', minLength: 6 })
   @IsString()
-  @MinLength(6)
+  @MinLength(6, { message: 'Пароль должен быть не короче 6 символов' })
   password: string;
 
   @ApiProperty({ example: 5, minimum: 0, maximum: 99 })
@@ -86,6 +86,16 @@ export class UpdateAdminExpertMemberDto {
   @IsOptional()
   @IsString()
   phoneNumber?: string;
+
+  @ApiPropertyOptional({
+    example: 'secret123',
+    minLength: 6,
+    description: 'New password for the expert. Omit to keep the current one.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(6, { message: 'Пароль должен быть не короче 6 символов' })
+  password?: string;
 
   @ApiPropertyOptional({ example: 5, minimum: 0, maximum: 99 })
   @IsOptional()
