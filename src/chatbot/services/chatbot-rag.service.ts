@@ -9,6 +9,11 @@ import {
   KnowledgeSearchResultItem,
   KnowledgeSearchService,
 } from '../../knowledge/services/knowledge-search.service';
+import {
+  ChatbotConversationalContextService,
+  ChatbotHistoryEntry,
+} from './chatbot-conversational-context.service';
+import { ChatbotQueryRewriterService } from './chatbot-query-rewriter.service';
 
 const DEFAULT_RETRIEVAL_LIMIT = 6;
 const DEFAULT_MIN_RELEVANCE_SCORE = 0.35;
@@ -54,9 +59,17 @@ const EVENT_SUCCEEDED = 'CHATBOT_RAG_SUCCEEDED';
  *   they will leak into public answers. Introducing a per-chunk `audience` field +
  *   filter is Phase 3 scope — flagged in the punch list. Assumption today: every
  *   chunk under `QA_CHATBOT` is public-safe.
+ * - Conversation memory: the optional `history` on the input is sliced by
+ *   `ChatbotConversationalContextService`, then a follow-up like "а сколько он
+ *   стоит?" is rewritten into "сколько стоит CRM Silver?" before retrieval so
+ *   vector search finds the right chunks. History (unmodified) is also spliced
+ *   into the LLM messages between system and augmented-user prompts so the model
+ *   sees the full turn context. Ownership of history and its storage live with
+ *   the caller (e.g. `/chat` module) — this service is agnostic of source.
  */
 export type ChatbotRagInput = {
   question: string;
+  history?: ChatbotHistoryEntry[];
 };
 
 export type ChatbotRagSource = {
@@ -102,6 +115,8 @@ export class ChatbotRagService {
   constructor(
     private readonly knowledgeSearch: KnowledgeSearchService,
     private readonly llmProxy: LlmProxyService,
+    private readonly conversationalContext: ChatbotConversationalContextService,
+    private readonly queryRewriter: ChatbotQueryRewriterService,
     @Optional()
     private readonly configService?: ConfigService,
   ) {
@@ -119,12 +134,21 @@ export class ChatbotRagService {
       return this.buildRefusal('empty_question', startedAt, { retrievalMs: 0, totalResults: 0 });
     }
 
+    // Memory pipeline: slice history → rewrite follow-up query → retrieve → LLM.
+    // Rewrite turns "а сколько он стоит?" into "сколько стоит CRM Silver?" so
+    // vector retrieval matches the right chunks even for terse follow-ups.
+    const context = this.conversationalContext.build(input.history ?? []);
+    const rewriteStartedAt = Date.now();
+    const searchQuery = await this.queryRewriter.rewrite(question, context.historyMessages);
+    const rewriteMs = Date.now() - rewriteStartedAt;
+    const queryRewritten = searchQuery !== question ? 1 : 0;
+
     const retrievalStartedAt = Date.now();
     let results: KnowledgeSearchResultItem[];
     try {
       const searchResponse = await this.knowledgeSearch.search({
         purpose: KnowledgeBasePurpose.QA_CHATBOT,
-        query: question,
+        query: searchQuery,
         limit: this.retrievalLimit,
       });
       results = searchResponse.results;
@@ -135,6 +159,9 @@ export class ChatbotRagService {
       return this.buildRefusal('retrieval_failed', startedAt, {
         retrievalMs: Date.now() - retrievalStartedAt,
         totalResults: 0,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
       });
     }
     const retrievalMs = Date.now() - retrievalStartedAt;
@@ -144,7 +171,14 @@ export class ChatbotRagService {
       return this.buildRefusal(
         results.length === 0 ? 'no_results' : 'below_threshold',
         startedAt,
-        { retrievalMs, totalResults: results.length, topScore: results[0]?.score },
+        {
+          retrievalMs,
+          totalResults: results.length,
+          topScore: results[0]?.score,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        },
       );
     }
 
@@ -154,6 +188,9 @@ export class ChatbotRagService {
         retrievalMs,
         totalResults: results.length,
         topScore: strongResults[0]?.score,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
       });
     }
     const userContent = this.buildAugmentedPrompt(question, contextResults);
@@ -167,6 +204,7 @@ export class ChatbotRagService {
         declaredDataClass: DataClass.NoPii,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
+          ...context.historyMessages,
           { role: 'user', content: userContent },
         ],
         policy: {
@@ -184,6 +222,9 @@ export class ChatbotRagService {
         topScore: results[0]?.score,
         contextChunks: contextResults.length,
         generationMs: Date.now() - generationStartedAt,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
       });
     }
     const generationMs = Date.now() - generationStartedAt;
@@ -194,6 +235,9 @@ export class ChatbotRagService {
         totalResults: results.length,
         contextChunks: contextResults.length,
         generationMs,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
       });
     }
 
@@ -204,6 +248,9 @@ export class ChatbotRagService {
       totalResults: results.length,
       contextChunks: contextResults.length,
       topScore: contextResults[0]?.score,
+      rewriteMs,
+      queryRewritten,
+      usedHistoryCount: context.usedHistoryCount,
     });
 
     return {
