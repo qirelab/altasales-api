@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationScoringService } from './recommendation-scoring.service';
@@ -75,6 +75,29 @@ describe('RecommendationScoringService', () => {
       ),
     ).resolves.toEqual([]);
     expect(Logger.prototype.warn).toHaveBeenCalled();
+  });
+
+  it('logs and falls back when anonymization validation fails', async () => {
+    const error = new BadRequestException(
+      'LLM request validation failed',
+    ) as BadRequestException & { safeErrorCode: string };
+    error.safeErrorCode = 'AI_VALIDATION_FAILED';
+    llmProxy.chat.mockRejectedValueOnce(error);
+
+    await expect(
+      service.generateAiRecommendations(
+        {
+          userId: 'user-id',
+          diagnostics: ['revenue plan'],
+        },
+        [],
+        'revenue plan',
+      ),
+    ).resolves.toEqual([]);
+    expect(Logger.prototype.warn).toHaveBeenCalledWith({
+      eventName: 'AI_RECOMMENDATION_GENERATION_FAILED',
+      error: 'LLM request validation failed',
+    });
   });
 
   it('accepts serviceId from AI recommendation output', async () => {
