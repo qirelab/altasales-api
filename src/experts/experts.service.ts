@@ -1688,6 +1688,17 @@ export class ExpertsService {
     if (dto.phoneNumber !== undefined) user.phoneNumber = dto.phoneNumber.trim();
     await this.userRepository.save(user);
 
+    if (dto.password) {
+      if (!user.firebaseUid) {
+        throw new BadRequestException(
+          'У эксперта нет привязки к Firebase — пароль изменить нельзя',
+        );
+      }
+      await this.firebaseService
+        .getAuth()
+        .updateUser(user.firebaseUid, { password: dto.password });
+    }
+
     let profileEntity = await this.expertProfileRepository.findOne({ where: { userId } });
     if (!profileEntity) {
       profileEntity = this.expertProfileRepository.create({ userId, skills: [] });

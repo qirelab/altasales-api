@@ -41,6 +41,7 @@ export class CategoriesService {
     const category = await this.categoryRepository.findOne({
       where: { slug: normalizedSlug, isHidden: false },
       relations: { faqs: true },
+      order: { faqs: { sortOrder: 'ASC' } },
     });
 
     if (!category) {
@@ -111,7 +112,8 @@ export class CategoriesService {
       .loadRelationCountAndMap('c.packagesCount', 'c.packages')
       .loadRelationCountAndMap('c.faqsCount', 'c.faqs')
       .where('c.id = :id', { id })
-      .orderBy('service.name', 'ASC')
+      .orderBy('faq."sortOrder"', 'ASC')
+      .addOrderBy('service.name', 'ASC')
       .addOrderBy('pkg.name', 'ASC')
       .getOne();
 
@@ -145,7 +147,8 @@ export class CategoriesService {
 
       return categoryRepo.findOneOrFail({
         where: { id: category.id },
-        relations: ['faqs'],
+        relations: { faqs: true },
+        order: { faqs: { sortOrder: 'ASC' } },
       });
     });
   }
@@ -153,7 +156,8 @@ export class CategoriesService {
   async updateForAdmin(id: string, dto: UpdateAdminCategoryDto): Promise<Category> {
     const category = await this.categoryRepository.findOne({
       where: { id },
-      relations: ['faqs'],
+      relations: { faqs: true },
+      order: { faqs: { sortOrder: 'ASC' } },
     });
 
     if (!category) {
@@ -184,7 +188,8 @@ export class CategoriesService {
 
       return categoryRepo.findOneOrFail({
         where: { id },
-        relations: ['faqs'],
+        relations: { faqs: true },
+        order: { faqs: { sortOrder: 'ASC' } },
       });
     });
   }
@@ -203,6 +208,7 @@ export class CategoriesService {
     const category = await this.categoryRepository.findOne({
       where: { id },
       relations: { faqs: true },
+      order: { faqs: { sortOrder: 'ASC' } },
     });
 
     if (!category) {
@@ -268,7 +274,8 @@ export class CategoriesService {
       await faqRepo.remove(toRemove);
     }
 
-    for (const item of faqs) {
+    for (let index = 0; index < faqs.length; index += 1) {
+      const item = faqs[index];
       const question = item.question.trim();
       const answer = item.answer.trim();
 
@@ -280,6 +287,7 @@ export class CategoriesService {
 
         faq.question = question;
         faq.answer = answer;
+        faq.sortOrder = index;
         await faqRepo.save(faq);
         continue;
       }
@@ -289,6 +297,7 @@ export class CategoriesService {
           categoryId,
           question,
           answer,
+          sortOrder: index,
         }),
       );
     }

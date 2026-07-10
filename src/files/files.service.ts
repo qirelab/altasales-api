@@ -1,14 +1,13 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { FileEntity, FileSource } from './entities/file.entity';
-import { User } from '../users/entities/user.entity';
+
 import { RopService } from '../rop/rop.service';
+import { User } from '../users/entities/user.entity';
+import { FileEntity, FileSource } from './entities/file.entity';
 
 @Injectable()
 export class FilesService {
-  private readonly logger = new Logger(FilesService.name);
-
   constructor(
     @InjectRepository(FileEntity)
     private readonly fileRepository: Repository<FileEntity>,
@@ -17,7 +16,7 @@ export class FilesService {
     private readonly ropService: RopService,
   ) {}
 
-  private async getOrCreateRopProject(userId: string): Promise<string> {
+  private async getRopProjectId(userId: string): Promise<string> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
@@ -25,14 +24,11 @@ export class FilesService {
       return user.ropProjectId;
     }
 
-    const project = await this.ropService.createProject(
-      `altasales-user-${userId}`,
-    );
+    if (!this.ropService.isConfigured()) {
+      throw new InternalServerErrorException('ROP API not configured');
+    }
 
-    await this.userRepository.update(userId, { ropProjectId: project.id });
-    this.logger.log(`Created ROP project ${project.id} for user ${userId}`);
-
-    return project.id;
+    throw new BadRequestException('Сначала заполните анкету');
   }
 
   async create(
@@ -42,7 +38,7 @@ export class FilesService {
     source: FileSource = FileSource.CLIENT,
     orderItemSubItemId?: string,
   ): Promise<FileEntity> {
-    const ropProjectId = await this.getOrCreateRopProject(userId);
+    const ropProjectId = await this.getRopProjectId(userId);
 
     const ropDocument = await this.ropService.createDocument(
       ropProjectId,

@@ -29,6 +29,7 @@ const SUPPORTED_ENTITY_TYPES: readonly PiiEntityType[] = [
   'inn',
   'snils',
   'passport',
+  'address',
   'bank_card',
   'birth_date',
 ];

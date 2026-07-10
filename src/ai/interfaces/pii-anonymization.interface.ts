@@ -8,6 +8,7 @@ export type PiiEntityType =
   | 'inn'
   | 'snils'
   | 'passport'
+  | 'address'
   | 'bank_card'
   | 'birth_date';
 
