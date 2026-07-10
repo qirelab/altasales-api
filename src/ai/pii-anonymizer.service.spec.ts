@@ -173,6 +173,179 @@ describe('PiiAnonymizerService', () => {
     expect(result.dataClass).toBe(DataClass.HighSensitive);
   });
 
+  it('accepts a consistent person, email, and phone contract', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Contact {{PII_PERSON_0001}} at {{PII_EMAIL_0001}} or {{PII_PHONE_0001}}',
+          },
+        ],
+        entities: [
+          {
+            placeholder: '{{PII_PERSON_0001}}',
+            type: 'person',
+            description: 'person name',
+          },
+          {
+            placeholder: '{{PII_EMAIL_0001}}',
+            type: 'email',
+            description: 'email address',
+          },
+          {
+            placeholder: '{{PII_PHONE_0001}}',
+            type: 'phone',
+            description: 'phone number',
+          },
+        ],
+        placeholderMap: {
+          '{{PII_PERSON_0001}}': 'Synthetic Person',
+          '{{PII_EMAIL_0001}}': 'synthetic@example.test',
+          '{{PII_PHONE_0001}}': '+7 999 000-00-00',
+        },
+        stats: { person: 1, email: 1, phone: 1 },
+      }),
+    );
+
+    const result = await service.anonymizeMessages(messages);
+
+    expect(result.dataClass).toBe(DataClass.AnonymizedPii);
+    expect(result.entities).toHaveLength(3);
+    expect(result.stats).toEqual({ person: 1, email: 1, phone: 1 });
+  });
+
+  it('fails closed when a message placeholder is absent from entities and map', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII_EMAIL_0001}}' }],
+        entities: [],
+        placeholderMap: {},
+        stats: {},
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when a message placeholder is missing from the map', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII_EMAIL_0001}}' }],
+        entities: [
+          {
+            placeholder: '{{PII_EMAIL_0001}}',
+            type: 'email',
+            description: 'email address',
+          },
+        ],
+        placeholderMap: {},
+        stats: { email: 1 },
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when a message placeholder is missing from entities', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII_EMAIL_0001}}' }],
+        entities: [],
+        placeholderMap: {
+          '{{PII_EMAIL_0001}}': 'user@example.com',
+        },
+        stats: { email: 1 },
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when a map placeholder is absent from messages', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact removed' }],
+        entities: [],
+        placeholderMap: {
+          '{{PII_EMAIL_0001}}': 'user@example.com',
+        },
+        stats: { email: 1 },
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when an entity placeholder is absent from messages', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact removed' }],
+        entities: [
+          {
+            placeholder: '{{PII_EMAIL_0001}}',
+            type: 'email',
+            description: 'email address',
+          },
+        ],
+        placeholderMap: {
+          '{{PII_EMAIL_0001}}': 'user@example.com',
+        },
+        stats: { email: 1 },
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when entity placeholders are duplicated', async () => {
+    const entity = {
+      placeholder: '{{PII_EMAIL_0001}}',
+      type: 'email',
+      description: 'email address',
+    };
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII_EMAIL_0001}}' }],
+        entities: [entity, entity],
+        placeholderMap: {
+          '{{PII_EMAIL_0001}}': 'user@example.com',
+        },
+        stats: { email: 2 },
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when messages contain an invalid PII placeholder format', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII_EMAIL_1}}' }],
+        entities: [],
+        placeholderMap: {},
+        stats: {},
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
   it('fails closed on malformed JSON', async () => {
     provider.anonymize.mockResolvedValueOnce('not-json');
 
