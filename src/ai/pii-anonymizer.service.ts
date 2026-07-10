@@ -52,7 +52,7 @@ const PII_PATTERNS: Record<Exclude<PiiKind, 'bank_card'>, RegExp> = {
 
 const CARD_CANDIDATE_PATTERN = /\b(?:\d[ -]*?){13,19}\b/g;
 const PLACEHOLDER_PATTERN = /^\{\{PII_[A-Z_]+_\d{4}\}\}$/;
-const PII_PLACEHOLDER_CANDIDATE_PATTERN = /\{\{PII_[^{}]*\}\}/g;
+const PII_PLACEHOLDER_CANDIDATE_PATTERN = /\{\{\s*PII[^{}]*\}\}/gi;
 
 // The LLM anonymizer is the primary detector; regexes are safety checks only.
 @Injectable()

@@ -346,6 +346,36 @@ describe('PiiAnonymizerService', () => {
     );
   });
 
+  it('fails closed when messages contain a case-variant PII placeholder format', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{pii_email_0001}}' }],
+        entities: [],
+        placeholderMap: {},
+        stats: {},
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
+  it('fails closed when messages contain a malformed PII placeholder prefix', async () => {
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII-EMAIL-0001}}' }],
+        entities: [],
+        placeholderMap: {},
+        stats: {},
+      }),
+    );
+
+    await expect(service.anonymizeMessages(messages)).rejects.toThrow(
+      'validation_error',
+    );
+  });
+
   it('fails closed on malformed JSON', async () => {
     provider.anonymize.mockResolvedValueOnce('not-json');
 
