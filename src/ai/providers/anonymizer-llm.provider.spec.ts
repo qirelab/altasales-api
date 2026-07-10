@@ -4,6 +4,8 @@ import { AiMonitoringEventName } from '../enums/ai-monitoring-event-name.enum';
 import { AiMonitoringOperation } from '../enums/ai-monitoring-operation.enum';
 import { AiMonitoringStage } from '../enums/ai-monitoring-stage.enum';
 import { AiMonitoringStatus } from '../enums/ai-monitoring-status.enum';
+import { DataClass } from '../enums/data-class.enum';
+import { PiiAnonymizerService } from '../pii-anonymizer.service';
 import { AnonymizerLlmProvider } from './anonymizer-llm.provider';
 
 describe('AnonymizerLlmProvider', () => {
@@ -46,6 +48,125 @@ describe('AnonymizerLlmProvider', () => {
   afterEach(() => {
     restoreEnv(originalEnv);
     jest.restoreAllMocks();
+  });
+
+  it('sends the anonymizer JSON contract before caller messages', async () => {
+    const callerMessages = [
+      { role: 'system' as const, content: 'Caller task instructions' },
+      { role: 'user' as const, content: 'Summarize public information' },
+    ];
+    fetchSpy.mockResolvedValueOnce(okResponse('{"messages":[]}'));
+
+    await provider.anonymize({ messages: callerMessages });
+
+    const requestBody = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+      response_format?: { type?: string };
+    };
+    const anonymizerInstruction = requestBody.messages[0];
+
+    expect(requestBody.model).toBe('pii-anonymizer-v1');
+    expect(requestBody.response_format).toEqual({ type: 'json_object' });
+    expect(anonymizerInstruction.role).toBe('system');
+    expect(anonymizerInstruction.content).toContain('messages');
+    expect(anonymizerInstruction.content).toContain('entities');
+    expect(anonymizerInstruction.content).toContain('placeholderMap');
+    expect(anonymizerInstruction.content).toContain('stats');
+    expect(anonymizerInstruction.content).toContain('address');
+    expect(anonymizerInstruction.content).toContain('Do not answer');
+    expect(anonymizerInstruction.content).toContain('without markdown');
+    expect(anonymizerInstruction.content).toContain('exact number');
+    expect(anonymizerInstruction.content).toContain(
+      'Do not add or remove messages',
+    );
+    expect(anonymizerInstruction.content).toContain('{{PII_TYPE_0001}}');
+    expect(requestBody.messages.slice(1)).toEqual(callerMessages);
+  });
+
+  it('normalizes an OpenAI-compatible envelope for strict validation', async () => {
+    const content = JSON.stringify({
+      messages: [{ role: 'user', content: 'Email: {{PII_EMAIL_0001}}' }],
+      entities: [
+        {
+          placeholder: '{{PII_EMAIL_0001}}',
+          type: 'email',
+          description: 'email address',
+        },
+      ],
+      placeholderMap: {
+        '{{PII_EMAIL_0001}}': 'user@example.com',
+      },
+      stats: { email: 1 },
+    });
+    fetchSpy.mockResolvedValueOnce(
+      okResponse(JSON.stringify({ choices: [{ message: { content } }] })),
+    );
+    const anonymizer = new PiiAnonymizerService(provider);
+
+    const result = await anonymizer.anonymizeMessages(request.messages);
+
+    expect(result.dataClass).toBe(DataClass.AnonymizedPii);
+    expect(result.messages[0].content).toBe('Email: {{PII_EMAIL_0001}}');
+  });
+
+  it('keeps a raw anonymizer contract compatible with custom facades', async () => {
+    const cleanMessages = [
+      { role: 'user' as const, content: 'Summarize public information' },
+    ];
+    fetchSpy.mockResolvedValueOnce(
+      okResponse(
+        JSON.stringify({
+          messages: cleanMessages,
+          entities: [],
+          placeholderMap: {},
+          stats: {},
+        }),
+      ),
+    );
+    const anonymizer = new PiiAnonymizerService(provider);
+
+    const result = await anonymizer.anonymizeMessages(cleanMessages);
+
+    expect(result.dataClass).toBe(DataClass.NoPii);
+    expect(result.messages).toEqual(cleanMessages);
+  });
+
+  it('unwraps a JSON-encoded contract string from custom facades', async () => {
+    const cleanMessages = [
+      { role: 'user' as const, content: 'Summarize public information' },
+    ];
+    const content = JSON.stringify({
+      messages: cleanMessages,
+      entities: [],
+      placeholderMap: {},
+      stats: {},
+    });
+    fetchSpy.mockResolvedValueOnce(okResponse(JSON.stringify(content)));
+    const anonymizer = new PiiAnonymizerService(provider);
+
+    const result = await anonymizer.anonymizeMessages(cleanMessages);
+
+    expect(result.dataClass).toBe(DataClass.NoPii);
+    expect(result.messages).toEqual(cleanMessages);
+  });
+
+  it('lets strict validation reject plain text without logging it', async () => {
+    const rawMarker = 'ordinary-anonymizer-response-marker';
+    fetchSpy.mockResolvedValueOnce(okResponse(rawMarker));
+    const anonymizer = new PiiAnonymizerService(provider);
+
+    await expect(
+      anonymizer.anonymizeMessages(request.messages),
+    ).rejects.toThrow('validation_error');
+
+    const serializedLogs = loggerLogSpy.mock.calls
+      .flat()
+      .map((entry) => JSON.stringify(entry))
+      .join(' ');
+    expect(serializedLogs).not.toContain(rawMarker);
   });
 
   it('times out safely', async () => {

@@ -49,7 +49,9 @@ describe('PiiAnonymizerService', () => {
   });
 
   it('detects valid 10-digit and 12-digit INN values', () => {
-    const result = service.scanText('ИНН компании 7707083893, ИНН ИП 500100732259');
+    const result = service.scanText(
+      'ИНН компании 7707083893, ИНН ИП 500100732259',
+    );
 
     expect(result.hasPii).toBe(true);
     expect(result.stats.inn).toBe(2);
@@ -69,9 +71,9 @@ describe('PiiAnonymizerService', () => {
     }).compile();
     const serviceWithoutProvider = moduleRef.get(PiiAnonymizerService);
 
-    await expect(serviceWithoutProvider.anonymizeMessages(messages)).rejects.toThrow(
-      'anonymizer_unavailable',
-    );
+    await expect(
+      serviceWithoutProvider.anonymizeMessages(messages),
+    ).rejects.toThrow('anonymizer_unavailable');
   });
 
   it('validates anonymizer JSON and returns anonymized data class', async () => {
@@ -99,6 +101,35 @@ describe('PiiAnonymizerService', () => {
     expect(result.semanticPlaceholderDescriptions).toEqual({
       '{{PII_EMAIL_0001}}': 'email address',
     });
+  });
+
+  it('accepts address entities from the anonymizer contract', async () => {
+    const addressMessages: LlmMessage[] = [
+      { role: 'user', content: 'Deliver to Main Street 1' },
+    ];
+    provider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [
+          { role: 'user', content: 'Deliver to {{PII_ADDRESS_0001}}' },
+        ],
+        entities: [
+          {
+            placeholder: '{{PII_ADDRESS_0001}}',
+            type: 'address',
+            description: 'postal address',
+          },
+        ],
+        placeholderMap: {
+          '{{PII_ADDRESS_0001}}': 'Main Street 1',
+        },
+        stats: { address: 1 },
+      }),
+    );
+
+    const result = await service.anonymizeMessages(addressMessages);
+
+    expect(result.dataClass).toBe(DataClass.AnonymizedPii);
+    expect(result.messages[0].content).toBe('Deliver to {{PII_ADDRESS_0001}}');
   });
 
   it('returns no_pii when anonymizer finds no entities', async () => {
@@ -169,7 +200,9 @@ describe('PiiAnonymizerService', () => {
   it('fails closed when message role changes', async () => {
     provider.anonymize.mockResolvedValueOnce(
       JSON.stringify({
-        messages: [{ role: 'assistant', content: 'Contact {{PII_EMAIL_0001}}' }],
+        messages: [
+          { role: 'assistant', content: 'Contact {{PII_EMAIL_0001}}' },
+        ],
         entities: [],
         placeholderMap: {},
         stats: {},

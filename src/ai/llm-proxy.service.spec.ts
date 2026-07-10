@@ -158,12 +158,15 @@ describe('LlmProxyService', () => {
   });
 
   it('mode required still calls anonymizer for explicit no_pii', async () => {
+    const chatSpy = jest.spyOn(provider, 'chat');
+
     await service.chat({
       ...baseRequest,
       declaredDataClass: DataClass.NoPii,
     });
 
     expect(anonymizerProvider.anonymize).toHaveBeenCalledTimes(1);
+    expect(chatSpy).toHaveBeenCalledTimes(1);
   });
 
   it('mode disabled_for_no_pii lets explicit no_pii skip anonymizer', async () => {
@@ -498,11 +501,28 @@ describe('LlmProxyService', () => {
   });
 
   it('malformed anonymizer JSON fails closed', async () => {
-    anonymizerProvider.anonymize.mockResolvedValueOnce('raw response with map');
+    const rawMarker = 'ordinary-anonymizer-response-marker';
+    anonymizerProvider.anonymize.mockResolvedValueOnce(rawMarker);
+    const chatSpy = jest.spyOn(provider, 'chat');
 
-    await expect(service.chat(baseRequest)).rejects.toThrow(
-      new BadRequestException('LLM request validation failed'),
+    await expect(service.chat(baseRequest)).rejects.toMatchObject({
+      message: 'LLM request validation failed',
+      safeErrorCode: 'AI_VALIDATION_FAILED',
+    });
+    expect(chatSpy).not.toHaveBeenCalled();
+    expect(loggerLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: AiMonitoringEventName.AiStageFailed,
+        stage: AiMonitoringStage.Anonymization,
+        errorCode: 'AI_VALIDATION_FAILED',
+      }),
     );
+
+    const serializedLogs = loggerLogSpy.mock.calls
+      .flat()
+      .map((entry) => JSON.stringify(entry))
+      .join(' ');
+    expect(serializedLogs).not.toContain(rawMarker);
   });
 
   it('changed message count fails closed', async () => {
