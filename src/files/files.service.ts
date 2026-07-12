@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, InternalServerErrorException, NotFound
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 
+import { OrderItem } from '../orders/entities/order-item.entity';
 import { RopService } from '../rop/rop.service';
 import { User } from '../users/entities/user.entity';
 import { FileEntity, FileSource } from './entities/file.entity';
@@ -13,6 +14,8 @@ export class FilesService {
     private readonly fileRepository: Repository<FileEntity>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(OrderItem)
+    private readonly orderItemRepository: Repository<OrderItem>,
     private readonly ropService: RopService,
   ) {}
 
@@ -31,6 +34,27 @@ export class FilesService {
     throw new BadRequestException('Сначала заполните анкету');
   }
 
+  private async resolveTargetUserId(
+    currentUserId: string,
+    source: FileSource,
+    orderItemId?: string,
+  ): Promise<string> {
+    if (source !== FileSource.ADMIN || !orderItemId) {
+      return currentUserId;
+    }
+
+    const orderItem = await this.orderItemRepository.findOne({
+      where: { id: orderItemId },
+      relations: ['order'],
+    });
+
+    if (!orderItem?.order?.userId) {
+      throw new NotFoundException('Order item not found');
+    }
+
+    return orderItem.order.userId;
+  }
+
   async create(
     userId: string,
     file: Express.Multer.File,
@@ -38,7 +62,8 @@ export class FilesService {
     source: FileSource = FileSource.CLIENT,
     orderItemSubItemId?: string,
   ): Promise<FileEntity> {
-    const ropProjectId = await this.getRopProjectId(userId);
+    const targetUserId = await this.resolveTargetUserId(userId, source, orderItemId);
+    const ropProjectId = await this.getRopProjectId(targetUserId);
 
     const ropDocument = await this.ropService.createDocument(
       ropProjectId,
@@ -48,7 +73,7 @@ export class FilesService {
     await this.ropService.uploadFile(ropProjectId, ropDocument.id, file);
 
     const entity = this.fileRepository.create({
-      userId,
+      userId: targetUserId,
       originalName: file.originalname,
       storedName: ropDocument.id,
       mimeType: file.mimetype,

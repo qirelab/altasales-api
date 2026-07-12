@@ -14,8 +14,10 @@ import type { CurrentUserData } from '../auth/decorators/current-user.decorator'
 import { SessionGuard } from '../auth/guards/session.guard';
 import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
+import { RopStatusResponseDto } from './dto/rop-status-response.dto';
 import { RopTaskResponseDto } from './dto/rop-task-response.dto';
 import { RopDocumentsService } from './rop-documents.service';
+import { RopStatusService } from './rop-status.service';
 import { RopTasksService } from './rop-tasks.service';
 
 @ApiTags('rop')
@@ -24,8 +26,16 @@ import { RopTasksService } from './rop-tasks.service';
 export class RopController {
   constructor(
     private readonly ropDocumentsService: RopDocumentsService,
+    private readonly ropStatusService: RopStatusService,
     private readonly ropTasksService: RopTasksService,
   ) {}
+
+  @Get('status')
+  @ApiOperation({ summary: 'Get current user ROP integration status' })
+  @ApiOkResponse({ type: RopStatusResponseDto })
+  async getStatus(@CurrentUser() user: CurrentUserData): Promise<RopStatusResponseDto> {
+    return this.ropStatusService.getForUser(user.id);
+  }
 
   @Get('documents')
   @ApiOperation({ summary: 'List ROP project documents for the current user' })
