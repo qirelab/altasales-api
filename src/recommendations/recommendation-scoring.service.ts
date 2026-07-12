@@ -36,7 +36,7 @@ type AiRecommendationCandidate = {
   diagnosticSignals?: string[];
 };
 
-const MAX_CATALOG_FOR_LLM = 50;
+const MAX_CATALOG_FOR_LLM = 500;
 const AI_RECOMMENDATION_CACHE_TTL_MS = 60 * 60 * 1000;
 const AI_SEMANTIC_RECOMMENDATION_SCORE = 6;
 const MIN_AI_EVIDENCE_TOKEN_LENGTH = 4;
@@ -235,7 +235,14 @@ export class RecommendationScoringService {
 
     if (!Array.isArray(parsed.recommendations)) return [];
     return parsed.recommendations.filter(
-      (item) => item && typeof item.serviceId === 'string',
+      (item) =>
+        item &&
+        typeof item.serviceId === 'string' &&
+        (item.priority === undefined || typeof item.priority === 'string') &&
+        (item.rationale === undefined || typeof item.rationale === 'string') &&
+        (item.diagnosticSignals === undefined ||
+          (Array.isArray(item.diagnosticSignals) &&
+            item.diagnosticSignals.every((signal) => typeof signal === 'string'))),
     );
   }
 
@@ -274,7 +281,7 @@ export class RecommendationScoringService {
 
   normalizeSignals(signals: string[]): string[] {
     return Array.from(
-      new Set(signals.map((s) => s.trim()).filter((s) => s.length > 0)),
+      new Set(signals.filter((s): s is string => typeof s === 'string').map((s) => s.trim()).filter((s) => s.length > 0)),
     );
   }
 
