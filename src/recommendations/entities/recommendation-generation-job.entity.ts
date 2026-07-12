@@ -24,6 +24,10 @@ export class RecommendationGenerationJob {
   @Column({ type: 'uuid' })
   userId: string;
 
+  @ApiPropertyOptional({ description: 'Client supplied idempotency key' })
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  idempotencyKey: string | null;
+
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
   user: User;
@@ -58,6 +62,16 @@ export class RecommendationGenerationJob {
   @ApiPropertyOptional({ description: 'When processing completed or failed' })
   @Column({ type: 'timestamptz', nullable: true })
   completedAt: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'Opaque token owned by the worker processing the job',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  leaseToken: string | null;
+
+  @ApiPropertyOptional({ description: 'When the current worker lease expires' })
+  @Column({ type: 'timestamptz', nullable: true })
+  leaseExpiresAt: Date | null;
 
   @ApiProperty({ description: 'Job creation date' })
   @CreateDateColumn({ type: 'timestamptz' })
