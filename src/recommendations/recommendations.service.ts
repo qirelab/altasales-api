@@ -48,7 +48,6 @@ import {
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
-const MIN_FALLBACK_RECOMMENDATION_SCORE = 25;
 const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
   RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
@@ -298,6 +297,7 @@ export class RecommendationsService implements OnModuleInit {
     const rows: UserRecommendationListItem[] = rawRows.map(
       ({ orderId: _omit, giftEligible, ...rest }) => ({
         ...rest,
+        price: Number(rest.price),
         giftEligible: giftEligible == null ? null : giftEligible === true,
       }),
     );
@@ -626,13 +626,6 @@ export class RecommendationsService implements OnModuleInit {
       services,
       context,
     );
-
-    if (ranked.length === 0) {
-      ranked = services
-        .map((service) => this.scoringService.scoreService(service, context))
-        .filter((item) => item.score >= MIN_FALLBACK_RECOMMENDATION_SCORE)
-        .sort((a, b) => b.score - a.score);
-    }
 
     ranked = this.relevanceRanker.rankRecommendations(
       effectiveDto,

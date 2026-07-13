@@ -49,50 +49,50 @@ export async function ensureDependencyGraphIsValid(
     throw new BadRequestException('Dependencies must belong to the same user');
   }
 
-  if (!rootRecommendationId) return;
-
+  const cache = new Map(dependencies.map((dependency) => [dependency.id, dependency]));
+  const visiting = new Set<string>();
   const visited = new Set<string>();
-  let frontier = dependencies.flatMap(
-    (dependency) => dependency.dependencyIds ?? [],
-  );
-  let depth = 0;
 
-  while (frontier.length > 0) {
-    depth++;
+  const visit = async (id: string, depth: number): Promise<void> => {
     if (depth > MAX_DEPENDENCY_DEPTH) {
       throw new BadRequestException(
         `Recommendation dependency graph exceeds maximum depth of ${MAX_DEPENDENCY_DEPTH}`,
       );
     }
-
-    if (frontier.includes(rootRecommendationId)) {
-      throw new BadRequestException(
-        'Recommendation dependency graph cannot contain cycles',
-      );
+    if (visiting.has(id)) {
+      throw new BadRequestException('Recommendation dependency graph cannot contain cycles');
     }
+    if (visited.has(id)) return;
 
-    const nextIds = uniqueIds(
-      frontier.filter((id) => !visited.has(id)),
-    );
-
-    if (nextIds.length === 0) {
-      return;
+    let dependency = cache.get(id);
+    if (!dependency) {
+      const found = await recommendationRepository.find({
+        where: { id: In([id]) },
+        select: { id: true, userId: true, dependencyIds: true },
+      });
+      if (found.length !== 1) {
+        throw new BadRequestException('One or more dependency IDs do not exist');
+      }
+      dependency = found[0];
+      cache.set(id, dependency);
     }
-
-    nextIds.forEach((id) => visited.add(id));
-
-    const nextDependencies = await recommendationRepository.find({
-      where: { id: In(nextIds) },
-      select: { id: true, userId: true, dependencyIds: true },
-    });
-
-    if (userId && nextDependencies.some((dependency) => dependency.userId !== userId)) {
+    if (userId && dependency.userId !== userId) {
       throw new BadRequestException('Dependencies must belong to the same user');
     }
+    if (rootRecommendationId && id === rootRecommendationId) {
+      throw new BadRequestException('Recommendation dependency graph cannot contain cycles');
+    }
 
-    frontier = nextDependencies.flatMap(
-      (dependency) => dependency.dependencyIds ?? [],
-    );
+    visiting.add(id);
+    for (const childId of uniqueIds(dependency.dependencyIds ?? [])) {
+      await visit(childId, depth + 1);
+    }
+    visiting.delete(id);
+    visited.add(id);
+  };
+
+  for (const dependency of dependencies) {
+    await visit(dependency.id, 1);
   }
 }
 

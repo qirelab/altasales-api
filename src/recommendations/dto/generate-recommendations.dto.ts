@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsInt,
+  MaxLength,
   IsObject,
   IsOptional,
   IsString,
@@ -18,6 +19,12 @@ export class GenerateRecommendationsDto {
   })
   @IsUUID()
   userId: string;
+
+  @ApiPropertyOptional({ description: 'Idempotency key for retrying the same generation job' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  idempotencyKey?: string;
 
   @ApiPropertyOptional({
     description: 'Structured client profile from the platform',
@@ -36,7 +43,7 @@ export class GenerateRecommendationsDto {
   diagnostics?: string[];
 
   @ApiPropertyOptional({
-    description: 'Maximum number of recommendations after package compaction',
+    description: 'Maximum number of recommendations to return',
     minimum: 1,
     maximum: 20,
   })

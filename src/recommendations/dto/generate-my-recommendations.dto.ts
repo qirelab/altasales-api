@@ -7,10 +7,19 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 
 export class GenerateMyRecommendationsDto {
+  @ApiPropertyOptional({
+    description: 'Idempotency key for retrying the same generation job',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  idempotencyKey?: string;
+
   @ApiPropertyOptional({
     description: 'Structured client profile from onboarding or platform data',
   })
