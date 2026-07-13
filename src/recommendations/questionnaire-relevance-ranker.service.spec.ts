@@ -55,6 +55,10 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('quality', 'На Контроле + Рубичат'),
     service('sales-head', 'Руководитель отдела продаж'),
     service('document-request', 'Документ под запрос'),
+    service('ai-docs', 'ИИ анализ документов'),
+    service('ai-crm', 'ИИ анализ CRM'),
+    service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+    service('rop-expert', 'Эксперт РОП: консультация'),
     service('financial-director', 'Финансовый директор'),
   ];
 
@@ -1466,12 +1470,12 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result.map((item) => item.serviceId)).not.toContain('base-setup');
   });
 
-  it('does not treat a new product alone as a new sales department', () => {
+  it('treats the questionnaire value "Нет, продукт новый" as a new sales department', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Новый',
+          productStage: 'Нет, продукт новый',
           targetResult: 'Увеличить продажи в команде из 6 менеджеров',
           calculatedManagersCount: 6,
           components: components({
@@ -1488,9 +1492,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
 
     expect(result.map((item) => item.serviceId)).toContain('dashboard');
-    expect(result.map((item) => item.serviceId)).not.toEqual(
-      expect.arrayContaining(['from-zero']),
-    );
+    expect(result.map((item) => item.serviceId)).toContain('from-zero');
   });
 
   it('prioritizes requested tools and hiring for a new product with inbound leads', () => {
@@ -1839,4 +1841,38 @@ describe('QuestionnaireRelevanceRankerService', () => {
       expect.arrayContaining(['from-zero', 'crm-start', 'crm-bronze']),
     );
   });
+
+  it('selects one-month training, CRM Start, AI analyses and ROP expert for the new-OP questionnaire', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'Нет, продукт новый',
+          desiredResult: { period: '1 месяц', description: 'Запустить ОП' },
+          components: components({
+            crm: true,
+            trainingSystem: true,
+            salesDocuments: true,
+            callAnalysis: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+    );
+    const names = result.map((item) => item.serviceName);
+    expect(names).toEqual(expect.arrayContaining([
+      'Пакет обучения на месяц',
+      'CRM Старт',
+      'ИИ анализ документов',
+      'ИИ анализ CRM',
+      'ИИ анализ звонков и менеджеров',
+      'Эксперт РОП: консультация',
+    ]));
+    expect(names).not.toContain('Пакет обучения на 3 месяца');
+  });
+
 });
