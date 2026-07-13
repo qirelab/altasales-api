@@ -378,7 +378,7 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
   ],
   salesDocuments: [
     {
-      terms: ['ии анализ документов', 'анализ документов'],
+      terms: ['ии анализ документов'],
       points: AI_ANALYSIS_COMPONENT_POINTS,
       reason: 'для документов ОП нужен ИИ-анализ',
     },
@@ -426,7 +426,7 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
   ],
   salesHead: [
     {
-      terms: ['эксперт роп', 'экспертная консультация', 'консультация роп'],
+      terms: ['эксперт роп'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'выбран РОП — нужна экспертная консультация',
     },
@@ -1084,13 +1084,16 @@ export class QuestionnaireRelevanceRankerService {
 
     if (stage === 'new_department') {
       if (profile.selectedComponents.includes('crm')) {
-        add(['ии анализ crm', 'анализ crm'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ CRM');
+        add(['ии анализ crm'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ CRM');
+        add(['анализ crm'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ CRM');
       }
       if (profile.selectedComponents.includes('salesDocuments')) {
-        add(['ии анализ документов', 'анализ документов'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ документов');
+        add(['ии анализ документов'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ документов');
+        add(['анализ документов'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ документов');
       }
       if (profile.selectedComponents.includes('telephony') || profile.selectedComponents.includes('callAnalysis')) {
-        add(['ии анализ звонков и менеджеров', 'анализ звонков и менеджеров'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ звонков и менеджеров');
+        add(['ии анализ звонков и менеджеров'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ звонков и менеджеров');
+        add(['анализ звонков и менеджеров'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ звонков и менеджеров');
       }
     }
 
