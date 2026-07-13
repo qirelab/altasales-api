@@ -1433,6 +1433,12 @@ export class QuestionnaireRelevanceRankerService {
     } = profile;
     const explicitlyRequestedOneMonthTraining =
       desiredPeriod === '1m' && selectedComponents.includes('trainingSystem');
+    const crmStartClosesRequestedIntegrations =
+      existingComponents.includes('crm') &&
+      this.matchesCatalogCandidate(service, serviceText, 'crmStart') &&
+      ['telephony', 'messenger'].every((component) =>
+        selectedComponents.includes(component as SelectedComponent),
+      );
 
     if (this.includesAny(serviceText, ['на контроле', 'рубичат'])) {
       return 'устаревшая услуга заменена ИИ-анализом';
@@ -1443,10 +1449,7 @@ export class QuestionnaireRelevanceRankerService {
         !selectedComponents.includes(component) &&
         !(
           component === 'crm' &&
-          this.matchesCatalogCandidate(service, serviceText, 'crmStart') &&
-          ['telephony', 'messenger'].every((selected) =>
-            selectedComponents.includes(selected as SelectedComponent),
-          )
+          crmStartClosesRequestedIntegrations
         ) &&
         this.matchesExistingComponentService(service, serviceText, component),
     );
@@ -1532,7 +1535,8 @@ export class QuestionnaireRelevanceRankerService {
         (this.matchesCatalogCandidate(service, serviceText, 'trainingOneMonth') &&
           !explicitlyRequestedOneMonthTraining) ||
         (this.includesAny(desiredText, ['crm']) &&
-          (this.matchesCatalogCandidate(service, serviceText, 'crmStart') ||
+          ((this.matchesCatalogCandidate(service, serviceText, 'crmStart') &&
+            !crmStartClosesRequestedIntegrations) ||
             this.matchesCatalogCandidate(service, serviceText, 'crmBronze') ||
             this.includesAny(serviceText, [
               'базовая настройка работы отдела продаж',
