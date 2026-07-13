@@ -22,6 +22,7 @@ export class GenerateRecommendationsDto {
   @ApiPropertyOptional({ description: 'Idempotency key for retrying the same generation job' })
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   idempotencyKey?: string;
 
   @ApiPropertyOptional({
