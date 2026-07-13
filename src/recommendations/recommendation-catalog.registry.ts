@@ -69,6 +69,30 @@ export const RECOMMENDATION_CATALOG = {
     displayName: 'ИИ РОП',
     legacyAliases: ['ии роп'],
   },
+  aiCrmAnalysis: {
+    id: 'f5012878-be3f-448f-a10d-1507eb422442',
+    kind: 'service',
+    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 CRM',
+    legacyAliases: [],
+  },
+  aiDashboardAnalysis: {
+    id: '93404cd2-5292-40c0-a5a3-f77e8709a904',
+    kind: 'service',
+    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u0430\u0448\u0431\u043e\u0440\u0434\u0430',
+    legacyAliases: [],
+  },
+  aiDocumentAnalysis: {
+    id: '68b641f3-5f6f-4d30-9f56-f77cb9cce9ed',
+    kind: 'service',
+    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u043e\u0432',
+    legacyAliases: [],
+  },
+  aiCallManagersAnalysis: {
+    id: 'd2dc70e0-0774-4401-ae25-d15662fe1877',
+    kind: 'service',
+    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0437\u0432\u043e\u043d\u043a\u043e\u0432 \u0438 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u043e\u0432',
+    legacyAliases: [],
+  },
   salesHeadFocus: {
     id: 'b7ddadc8-4654-4d73-9e9a-3a5e3e858f89',
     kind: 'package',
@@ -152,6 +176,35 @@ export const RECOMMENDATION_CATALOG = {
 } as const satisfies Record<string, RecommendationCatalogEntry>;
 
 export type RecommendationCatalogKey = keyof typeof RECOMMENDATION_CATALOG;
+
+/**
+ * Returns the canonical display name and compatibility aliases for catalog
+ * matching. Stable IDs remain the source of truth whenever a candidate has a
+ * configured catalog ID; aliases only support legacy fixtures and records
+ * that predate the catalog registry.
+ */
+export function getRecommendationCatalogAliases(
+  ...keys: RecommendationCatalogKey[]
+): string[] {
+  return Array.from(
+    new Set(
+      keys.flatMap((key) => {
+        const entry = RECOMMENDATION_CATALOG[key];
+        return [entry.displayName, ...entry.legacyAliases];
+      }),
+    ),
+  );
+}
+
+export function getRecommendationCatalogLegacyAliases(
+  ...keys: RecommendationCatalogKey[]
+): string[] {
+  return Array.from(
+    new Set(
+      keys.flatMap((key) => RECOMMENDATION_CATALOG[key].legacyAliases),
+    ),
+  );
+}
 
 export const RECOMMENDATION_CATALOG_ENTRIES = Object.values(
   RECOMMENDATION_CATALOG,

@@ -487,18 +487,18 @@ describe('RecommendationsService', () => {
     const packageCandidate = candidates.find(
       (item) => item.packageId === 'crm-silver-package-id',
     );
-    expect(packageCandidate.coveredServiceIds).toEqual(
-      expect.arrayContaining([
-        'inner-tz-service-id',
-        'tech-spec-service-id',
-        'crm-audit-service-id',
-      ]),
+    expect(packageCandidate.coveredServiceIds).toEqual(['inner-tz-service-id']);
+    expect(packageCandidate.coveredServiceIds).not.toEqual(
+      expect.arrayContaining(['tech-spec-service-id', 'crm-audit-service-id']),
     );
     const documentsPackageCandidate = candidates.find(
       (item) => item.packageId === 'documents-package-id',
     );
-    expect(documentsPackageCandidate.coveredServiceIds).toEqual(
-      expect.arrayContaining(['dashboard-service-id']),
+    expect(documentsPackageCandidate.coveredServiceIds).toEqual([
+      'instruction-service-id',
+    ]);
+    expect(documentsPackageCandidate.coveredServiceIds).not.toContain(
+      'dashboard-service-id',
     );
   });
 
@@ -937,7 +937,7 @@ describe('RecommendationsService', () => {
         rationale: 'package fit',
         diagnosticSignals: [],
         score: 30,
-        coveredServiceIds: ['catalog_semantic:crm_technical_spec'],
+        coveredServiceIds: ['tech-spec-service-id'],
       },
       {
         serviceId: 'tech-spec-service-id',
@@ -947,10 +947,7 @@ describe('RecommendationsService', () => {
         rationale: 'service fit',
         diagnosticSignals: [],
         score: 25,
-        coveredServiceIds: [
-          'tech-spec-service-id',
-          'catalog_semantic:crm_technical_spec',
-        ],
+        coveredServiceIds: ['tech-spec-service-id'],
       },
     ]);
 
@@ -962,7 +959,7 @@ describe('RecommendationsService', () => {
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
       'crm-silver-package-id',
     ]);
-    expect(result[0].coveredServiceIds).toEqual([]);
+    expect(result[0].coveredServiceIds).toEqual(['tech-spec-service-id']);
   });
 
   it('does not let replaceable existing package coverage affect new selection', async () => {
@@ -1008,7 +1005,7 @@ describe('RecommendationsService', () => {
     });
 
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
-      'service-id',
+      'package-id',
     ]);
   });
 
