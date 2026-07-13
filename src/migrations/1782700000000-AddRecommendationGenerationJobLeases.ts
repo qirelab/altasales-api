@@ -11,7 +11,11 @@ export class AddRecommendationGenerationJobLeases1782700000000 implements Migrat
 
     await queryRunner.query(`
       UPDATE "recommendation_generation_job"
-      SET "leaseExpiresAt" = "updatedAt"
+      SET "leaseExpiresAt" = CASE
+        WHEN "updatedAt" < now() - interval '10 minutes'
+          THEN "updatedAt"
+        ELSE now() + interval '10 minutes'
+      END
       WHERE "status" = 'processing' AND "leaseExpiresAt" IS NULL
     `);
 
