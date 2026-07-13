@@ -46,9 +46,13 @@ import {
   ensureDependencyGraphIsValid,
   validateDependencyIds,
 } from './dependency-graph.utils';
+import {
+  getCoverageIds,
+  getCoverageRecommendationTargetId,
+  selectNonOverlappingRecommendations,
+} from './recommendation-coverage.util';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
-const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
   RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
 );
@@ -745,11 +749,7 @@ export class RecommendationsService implements OnModuleInit {
         const activeServices = filterActiveServices(servicePackage.services);
         if (activeServices.length === 0) return null;
         if (this.isPlaceholderPackageCandidate(servicePackage)) return null;
-        const coverageIds = this.getPackageCoverageIds(
-          servicePackage,
-          activeServices,
-          services,
-        );
+        const coverageIds = this.getPackageCoverageIds(activeServices);
 
         return {
           id: servicePackage.id,
@@ -863,57 +863,11 @@ export class RecommendationsService implements OnModuleInit {
     });
   }
 
-  private getPackageCoverageIds(
-    servicePackage: ServicePackage,
-    activeServices: Service[],
-    services: Service[],
-  ): string[] {
-    const coverageIds = new Set<string>();
-
-    activeServices.forEach((service) => {
-      coverageIds.add(service.id);
-      this.getServiceCoverageKeys(service).forEach((key) =>
-        coverageIds.add(key),
-      );
-    });
-
-    this.getPackageCoverageKeys(servicePackage, activeServices).forEach((key) =>
-      coverageIds.add(key),
-    );
-
-    const packageCoverageKeys = new Set(coverageIds);
-    services.forEach((service) => {
-      if (!this.hasRecommendableServiceContent(service)) return;
-      if (service.deletedAt) return;
-
-      const serviceCoverageKeys = this.getServiceCoverageKeys(service);
-      if (serviceCoverageKeys.some((key) => packageCoverageKeys.has(key))) {
-        coverageIds.add(service.id);
-      }
-    });
-
-    return Array.from(coverageIds);
-  }
-
-  private getPackageCoverageKeys(
-    servicePackage: ServicePackage,
-    activeServices: Service[],
-  ): string[] {
-    return this.getLogicalCoverageKeys(
-      [
-        servicePackage.name,
-        servicePackage.description,
-        servicePackage.packageType,
-        ...(servicePackage.categories ?? []).map((c) => c.name),
-        ...(servicePackage.tags ?? []),
-        ...activeServices.flatMap((service) => [
-          service.name,
-          service.description,
-          service.category?.name,
-          ...(service.skills ?? []),
-        ]),
-      ],
-      [servicePackage.name, ...activeServices.map((service) => service.name)],
+  private getPackageCoverageIds(activeServices: Service[]): string[] {
+    return this.uniqueIds(
+      activeServices
+        .filter((service) => !service.deletedAt)
+        .map((service) => service.id),
     );
   }
 
@@ -1129,73 +1083,15 @@ export class RecommendationsService implements OnModuleInit {
     items: GeneratedRecommendationItem[],
     existingCoverage: ExistingRecommendationCoverage[],
   ): GeneratedRecommendationItem[] {
-    const selected: GeneratedRecommendationItem[] = [];
-    const selectedTargetIds = new Set<string>();
-    const selectedCoveredServiceIds = new Set<string>();
-
-    for (const item of items) {
-      const targetId = this.getGeneratedRecommendationTargetId(item);
-      if (!targetId || selectedTargetIds.has(targetId)) continue;
-      const targetIsAlreadyActive = existingCoverage.some(
-        (entry) => entry.blocksOverlaps && entry.targetId === targetId,
-      );
-      if (targetIsAlreadyActive) continue;
-
-      const coveredServiceIds =
-        this.getGeneratedRecommendationCoveredServiceIds(item);
-      const existingCoveredServiceIds =
-        this.getExistingCoveredServiceIdsExceptTarget(
-          existingCoverage,
-          targetId,
-        );
-      const overlapsExisting = coveredServiceIds.some((serviceId) =>
-        existingCoveredServiceIds.has(serviceId),
-      );
-      const overlapsSelected = coveredServiceIds.some((serviceId) =>
-        selectedCoveredServiceIds.has(serviceId),
-      );
-
-      if (overlapsExisting) continue;
-
-      if (overlapsSelected) {
-        const overlappingSelected = selected.filter((selectedItem) =>
-          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).some(
-            (serviceId) => coveredServiceIds.includes(serviceId),
-          ),
-        );
-
-        if (
-          !this.shouldReplaceOverlappingRecommendations(
-            item,
-            overlappingSelected,
-          )
-        ) {
-          continue;
-        }
-
-        overlappingSelected.forEach((selectedItem) => {
-          const selectedTargetId =
-            this.getGeneratedRecommendationTargetId(selectedItem);
-          if (selectedTargetId) selectedTargetIds.delete(selectedTargetId);
-          const selectedIndex = selected.indexOf(selectedItem);
-          if (selectedIndex !== -1) selected.splice(selectedIndex, 1);
-        });
-        selectedCoveredServiceIds.clear();
-        selected.forEach((selectedItem) => {
-          this.getGeneratedRecommendationCoveredServiceIds(
-            selectedItem,
-          ).forEach((serviceId) => selectedCoveredServiceIds.add(serviceId));
-        });
-      }
-
-      selected.push(item);
-      selectedTargetIds.add(targetId);
-      coveredServiceIds.forEach((serviceId) =>
-        selectedCoveredServiceIds.add(serviceId),
-      );
-    }
-
-    return selected;
+    return selectNonOverlappingRecommendations(items, {
+      existingCoverage,
+      idealTargetIds: new Set(
+        items
+          .filter((item) => this.isIdealReferenceRecommendation(item))
+          .map((item) => this.getGeneratedRecommendationTargetId(item))
+          .filter((targetId): targetId is string => Boolean(targetId)),
+      ),
+    });
   }
 
   private compareGeneratedRecommendations(
@@ -1220,56 +1116,6 @@ export class RecommendationsService implements OnModuleInit {
         signal.startsWith('ideal_reference:'),
       ),
     );
-  }
-
-  private shouldReplaceOverlappingRecommendations(
-    item: GeneratedRecommendationItem,
-    overlappingSelected: GeneratedRecommendationItem[],
-  ): boolean {
-    if (!item.packageId || overlappingSelected.length === 0) {
-      return false;
-    }
-    if (
-      overlappingSelected.some((selectedItem) =>
-        this.isIdealReferenceRecommendation(selectedItem),
-      )
-    ) {
-      return false;
-    }
-
-    const itemCoverageSize =
-      this.getGeneratedRecommendationCoveredServiceIds(item).length;
-    const maxSelectedCoverageSize = Math.max(
-      ...overlappingSelected.map(
-        (selectedItem) =>
-          this.getGeneratedRecommendationCoveredServiceIds(selectedItem).length,
-      ),
-    );
-    const maxSelectedScore = Math.max(
-      ...overlappingSelected.map((selectedItem) =>
-        Number(selectedItem.score || 0),
-      ),
-    );
-
-    return (
-      itemCoverageSize > maxSelectedCoverageSize &&
-      Number(item.score || 0) >=
-        maxSelectedScore - PACKAGE_REPLACEMENT_SCORE_TOLERANCE
-    );
-  }
-
-  private getExistingCoveredServiceIdsExceptTarget(
-    coverage: ExistingRecommendationCoverage[],
-    targetId: string,
-  ): Set<string> {
-    const result = new Set<string>();
-
-    coverage.forEach((entry) => {
-      if (!entry.blocksOverlaps || entry.targetId === targetId) return;
-      entry.coveredServiceIds.forEach((serviceId) => result.add(serviceId));
-    });
-
-    return result;
   }
 
   private async pruneStaleGeneratedRecommendations(
@@ -1351,16 +1197,13 @@ export class RecommendationsService implements OnModuleInit {
   private getGeneratedRecommendationTargetId(
     item: GeneratedRecommendationItem,
   ): string | null {
-    return item.packageId ?? item.serviceId ?? null;
+    return getCoverageRecommendationTargetId(item);
   }
 
   private getGeneratedRecommendationCoveredServiceIds(
     item: GeneratedRecommendationItem,
   ): string[] {
-    if (item.coveredServiceIds?.length) {
-      return item.coveredServiceIds;
-    }
-    return item.serviceId ? [item.serviceId] : [];
+    return [...getCoverageIds(item)];
   }
 
   private toPublicGeneratedRecommendationItem(
@@ -1394,9 +1237,7 @@ export class RecommendationsService implements OnModuleInit {
     if (recommendation.packageId && recommendation.package) {
       return this.uniqueIds(
         this.getPackageCoverageIds(
-          recommendation.package,
           filterActiveServices(recommendation.package?.services),
-          [],
         ),
       );
     }
