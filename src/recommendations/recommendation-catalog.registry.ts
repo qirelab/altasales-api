@@ -177,6 +177,35 @@ export const RECOMMENDATION_CATALOG = {
 
 export type RecommendationCatalogKey = keyof typeof RECOMMENDATION_CATALOG;
 
+/**
+ * Returns the canonical display name and compatibility aliases for catalog
+ * matching. Stable IDs remain the source of truth whenever a candidate has a
+ * configured catalog ID; aliases only support legacy fixtures and records
+ * that predate the catalog registry.
+ */
+export function getRecommendationCatalogAliases(
+  ...keys: RecommendationCatalogKey[]
+): string[] {
+  return Array.from(
+    new Set(
+      keys.flatMap((key) => {
+        const entry = RECOMMENDATION_CATALOG[key];
+        return [entry.displayName, ...entry.legacyAliases];
+      }),
+    ),
+  );
+}
+
+export function getRecommendationCatalogLegacyAliases(
+  ...keys: RecommendationCatalogKey[]
+): string[] {
+  return Array.from(
+    new Set(
+      keys.flatMap((key) => RECOMMENDATION_CATALOG[key].legacyAliases),
+    ),
+  );
+}
+
 export const RECOMMENDATION_CATALOG_ENTRIES = Object.values(
   RECOMMENDATION_CATALOG,
 ) as RecommendationCatalogEntry[];
