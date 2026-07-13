@@ -344,6 +344,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
 > = {
   crm: [
     {
+      terms: ['crm старт'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'для существующей CRM нужен стартовый CRM-контур',
+    },
+    {
       terms: ['ии анализ crm'],
       points: AI_ANALYSIS_COMPONENT_POINTS,
       reason: 'в анкете указана существующая CRM, нужен ИИ-анализ',
@@ -372,6 +377,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
     },
   ],
   salesDocuments: [
+    {
+      terms: ['ии анализ документов', 'анализ документов'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'для документов ОП нужен ИИ-анализ',
+    },
     {
       terms: ['ии анализ документов'],
       points: AI_ANALYSIS_COMPONENT_POINTS,
@@ -415,6 +425,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
     },
   ],
   salesHead: [
+    {
+      terms: ['эксперт роп', 'экспертная консультация', 'консультация роп'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'выбран РОП — нужна экспертная консультация',
+    },
     {
       catalogKeys: ['aiSalesHead'],
       points: EXPLICIT_COMPONENT_POINTS,
@@ -742,6 +757,9 @@ export class QuestionnaireRelevanceRankerService {
         'с нуля',
         'отсутствует отдел продаж',
         'нет отдела продаж',
+        'продукт новый',
+        'новый продукт',
+        'нет оп',
       ])
     ) {
       return 'new_department';
@@ -1064,6 +1082,18 @@ export class QuestionnaireRelevanceRankerService {
       );
     }
 
+    if (stage === 'new_department') {
+      if (profile.selectedComponents.includes('crm')) {
+        add(['ии анализ crm', 'анализ crm'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ CRM');
+      }
+      if (profile.selectedComponents.includes('salesDocuments')) {
+        add(['ии анализ документов', 'анализ документов'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ документов');
+      }
+      if (profile.selectedComponents.includes('telephony') || profile.selectedComponents.includes('callAnalysis')) {
+        add(['ии анализ звонков и менеджеров', 'анализ звонков и менеджеров'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ звонков и менеджеров');
+      }
+    }
+
     if (
       profile.existingComponents.includes('crm') &&
       ['telephony', 'messenger'].every((component) =>
@@ -1173,10 +1203,13 @@ export class QuestionnaireRelevanceRankerService {
   }
 
   private getDesiredPeriod(profile: Record<string, unknown>): string {
-    if (this.isPlainObject(profile.desiredResult)) {
-      return String(profile.desiredResult.period ?? '');
-    }
-    return String(profile.period ?? '');
+    const raw = this.isPlainObject(profile.desiredResult)
+      ? String(profile.desiredResult.period ?? '')
+      : String(profile.period ?? '');
+    const normalized = this.normalize(raw);
+    if (['1m', '1 месяц', 'месяц', 'на месяц'].some((value) => normalized.includes(this.normalize(value)))) return '1m';
+    if (['3m', '3 месяца', 'три месяца', 'на 3 месяца'].some((value) => normalized.includes(this.normalize(value)))) return '3m';
+    return normalized;
   }
 
   private isExistingProductStage(productStage: unknown): boolean {
