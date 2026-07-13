@@ -482,6 +482,13 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       reason: 'нужен анализ переписок в существующем мессенджере',
     },
   ],
+  scripts: [
+    {
+      catalogKeys: ['aiDocumentAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'существующие скрипты требуют ИИ-анализа документов',
+    },
+  ],
   salesHead: [
     {
       terms: ['эксперт роп', 'экспертная консультация', 'консультация роп'],
@@ -639,6 +646,7 @@ export class QuestionnaireRelevanceRankerService {
         services,
         rankedById,
         context,
+        normalizedProfile.desiredPeriod,
         Number.POSITIVE_INFINITY,
       );
     } else if (stage === 'new_department') {
@@ -813,6 +821,7 @@ export class QuestionnaireRelevanceRankerService {
     profile: NormalizedQuestionnaireProfile,
   ): QuestionnaireStage {
     if (
+      profile.productStageText === 'new' ||
       this.includesAny(profile.rawText, [
         'построить отдел продаж',
         'с нуля',
@@ -921,21 +930,33 @@ export class QuestionnaireRelevanceRankerService {
       { item: GeneratedRecommendationItem; index: number }
     >,
     context: string,
+    desiredPeriod: string,
     limit: number,
   ): GeneratedRecommendationItem[] {
     const selected: GeneratedRecommendationItem[] = [];
     const usedTargetIds = new Set<string>();
 
     for (const recommendation of reference.recommendations) {
+      const catalogKey: RecommendationCatalogKey =
+        recommendation.catalogKey === 'trainingThreeMonths' &&
+        desiredPeriod === '1m'
+          ? 'trainingOneMonth'
+          : recommendation.catalogKey;
+      const referenceName =
+        catalogKey === recommendation.catalogKey
+          ? recommendation.referenceName
+          : RECOMMENDATION_CATALOG[catalogKey].displayName;
       const service = this.findCandidateByCatalogKey(
         services,
-        recommendation.catalogKey,
+        catalogKey,
         usedTargetIds,
-        this.getRecommendationAliases(recommendation),
+        catalogKey === recommendation.catalogKey
+          ? this.getRecommendationAliases(recommendation)
+          : getRecommendationCatalogAliases(catalogKey),
       );
       if (!service) {
         throw new InternalServerErrorException(
-          `Golden recommendation catalog item is missing: ${recommendation.referenceName}`,
+          `Golden recommendation catalog item is missing: ${referenceName}`,
         );
       }
 
@@ -954,12 +975,12 @@ export class QuestionnaireRelevanceRankerService {
         priority: this.resolveBoostedPriority(score, base.priority),
         rationale: this.buildRationale(service.name, [
           recommendation.reason,
-          `референс: ${recommendation.referenceName}`,
+          `референс: ${referenceName}`,
         ]),
         diagnosticSignals: this.scoringService.normalizeSignals([
           ...(base.diagnosticSignals ?? []),
           `ideal_reference:${reference.id}`,
-          recommendation.referenceName,
+          referenceName,
           recommendation.reason,
         ]),
         score,
@@ -1410,6 +1431,8 @@ export class QuestionnaireRelevanceRankerService {
       existingComponents,
       selectedComponents,
     } = profile;
+    const explicitlyRequestedOneMonthTraining =
+      desiredPeriod === '1m' && selectedComponents.includes('trainingSystem');
 
     if (this.includesAny(serviceText, ['на контроле', 'рубичат'])) {
       return 'устаревшая услуга заменена ИИ-анализом';
@@ -1442,13 +1465,18 @@ export class QuestionnaireRelevanceRankerService {
 
     if (
       desiredPeriod === '1m' &&
-      this.includesAny(serviceText, [
-        'на 3 месяца',
-        '3 месяца',
-        'трехмесяч',
-        'трех месяцев',
-        'трехмесячный',
-      ])
+      (this.matchesCatalogCandidate(
+        service,
+        serviceText,
+        'trainingThreeMonths',
+      ) ||
+        this.includesAny(serviceText, [
+          'на 3 месяца',
+          '3 месяца',
+          'трехмесяч',
+          'трех месяцев',
+          'трехмесячный',
+        ]))
     ) {
       return 'срок услуги не соответствует цели на 1 месяц';
     }
@@ -1501,7 +1529,8 @@ export class QuestionnaireRelevanceRankerService {
     if (
       stage === 'advanced_department' &&
       (this.matchesCatalogCandidate(service, serviceText, 'salesDepartmentFromZero') ||
-        this.matchesCatalogCandidate(service, serviceText, 'trainingOneMonth') ||
+        (this.matchesCatalogCandidate(service, serviceText, 'trainingOneMonth') &&
+          !explicitlyRequestedOneMonthTraining) ||
         (this.includesAny(desiredText, ['crm']) &&
           (this.matchesCatalogCandidate(service, serviceText, 'crmStart') ||
             this.matchesCatalogCandidate(service, serviceText, 'crmBronze') ||
