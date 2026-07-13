@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsInt,
+  MaxLength,
   IsObject,
   IsOptional,
   IsString,
