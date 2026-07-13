@@ -9,6 +9,7 @@ import {
   GeneratedRecommendationItem,
   ServiceCandidate,
 } from './recommendation-scoring.service';
+import { selectNonOverlappingRecommendations } from './recommendation-coverage.util';
 
 describe('QuestionnaireRelevanceRankerService', () => {
   const service = (id: string, name: string): ServiceCandidate =>
@@ -1979,10 +1980,37 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     const targetIds = result.map((item) => item.packageId ?? item.serviceId);
 
+    expect(targetIds).toContain(RECOMMENDATION_CATALOG.crmStart.id);
     expect(targetIds).toContain(RECOMMENDATION_CATALOG.aiDocumentAnalysis.id);
     expect(targetIds).toContain(RECOMMENDATION_CATALOG.trainingOneMonth.id);
     expect(targetIds).not.toContain(
       RECOMMENDATION_CATALOG.trainingThreeMonths.id,
+    );
+
+    const compacted = selectNonOverlappingRecommendations(
+      result.map((item) =>
+        (item.packageId ?? item.serviceId) === RECOMMENDATION_CATALOG.crmStart.id
+          ? {
+              ...item,
+              serviceId: null,
+              packageId: RECOMMENDATION_CATALOG.crmStart.id,
+              coveredServiceIds: [
+                RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                RECOMMENDATION_CATALOG.messengerIntegration.id,
+              ],
+            }
+          : item,
+      ),
+    );
+    const compactedTargetIds = compacted.map(
+      (item) => item.packageId ?? item.serviceId,
+    );
+    expect(compactedTargetIds).toContain(RECOMMENDATION_CATALOG.crmStart.id);
+    expect(compactedTargetIds).not.toEqual(
+      expect.arrayContaining([
+        RECOMMENDATION_CATALOG.telephonyIntegration.id,
+        RECOMMENDATION_CATALOG.messengerIntegration.id,
+      ]),
     );
   });
 
