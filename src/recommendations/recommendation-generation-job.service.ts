@@ -67,6 +67,26 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
         this.schedulePendingGenerationJobs(processor);
         return this.toSummary(existingJob);
       }
+    } else {
+      const pendingJob = await this.generationJobRepository.findOne({
+        where: { userId, status: RecommendationGenerationStatus.Pending },
+        order: { createdAt: 'DESC' },
+      });
+      if (pendingJob) {
+        pendingJob.request = {
+          clientProfile: dto.clientProfile ?? {},
+          diagnostics: dto.diagnostics ?? [],
+          limit: dto.limit,
+          persist: dto.persist ?? true,
+        };
+        pendingJob.result = null;
+        pendingJob.error = null;
+        pendingJob.startedAt = null;
+        pendingJob.completedAt = null;
+        const updatedJob = await this.generationJobRepository.save(pendingJob);
+        this.schedulePendingGenerationJobs(processor);
+        return this.toSummary(updatedJob);
+      }
     }
 
     const jobToCreate = this.generationJobRepository.create({
@@ -262,6 +282,7 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
           id: job.id,
           status: RecommendationGenerationStatus.Processing,
           leaseToken,
+          leaseExpiresAt: MoreThan(new Date()),
         },
         {
           result: result as any,
@@ -278,6 +299,7 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
           id: job.id,
           status: RecommendationGenerationStatus.Processing,
           leaseToken,
+          leaseExpiresAt: MoreThan(new Date()),
         },
         {
           status: RecommendationGenerationStatus.Failed,
