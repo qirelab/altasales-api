@@ -137,7 +137,7 @@ const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
     requiredComponents: ['trainingSystem'],
   },
   {
-    catalogKey: 'outsourcedSalesHead',
+    catalogKey: 'salesHead',
     score: 76,
     reason: 'нужно управление запуском нового отдела',
     requiredComponents: ['salesHead'],
@@ -312,6 +312,11 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужно оценивать звонки',
     },
+    {
+      catalogKeys: ['aiCallManagersAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'AI call analysis selected in questionnaire',
+    },
   ],
   salesDocuments: [
     {
@@ -321,6 +326,11 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
     },
   ],
   salesHead: [
+    {
+      terms: ['эксперт роп'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'выбран РОП — нужна экспертная консультация',
+    },
     {
       catalogKeys: ['salesHeadFocus'],
       points: EXPLICIT_COMPONENT_POINTS,
@@ -335,6 +345,11 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       catalogKeys: ['aiSalesHead'],
       points: 24,
       reason: 'нужно управлять отделом по данным',
+    },
+    {
+      catalogKeys: ['salesHead'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'ROP expert service selected in questionnaire',
     },
   ],
 };
@@ -363,6 +378,16 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'в анкете указана существующая CRM, нужен анализ',
     },
+    {
+      catalogKeys: ['crmStart'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'existing CRM needs the CRM Start package',
+    },
+    {
+      catalogKeys: ['aiCrmAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'existing CRM needs AI analysis',
+    },
   ],
   analytics: [
     {
@@ -374,6 +399,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       catalogKeys: ['salesDashboard'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен анализ существующей аналитики',
+    },
+    {
+      catalogKeys: ['aiDashboardAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'existing dashboard needs AI analysis',
     },
   ],
   salesDocuments: [
@@ -392,6 +422,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен анализ существующих документов ОП',
     },
+    {
+      catalogKeys: ['aiDocumentAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'sales documents need AI analysis',
+    },
   ],
   telephony: [
     {
@@ -404,6 +439,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен анализ звонков существующей телефонии',
     },
+    {
+      catalogKeys: ['aiCallManagersAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'existing telephony needs AI call analysis',
+    },
   ],
   callAnalysis: [
     {
@@ -415,6 +455,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       catalogKeys: ['callAnalysis'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужен анализ звонков и работы менеджеров',
+    },
+    {
+      catalogKeys: ['aiCallManagersAnalysis'],
+      points: AI_ANALYSIS_COMPONENT_POINTS,
+      reason: 'call analysis selected in questionnaire',
     },
   ],
   messenger: [
@@ -434,6 +479,11 @@ const EXISTING_COMPONENT_RELEVANCE_RULES: Partial<
       catalogKeys: ['aiSalesHead'],
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'нужна экспертная консультация для существующего РОПа',
+    },
+    {
+      catalogKeys: ['salesHead'],
+      points: EXPLICIT_COMPONENT_POINTS,
+      reason: 'existing ROP needs expert support',
     },
   ],
 };
@@ -1083,6 +1133,26 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     if (stage === 'new_department') {
+      addCatalog(
+        ['aiCrmAnalysis'],
+        AI_ANALYSIS_COMPONENT_POINTS,
+        'new sales department always includes AI CRM analysis',
+      );
+      addCatalog(
+        ['aiDashboardAnalysis'],
+        AI_ANALYSIS_COMPONENT_POINTS,
+        'new sales department always includes AI dashboard analysis',
+      );
+      addCatalog(
+        ['aiDocumentAnalysis'],
+        AI_ANALYSIS_COMPONENT_POINTS,
+        'new sales department always includes AI document analysis',
+      );
+      addCatalog(
+        ['aiCallManagersAnalysis'],
+        AI_ANALYSIS_COMPONENT_POINTS,
+        'new sales department always includes AI call analysis',
+      );
       if (profile.selectedComponents.includes('crm')) {
         add(['ии анализ crm', 'анализ crm'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ CRM');
       }
@@ -1532,9 +1602,14 @@ export class QuestionnaireRelevanceRankerService {
         continue;
       }
 
+      const catalogKey: RecommendationCatalogKey =
+        rule.catalogKey === 'trainingThreeMonths' &&
+        profile.desiredPeriod === '1m'
+          ? 'trainingOneMonth'
+          : rule.catalogKey;
       const service = this.findCandidateByCatalogKey(
         services,
-        rule.catalogKey,
+        catalogKey,
         usedTargetIds,
       );
 

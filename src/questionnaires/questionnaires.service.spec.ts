@@ -46,6 +46,9 @@ describe('QuestionnairesService', () => {
       emitToUser: jest.fn(),
     };
 
+    const ropProvisioningService = {
+      scheduleProjectCreation: jest.fn(),
+    };
     const service = new QuestionnairesService(
       repo as any,
       recommendationsService as any,
@@ -53,6 +56,7 @@ describe('QuestionnairesService', () => {
       mailService as any,
       balanceService as any,
       websocketGateway as any,
+      ropProvisioningService as any,
     );
 
     return {

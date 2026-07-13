@@ -55,10 +55,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
     service('quality', 'На Контроле + Рубичат'),
     service('sales-head', 'Руководитель отдела продаж'),
     service('document-request', 'Документ под запрос'),
-    service('ai-docs', 'ИИ анализ документов'),
-    service('ai-crm', 'ИИ анализ CRM'),
-    service('ai-calls', 'ИИ анализ звонков и менеджеров'),
-    service('rop-expert', 'Эксперт РОП: консультация'),
     service('financial-director', 'Финансовый директор'),
   ];
 
@@ -1843,6 +1839,13 @@ describe('QuestionnaireRelevanceRankerService', () => {
   });
 
   it('selects one-month training, CRM Start, AI analyses and ROP expert for the new-OP questionnaire', () => {
+    const extendedServices = [
+      ...services,
+      service('ai-docs', 'ИИ анализ документов'),
+      service('ai-crm', 'ИИ анализ CRM'),
+      service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+      service('rop-expert', 'Эксперт РОП: консультация'),
+    ];
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -1859,7 +1862,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         persist: false,
       },
-      services,
+      extendedServices,
       [],
       '',
     );
@@ -1873,6 +1876,48 @@ describe('QuestionnaireRelevanceRankerService', () => {
       'Эксперт РОП: консультация',
     ]));
     expect(names).not.toContain('Пакет обучения на 3 месяца');
+  });
+
+  it('runs the full new-OP scenario against stable catalog IDs', () => {
+    const configuredCatalog = RECOMMENDATION_CATALOG_ENTRIES.map((entry) => ({
+      ...service(entry.id, entry.displayName),
+      serviceId: entry.kind === 'service' ? entry.id : null,
+      packageId: entry.kind === 'package' ? entry.id : null,
+    })) as ServiceCandidate[];
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: '\u041d\u0435\u0442, \u043f\u0440\u043e\u0434\u0443\u043a\u0442 \u043d\u043e\u0432\u044b\u0439',
+          desiredResult: { period: '1m', description: '\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u041e\u041f' },
+          components: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            trainingSystem: true,
+            scripts: true,
+            callAnalysis: true,
+            salesDocuments: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      configuredCatalog,
+      [],
+      '',
+    );
+    const targetIds = result.map((item) => item.packageId ?? item.serviceId);
+    expect(targetIds).toEqual(expect.arrayContaining([
+      RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+      RECOMMENDATION_CATALOG.crmStart.id,
+      RECOMMENDATION_CATALOG.trainingOneMonth.id,
+      RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
+      RECOMMENDATION_CATALOG.aiDocumentAnalysis.id,
+      RECOMMENDATION_CATALOG.aiCallManagersAnalysis.id,
+      RECOMMENDATION_CATALOG.salesHead.id,
+    ]));
+    expect(targetIds).not.toContain(RECOMMENDATION_CATALOG.trainingThreeMonths.id);
   });
 
 });
