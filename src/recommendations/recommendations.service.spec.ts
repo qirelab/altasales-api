@@ -1044,7 +1044,7 @@ describe('RecommendationsService', () => {
     ]);
   });
 
-  it('allows a generated package to replace a manual recommended service without generatedAt', async () => {
+  it('keeps a manual recommended service without generatedAt', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     recommendationRepository.find.mockResolvedValue([
@@ -1076,12 +1076,10 @@ describe('RecommendationsService', () => {
       persist: false,
     });
 
-    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
-      'package-id',
-    ]);
+    expect(result).toEqual([]);
   });
 
-  it('removes only overlapping manual recommendations when persisting a generated package', async () => {
+  it('keeps manual coverage from being replaced by a generated package', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     const replacedManualRecommendation = {
@@ -1124,17 +1122,16 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    await service.generateForUser({
+    const result = await service.generateForUser({
       userId,
       persist: true,
     });
 
-    expect(recommendationRepository.delete).toHaveBeenCalledWith([
-      'manual-service-recommendation-id',
-    ]);
+    expect(result).toEqual([]);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
 
-  it('keeps a manual package when generation covers only part of its services', async () => {
+  it('keeps manual package coverage from being replaced by a child service', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     const manualPackageRecommendation = {
@@ -1194,7 +1191,7 @@ describe('RecommendationsService', () => {
       persist: true,
     });
 
-    expect(result.map((item) => item.serviceId)).toEqual(['service-a']);
+    expect(result).toEqual([]);
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
 
@@ -1739,5 +1736,114 @@ describe('RecommendationsService', () => {
     expect(recommendationRepository.delete).toHaveBeenCalledWith([
       'stale-service-recommendation-id',
     ]);
+  });
+  it('lets a package replace stale generated child recommendations and prunes them', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    const staleGeneratedChildren = [
+      {
+        id: 'stale-telephony-recommendation-id',
+        serviceId: 'telephony-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        orderId: null,
+      },
+      {
+        id: 'stale-messenger-recommendation-id',
+        serviceId: 'messenger-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        orderId: null,
+      },
+    ];
+    recommendationRepository.find
+      .mockResolvedValueOnce(staleGeneratedChildren)
+      .mockResolvedValueOnce(staleGeneratedChildren);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'telephony-id',
+        packageId: null,
+        serviceName: 'Telephony',
+        priority: 'urgent',
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 90,
+        coveredServiceIds: ['telephony-id'],
+      },
+      {
+        serviceId: 'messenger-id',
+        packageId: null,
+        serviceName: 'Messenger',
+        priority: 'urgent',
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 89,
+        coveredServiceIds: ['messenger-id'],
+      },
+      {
+        serviceId: null,
+        packageId: 'data-driven-package-id',
+        serviceName: 'Any package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 80,
+        coveredServiceIds: ['telephony-id', 'messenger-id', 'mail-id'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: true,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'data-driven-package-id',
+    ]);
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'stale-telephony-recommendation-id',
+      'stale-messenger-recommendation-id',
+    ]);
+  });
+
+  it('keeps a persisted ideal reference from being replaced by a package', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'ideal-service-recommendation-id',
+        serviceId: 'service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        diagnosticSignals: ['ideal_reference:existing_department'],
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        orderId: null,
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'CRM package',
+        priority: 'medium',
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 80,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result).toEqual([]);
   });
 });

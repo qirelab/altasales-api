@@ -641,6 +641,7 @@ export class RecommendationsService implements OnModuleInit {
     ranked = ranked.filter(
       (item) => Number(item.score || 0) >= MIN_RECOMMENDATION_RANKING_SCORE,
     );
+    ranked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
     ranked = this.filterOverlappingRecommendations(
       ranked,
       await this.findExistingRecommendationCoverage(dto.userId),
@@ -1111,8 +1112,14 @@ export class RecommendationsService implements OnModuleInit {
   private isIdealReferenceRecommendation(
     item: GeneratedRecommendationItem,
   ): boolean {
+    return this.hasIdealReferenceSignal(item.diagnosticSignals);
+  }
+
+  private hasIdealReferenceSignal(
+    diagnosticSignals: readonly string[] | null | undefined,
+  ): boolean {
     return Boolean(
-      item.diagnosticSignals?.some((signal) =>
+      diagnosticSignals?.some((signal) =>
         signal.startsWith('ideal_reference:'),
       ),
     );
@@ -1142,43 +1149,7 @@ export class RecommendationsService implements OnModuleInit {
       })
       .map((recommendation) => recommendation.id);
 
-    const currentCoveredServiceIds = new Set(
-      currentItems.flatMap((item) =>
-        this.getGeneratedRecommendationCoveredServiceIds(item),
-      ),
-    );
-    const manualRecommendations = await this.recommendationRepository.find({
-      where: {
-        userId,
-        status: RecommendationStatus.Recommended,
-        source: RecommendationSource.Manual,
-      },
-      relations: [
-        'service',
-        'service.category',
-        'package',
-        'package.categories',
-        'package.services',
-        'package.services.category',
-      ],
-    });
-    const replacedManualIds = manualRecommendations
-      .filter((recommendation) => {
-        if (!this.isReplaceableRecommendation(recommendation)) return false;
-        const targetId = this.getRecommendationTargetId(recommendation);
-        if (targetId && currentTargetIds.has(targetId)) return false;
-        const coveredServiceIds = this.toPublicCoveredServiceIds(
-          this.getRecommendationCoveredServiceIds(recommendation),
-        );
-        return (
-          coveredServiceIds.length > 0 &&
-          coveredServiceIds.every((serviceId) =>
-            currentCoveredServiceIds.has(serviceId),
-          )
-        );
-      })
-      .map((recommendation) => recommendation.id);
-    const idsToDelete = [...staleGeneratedIds, ...replacedManualIds];
+    const idsToDelete = staleGeneratedIds;
 
     if (idsToDelete.length === 0) return;
 
@@ -1186,11 +1157,16 @@ export class RecommendationsService implements OnModuleInit {
   }
 
   private isReplaceableRecommendation(
-    recommendation: Pick<Recommendation, 'status' | 'orderId'>,
+    recommendation: Pick<
+      Recommendation,
+      'status' | 'orderId' | 'source' | 'diagnosticSignals'
+    >,
   ): boolean {
     return (
+      recommendation.source !== RecommendationSource.Manual &&
       recommendation.status === RecommendationStatus.Recommended &&
-      recommendation.orderId == null
+      recommendation.orderId == null &&
+      !this.hasIdealReferenceSignal(recommendation.diagnosticSignals)
     );
   }
 
@@ -1198,12 +1174,6 @@ export class RecommendationsService implements OnModuleInit {
     item: GeneratedRecommendationItem,
   ): string | null {
     return getCoverageRecommendationTargetId(item);
-  }
-
-  private getGeneratedRecommendationCoveredServiceIds(
-    item: GeneratedRecommendationItem,
-  ): string[] {
-    return [...getCoverageIds(item)];
   }
 
   private toPublicGeneratedRecommendationItem(

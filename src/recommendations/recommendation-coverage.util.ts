@@ -26,10 +26,7 @@ const DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
  */
 export function selectNonOverlappingRecommendations<
   T extends CoverageRecommendationItem,
->(
-  items: readonly T[],
-  options: CoverageSelectionOptions = {},
-): T[] {
+>(items: readonly T[], options: CoverageSelectionOptions = {}): T[] {
   const selected: T[] = [];
   const blockedTargets = new Set(
     (options.existingCoverage ?? [])
@@ -44,7 +41,12 @@ export function selectNonOverlappingRecommendations<
   for (const item of items) {
     const targetId = getCoverageRecommendationTargetId(item);
     if (!targetId || blockedTargets.has(targetId)) continue;
-    if (selected.some((candidate) => getCoverageRecommendationTargetId(candidate) === targetId)) {
+    if (
+      selected.some(
+        (candidate) =>
+          getCoverageRecommendationTargetId(candidate) === targetId,
+      )
+    ) {
       continue;
     }
 
@@ -57,29 +59,49 @@ export function selectNonOverlappingRecommendations<
       continue;
     }
 
-    const overlappingSelected = selected.filter((candidate) =>
-      hasCoverageIntersection(itemCoverage, getCoverageIds(candidate)),
-    );
-
-    if (overlappingSelected.length === 0) {
+    if (!item.packageId) {
+      if (
+        selected.some((candidate) =>
+          hasCoverageIntersection(itemCoverage, getCoverageIds(candidate)),
+        )
+      ) {
+        continue;
+      }
       selected.push(item);
       continue;
     }
 
+    const selectedItemsCoveredByPackage = selected.filter((candidate) =>
+      coversAllServices(itemCoverage, getCoverageIds(candidate)),
+    );
+    const selectedPackageCoveringItem = selected.some(
+      (candidate) =>
+        Boolean(candidate.packageId) &&
+        coversAllServices(getCoverageIds(candidate), itemCoverage),
+    );
+
+    // A partially shared technical child service does not make two packages
+    // mutually exclusive. Only a package that fully covers a selected target
+    // can compact it.
+    if (selectedPackageCoveringItem) continue;
+
     if (
-      !item.packageId ||
-      overlappingSelected.some((candidate) =>
+      selectedItemsCoveredByPackage.some((candidate) =>
         idealTargetIds.has(getCoverageRecommendationTargetId(candidate) ?? ''),
       ) ||
-      !coversAllSelectedItems(itemCoverage, overlappingSelected) ||
-      Number(item.score ?? 0) <
-        Math.max(...overlappingSelected.map((candidate) => Number(candidate.score ?? 0))) -
-          tolerance
+      (selectedItemsCoveredByPackage.length > 0 &&
+        Number(item.score ?? 0) <
+          Math.max(
+            ...selectedItemsCoveredByPackage.map((candidate) =>
+              Number(candidate.score ?? 0),
+            ),
+          ) -
+            tolerance)
     ) {
       continue;
     }
 
-    overlappingSelected.forEach((candidate) => {
+    selectedItemsCoveredByPackage.forEach((candidate) => {
       const index = selected.indexOf(candidate);
       if (index !== -1) selected.splice(index, 1);
     });
@@ -95,9 +117,7 @@ export function getCoverageRecommendationTargetId(
   return item.packageId ?? item.serviceId ?? null;
 }
 
-export function getCoverageIds(
-  item: CoverageRecommendationItem,
-): Set<string> {
+export function getCoverageIds(item: CoverageRecommendationItem): Set<string> {
   const ids = (item.coveredServiceIds ?? []).filter(isPublicCoverageId);
   if (ids.length === 0 && item.serviceId) ids.push(item.serviceId);
   return new Set(ids);
@@ -124,14 +144,13 @@ function hasCoverageIntersection(
   return [...left].some((serviceId) => right.has(serviceId));
 }
 
-function coversAllSelectedItems(
-  packageCoverage: Set<string>,
-  selectedItems: readonly CoverageRecommendationItem[],
+function coversAllServices(
+  coverage: Set<string>,
+  targetCoverage: Set<string>,
 ): boolean {
-  return selectedItems.every((item) =>
-    [...getCoverageIds(item)].every((serviceId) =>
-      packageCoverage.has(serviceId),
-    ),
+  return (
+    targetCoverage.size > 0 &&
+    [...targetCoverage].every((serviceId) => coverage.has(serviceId))
   );
 }
 

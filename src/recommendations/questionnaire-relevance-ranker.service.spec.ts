@@ -930,7 +930,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result).toEqual([]);
   });
 
-  it('keeps the exact golden reference despite conflicting optional answers', () => {
+  it('keeps the golden reference while adapting training to the requested period', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -960,7 +960,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
       6,
     );
 
-    expect(result.map((item) => item.serviceId)).toContain('training-3m');
+    expect(result.map((item) => item.serviceId)).toContain('training-1m');
+    expect(result.map((item) => item.serviceId)).not.toContain('training-3m');
   });
 
   it('fails when a required golden reference item is missing from the catalog', () => {
@@ -1888,13 +1889,14 @@ describe('QuestionnaireRelevanceRankerService', () => {
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: '\u041d\u0435\u0442, \u043f\u0440\u043e\u0434\u0443\u043a\u0442 \u043d\u043e\u0432\u044b\u0439',
-          desiredResult: { period: '1m', description: '\u0417\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u041e\u041f' },
+          productStage: 'new',
+          desiredResult: { period: '1m', description: 'Запустить продажи' },
           components: components({
             crm: true,
             telephony: true,
             messenger: true,
             trainingSystem: true,
+            analytics: true,
             scripts: true,
             callAnalysis: true,
             salesDocuments: true,
@@ -1913,11 +1915,104 @@ describe('QuestionnaireRelevanceRankerService', () => {
       RECOMMENDATION_CATALOG.crmStart.id,
       RECOMMENDATION_CATALOG.trainingOneMonth.id,
       RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
+      RECOMMENDATION_CATALOG.aiDashboardAnalysis.id,
       RECOMMENDATION_CATALOG.aiDocumentAnalysis.id,
       RECOMMENDATION_CATALOG.aiCallManagersAnalysis.id,
       RECOMMENDATION_CATALOG.salesHead.id,
     ]));
     expect(targetIds).not.toContain(RECOMMENDATION_CATALOG.trainingThreeMonths.id);
+  });
+
+  it('keeps AI document analysis and one-month training for an existing outbound split flow by catalog ID', () => {
+    const configuredCatalog = RECOMMENDATION_CATALOG_ENTRIES.map((entry) => ({
+      ...service(
+        entry.id,
+        entry.id === RECOMMENDATION_CATALOG.trainingThreeMonths.id
+          ? 'Переименованный пакет обучения'
+          : entry.displayName,
+      ),
+      serviceId: entry.kind === 'service' ? entry.id : null,
+      packageId: entry.kind === 'package' ? entry.id : null,
+    })) as ServiceCandidate[];
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          leadGenerationTypes: ['outbound'],
+          desiredResult: {
+            period: '1m',
+            description: 'Усилить существующий отдел продаж',
+          },
+          components: components({
+            crm: true,
+            contactDatabase: true,
+            salesManager: true,
+            scripts: true,
+          }),
+          componentsToAdd: components({
+            crm: true,
+            telephony: true,
+            messenger: true,
+            salesManager: true,
+            trainingSystem: true,
+            salesDocuments: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      configuredCatalog,
+      [
+        {
+          serviceId: null,
+          packageId: RECOMMENDATION_CATALOG.trainingThreeMonths.id,
+          serviceName: 'Переименованный пакет обучения',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+      ],
+      '',
+    );
+
+    const targetIds = result.map((item) => item.packageId ?? item.serviceId);
+
+    expect(targetIds).toContain(RECOMMENDATION_CATALOG.aiDocumentAnalysis.id);
+    expect(targetIds).toContain(RECOMMENDATION_CATALOG.trainingOneMonth.id);
+    expect(targetIds).not.toContain(
+      RECOMMENDATION_CATALOG.trainingThreeMonths.id,
+    );
+  });
+
+  it('substitutes one-month training inside an ideal reference', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          leadGenerationTypes: ['inbound'],
+          desiredResult: { period: '1m' },
+          components: components({
+            telephony: true,
+            messenger: true,
+            trainingSystem: true,
+            analytics: true,
+            salesHead: true,
+          }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+    );
+
+    const serviceIds = result.map((item) => item.serviceId);
+
+    expect(serviceIds).toContain('training-1m');
+    expect(serviceIds).not.toContain('training-3m');
   });
 
 });
