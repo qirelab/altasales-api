@@ -298,6 +298,7 @@ export class RecommendationsService implements OnModuleInit {
     const rows: UserRecommendationListItem[] = rawRows.map(
       ({ orderId: _omit, giftEligible, ...rest }) => ({
         ...rest,
+        price: Number(rest.price),
         giftEligible: giftEligible == null ? null : giftEligible === true,
       }),
     );
@@ -627,12 +628,19 @@ export class RecommendationsService implements OnModuleInit {
       context,
     );
 
-    if (ranked.length === 0) {
-      ranked = services
-        .map((service) => this.scoringService.scoreService(service, context))
-        .filter((item) => item.score >= MIN_FALLBACK_RECOMMENDATION_SCORE)
-        .sort((a, b) => b.score - a.score);
-    }
+    const fallbackRanked = services
+      .map((service) => this.scoringService.scoreService(service, context))
+      .filter((item) => item.score >= MIN_FALLBACK_RECOMMENDATION_SCORE)
+      .sort((a, b) => b.score - a.score);
+    const aiTargetIds = new Set(
+      ranked.map((item) => item.packageId ?? item.serviceId).filter(Boolean),
+    );
+    ranked = [
+      ...ranked,
+      ...fallbackRanked.filter(
+        (item) => !aiTargetIds.has(item.packageId ?? item.serviceId),
+      ),
+    ];
 
     ranked = this.relevanceRanker.rankRecommendations(
       effectiveDto,
