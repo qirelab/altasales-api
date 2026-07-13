@@ -283,7 +283,7 @@ describe('RecommendationScoringService', () => {
   });
 
   it('ignores AI service ids outside the catalog slice sent to the model', async () => {
-    const candidates = Array.from({ length: 51 }, (_, index) => ({
+    const candidates = Array.from({ length: 501 }, (_, index) => ({
       id: `crm-service-${index}`,
       name: `CRM setup ${index}`,
       description: 'CRM data quality and setup',
@@ -293,7 +293,7 @@ describe('RecommendationScoringService', () => {
     })) as any[];
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"crm-service-50","priority":"medium","rationale":"Подходит для CRM","diagnosticSignals":["crm_quality"]}]}',
+        '{"recommendations":[{"serviceId":"crm-service-500","priority":"medium","rationale":"Подходит для CRM","diagnosticSignals":["crm_quality"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
