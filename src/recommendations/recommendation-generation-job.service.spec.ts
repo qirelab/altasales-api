@@ -1,4 +1,4 @@
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, FindOperator, Repository } from 'typeorm';
 import { RecommendationGenerationJobService } from './recommendation-generation-job.service';
 import { RecommendationGenerationJob } from './entities/recommendation-generation-job.entity';
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
@@ -20,7 +20,17 @@ describe('RecommendationGenerationJobService', () => {
       findOne: jest.fn(),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
-    dataSource = {} as DataSource;
+    const queryRunner = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      query: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+    };
+    dataSource = {
+      createQueryRunner: jest.fn().mockReturnValue(queryRunner),
+    } as unknown as DataSource;
     service = new RecommendationGenerationJobService(
       repository as unknown as Repository<RecommendationGenerationJob>,
       dataSource,
@@ -96,6 +106,45 @@ describe('RecommendationGenerationJobService', () => {
     expect(repository.findOne).toHaveBeenCalledTimes(2);
   });
 
+  it('does not overwrite a pending job that was claimed concurrently', async () => {
+    const pendingJob = {
+      id: 'job-race',
+      userId: 'user-1',
+      status: RecommendationGenerationStatus.Pending,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as RecommendationGenerationJob;
+    const claimedJob = {
+      ...pendingJob,
+      status: RecommendationGenerationStatus.Processing,
+      leaseToken: 'worker-lease',
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+    } as RecommendationGenerationJob;
+    repository.findOne
+      .mockResolvedValueOnce(pendingJob)
+      .mockResolvedValueOnce(claimedJob);
+    repository.update.mockResolvedValue({ affected: 0 });
+    jest
+      .spyOn(service, 'schedulePendingGenerationJobs')
+      .mockImplementation(() => undefined);
+
+    const result = await service.startGenerationForUser(
+      'user-1',
+      { diagnostics: ['new request'] },
+      processor,
+    );
+
+    expect(result.id).toBe('job-race');
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'job-race',
+        userId: 'user-1',
+        status: RecommendationGenerationStatus.Pending,
+      }),
+      expect.objectContaining({ request: expect.any(Object) }),
+    );
+    expect(repository.save).not.toHaveBeenCalled();
+  });
   it('claims a pending job with a fresh lease token and expiry', async () => {
     const job = {
       id: 'job-3',
@@ -148,6 +197,11 @@ describe('RecommendationGenerationJobService', () => {
       job,
       longRunningProcessor,
     );
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     jest.advanceTimersByTime(200_000);
     await Promise.resolve();
 
@@ -159,11 +213,12 @@ describe('RecommendationGenerationJobService', () => {
     resolveProcessor([{ recommendationId: 'recommendation-4' }]);
     await processing;
     expect(repository.update).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         id: 'job-4',
         status: RecommendationGenerationStatus.Processing,
         leaseToken: 'lease-4',
-      },
+        leaseExpiresAt: expect.any(FindOperator),
+      }),
       expect.objectContaining({
         status: RecommendationGenerationStatus.Completed,
       }),
@@ -182,11 +237,12 @@ describe('RecommendationGenerationJobService', () => {
 
     expect(repository.save).not.toHaveBeenCalled();
     expect(repository.update).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         id: 'job-5',
         status: RecommendationGenerationStatus.Processing,
         leaseToken: 'lease-5',
-      },
+        leaseExpiresAt: expect.any(FindOperator),
+      }),
       expect.objectContaining({
         status: RecommendationGenerationStatus.Completed,
       }),

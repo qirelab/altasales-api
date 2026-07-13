@@ -73,19 +73,27 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
         order: { createdAt: 'DESC' },
       });
       if (pendingJob) {
-        pendingJob.request = {
-          clientProfile: dto.clientProfile ?? {},
-          diagnostics: dto.diagnostics ?? [],
-          limit: dto.limit,
-          persist: dto.persist ?? true,
-        };
-        pendingJob.result = null;
-        pendingJob.error = null;
-        pendingJob.startedAt = null;
-        pendingJob.completedAt = null;
-        const updatedJob = await this.generationJobRepository.save(pendingJob);
-        this.schedulePendingGenerationJobs(processor);
-        return this.toSummary(updatedJob);
+        await this.generationJobRepository.update(
+          {
+            id: pendingJob.id,
+            userId,
+            status: RecommendationGenerationStatus.Pending,
+          },
+          {
+            request: this.buildRequest(dto) as any,
+            result: null,
+            error: null,
+            startedAt: null,
+            completedAt: null,
+          },
+        );
+        const currentJob = await this.generationJobRepository.findOne({
+          where: { id: pendingJob.id, userId },
+        });
+        if (currentJob) {
+          this.schedulePendingGenerationJobs(processor);
+          return this.toSummary(currentJob);
+        }
       }
     }
 
@@ -93,12 +101,7 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
       userId,
       idempotencyKey: normalizedIdempotencyKey,
       status: RecommendationGenerationStatus.Pending,
-      request: {
-        clientProfile: dto.clientProfile ?? {},
-        diagnostics: dto.diagnostics ?? [],
-        limit: dto.limit,
-        persist: dto.persist ?? true,
-      },
+      request: this.buildRequest(dto) as any,
       result: null,
       error: null,
       startedAt: null,
@@ -276,7 +279,9 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
     }, GENERATION_JOB_HEARTBEAT_MS);
 
     try {
-      const result = await processor(job);
+      const result = await this.withUserGenerationLock(job.userId, () =>
+        processor(job),
+      );
       const finalized = await this.generationJobRepository.update(
         {
           id: job.id,
@@ -343,6 +348,46 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
         jobId,
       });
     }
+  }
+
+  private async withUserGenerationLock<T>(
+    userId: string,
+    processor: () => Promise<T>,
+  ): Promise<T> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    let transactionStarted = false;
+
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+      transactionStarted = true;
+      await queryRunner.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [userId],
+      );
+
+      const result = await processor();
+      await queryRunner.commitTransaction();
+      return result;
+    } catch (error) {
+      if (transactionStarted) {
+        await queryRunner.rollbackTransaction();
+      }
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  private buildRequest(
+    dto: GenerationJobStartRequest,
+  ): Record<string, unknown> {
+    return {
+      clientProfile: dto.clientProfile ?? {},
+      diagnostics: dto.diagnostics ?? [],
+      limit: dto.limit,
+      persist: dto.persist ?? true,
+    };
   }
 
   private normalizeIdempotencyKey(key?: string): string | null {
