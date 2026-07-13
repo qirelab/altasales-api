@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddRecommendationGenerationJobLeases1782700000000 implements MigrationInterface {
+export class AddRecommendationGenerationJobLeases1782810000000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "recommendation_generation_job"
@@ -25,9 +27,31 @@ export class AddRecommendationGenerationJobLeases1782700000000 implements Migrat
       ON "recommendation_generation_job" ("userId", "idempotencyKey")
       WHERE "idempotencyKey" IS NOT NULL
     `);
+
+    await queryRunner.query(`
+      CREATE INDEX IF NOT EXISTS
+        "IDX_recommendation_generation_job_pending_created"
+      ON "recommendation_generation_job" ("createdAt")
+      WHERE "status" = 'pending'
+    `);
+
+    await queryRunner.query(`
+      CREATE INDEX IF NOT EXISTS
+        "IDX_recommendation_generation_job_processing_lease_expires"
+      ON "recommendation_generation_job" ("leaseExpiresAt")
+      WHERE "status" = 'processing'
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      DROP INDEX IF EXISTS "IDX_recommendation_generation_job_processing_lease_expires"
+    `);
+
+    await queryRunner.query(`
+      DROP INDEX IF EXISTS "IDX_recommendation_generation_job_pending_created"
+    `);
+
     await queryRunner.query(`
       DROP INDEX IF EXISTS "UQ_recommendation_generation_job_user_idempotency"
     `);

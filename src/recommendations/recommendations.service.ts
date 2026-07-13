@@ -48,7 +48,6 @@ import {
 } from './dependency-graph.utils';
 
 const RECOMMENDABLE_SERVICE_SCAN_LIMIT = 500;
-const MIN_FALLBACK_RECOMMENDATION_SCORE = 25;
 const PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const REGISTERED_RECOMMENDATION_CATALOG_IDS = new Set(
   RECOMMENDATION_CATALOG_ENTRIES.map((entry) => entry.id),
@@ -627,20 +626,6 @@ export class RecommendationsService implements OnModuleInit {
       services,
       context,
     );
-
-    const fallbackRanked = services
-      .map((service) => this.scoringService.scoreService(service, context))
-      .filter((item) => item.score >= MIN_FALLBACK_RECOMMENDATION_SCORE)
-      .sort((a, b) => b.score - a.score);
-    const aiTargetIds = new Set(
-      ranked.map((item) => item.packageId ?? item.serviceId).filter(Boolean),
-    );
-    ranked = [
-      ...ranked,
-      ...fallbackRanked.filter(
-        (item) => !aiTargetIds.has(item.packageId ?? item.serviceId),
-      ),
-    ];
 
     ranked = this.relevanceRanker.rankRecommendations(
       effectiveDto,
