@@ -1,6 +1,10 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 
-import { RopDocumentRecord, RopTaskListFilters, RopTaskRecord } from './rop.types';
+import {
+  RopDocumentRecord,
+  RopTaskListFilters,
+  RopTaskRecord,
+} from './rop.types';
 export interface RopProject {
   id: string;
   name: string;
@@ -250,5 +254,90 @@ export class RopService {
     }
 
     return response.json() as Promise<RopTaskRecord>;
+  }
+
+  async getDepartmentMonthDashboard(
+    projectId: string,
+    departmentId: string,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<Record<string, unknown>> {
+    this.ensureConfigured();
+
+    const params = new URLSearchParams();
+    if (startDate) {
+      params.set('start_date', startDate);
+    }
+    if (endDate) {
+      params.set('end_date', endDate);
+    }
+    const query = params.toString();
+    const url = `${this.apiUrl}/projects/${projectId}/departments/${departmentId}/dashboard${query ? `?${query}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.jsonHeaders,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get month dashboard', response, error);
+      throw new InternalServerErrorException('Failed to get month dashboard from ROP');
+    }
+
+    return response.json() as Promise<Record<string, unknown>>;
+  }
+
+  async getDepartmentIntervalDashboard(
+    projectId: string,
+    departmentId: string,
+    startDate: string,
+    endDate: string,
+  ): Promise<Record<string, unknown>> {
+    this.ensureConfigured();
+
+    const params = new URLSearchParams();
+    params.set('start_date', startDate);
+    params.set('end_date', endDate);
+    const query = params.toString();
+    const url = `${this.apiUrl}/projects/${projectId}/departments/${departmentId}/interval-dashboard?${query}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.jsonHeaders,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get interval dashboard', response, error);
+      throw new InternalServerErrorException('Failed to get interval dashboard from ROP');
+    }
+
+    return response.json() as Promise<Record<string, unknown>>;
+  }
+
+  async getDepartmentBenchmarkDecomposition(
+    projectId: string,
+    departmentId: string,
+    analyzeDate: string,
+  ): Promise<Record<string, unknown>> {
+    this.ensureConfigured();
+
+    const params = new URLSearchParams();
+    params.set('analyze_date', analyzeDate);
+    const url = `${this.apiUrl}/projects/${projectId}/departments/${departmentId}/benchmark-analyze?${params.toString()}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.jsonHeaders,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get benchmark decomposition', response, error);
+      throw new InternalServerErrorException('Failed to get benchmark decomposition from ROP');
+    }
+
+    return response.json() as Promise<Record<string, unknown>>;
   }
 }

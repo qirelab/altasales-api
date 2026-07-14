@@ -14,8 +14,14 @@ import type { CurrentUserData } from '../auth/decorators/current-user.decorator'
 import { SessionGuard } from '../auth/guards/session.guard';
 import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
+import {
+  RopBenchmarkDecompositionQueryDto,
+  RopIntervalDashboardQueryDto,
+  RopMonthDashboardQueryDto,
+} from './dto/rop-indicators-query.dto';
 import { RopTaskResponseDto } from './dto/rop-task-response.dto';
 import { RopDocumentsService } from './rop-documents.service';
+import { RopIndicatorsService } from './rop-indicators.service';
 import { RopTasksService } from './rop-tasks.service';
 
 @ApiTags('rop')
@@ -24,8 +30,36 @@ import { RopTasksService } from './rop-tasks.service';
 export class RopController {
   constructor(
     private readonly ropDocumentsService: RopDocumentsService,
+    private readonly ropIndicatorsService: RopIndicatorsService,
     private readonly ropTasksService: RopTasksService,
   ) {}
+
+  @Get('indicators/month-dashboard')
+  @ApiOperation({ summary: 'Get ROP month dashboard for current user project department' })
+  async getMonthDashboard(
+    @CurrentUser() user: CurrentUserData,
+    @Query() query: RopMonthDashboardQueryDto,
+  ): Promise<Record<string, unknown>> {
+    return this.ropIndicatorsService.getMonthDashboardForUser(user.id, query);
+  }
+
+  @Get('indicators/interim-report')
+  @ApiOperation({ summary: 'Get ROP interval dashboard (interim report) for current user project department' })
+  async getInterimReport(
+    @CurrentUser() user: CurrentUserData,
+    @Query() query: RopIntervalDashboardQueryDto,
+  ): Promise<Record<string, unknown>> {
+    return this.ropIndicatorsService.getIntervalDashboardForUser(user.id, query);
+  }
+
+  @Get('indicators/decomposition')
+  @ApiOperation({ summary: 'Get ROP benchmark decomposition for current user project department' })
+  async getDecomposition(
+    @CurrentUser() user: CurrentUserData,
+    @Query() query: RopBenchmarkDecompositionQueryDto,
+  ): Promise<Record<string, unknown>> {
+    return this.ropIndicatorsService.getBenchmarkDecompositionForUser(user.id, query);
+  }
 
   @Get('documents')
   @ApiOperation({ summary: 'List ROP project documents for the current user' })
