@@ -20,6 +20,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
 import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
+import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
 
 @ApiTags('chat')
 @ApiCookieAuth('session')
@@ -48,7 +49,7 @@ export class ChatController {
   }
 
   @Post('messages')
-  @ApiOperation({ summary: 'Send a message' })
+  @ApiOperation({ summary: 'Send a message (legacy expert-chat flow)' })
   sendMessage(
     @CurrentUser() user: CurrentUserData,
     @Body() dto: SendMessageDto,
@@ -72,5 +73,28 @@ export class ChatController {
     @Body() dto: StartConversationDto,
   ) {
     return this.chatService.findOrCreateConversation(user.id, dto);
+  }
+
+  @Post('conversations/platform')
+  @ApiOperation({
+    summary:
+      'Open or return the client\'s single platform chat with AI-консультант AltaSales',
+  })
+  openPlatformConversation(@CurrentUser() user: CurrentUserData) {
+    return this.chatService.openPlatformConversation(user.id);
+  }
+
+  @Post('conversations/:id/messages')
+  @ApiOperation({
+    summary:
+      'Send a message inside a platform conversation. Client messages trigger '
+      + 'an async AI reply (delivered via chat:new_message WS event).',
+  })
+  sendPlatformMessage(
+    @CurrentUser() user: CurrentUserData,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendPlatformMessageDto,
+  ) {
+    return this.chatService.sendPlatformMessage(user.id, id, dto);
   }
 }

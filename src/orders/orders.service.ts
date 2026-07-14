@@ -24,6 +24,7 @@ import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-acce
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { BalanceService } from '../balance-transactions/balance.service';
 import { CartService } from '../cart/cart.service';
+import { ChatService } from '../chat/chat.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 
@@ -117,6 +118,7 @@ export class OrdersService {
     private readonly balanceService: BalanceService,
     private readonly cartService: CartService,
     private readonly orderNotificationService: OrderNotificationService,
+    private readonly chatService: ChatService,
   ) { }
 
   private mapOrderStatusToRecommendationStatus(status: OrderStatus): RecommendationStatus {
@@ -858,13 +860,55 @@ export class OrdersService {
     id: string,
     dto: UpdateContractorChatAccessDto,
   ): Promise<Order> {
-    const order = await this.orderRepository.findOne({ where: { id } });
+    const order = await this.orderRepository.findOne({
+      where: { id },
+      relations: ['item', 'item.service'],
+    });
     if (!order) {
       throw new NotFoundException(`Order with id ${id} not found`);
     }
 
+    const wasGranted = order.contractorChatAccess === true;
     order.contractorChatAccess = dto.contractorChatAccess;
-    return this.orderRepository.save(order);
+    const saved = await this.orderRepository.save(order);
+
+    // When admin flips access on, add the expert to the client's platform
+    // chat so they can jump into the ongoing AI-consultant thread. The
+    // orchestrator keeps AI as the primary responder — see QIR-256 spec 3.4.
+    if (dto.contractorChatAccess === true && !wasGranted) {
+      const expertUserId = this.resolveOrderExpertUserId(order);
+      if (expertUserId && expertUserId !== order.userId) {
+        try {
+          await this.chatService.addExpertToClientPlatformChat(
+            order.userId,
+            expertUserId,
+          );
+        } catch (error) {
+          this.logger.error(
+            `Failed to attach expert ${expertUserId} to platform chat of `
+            + `client ${order.userId} for order ${order.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+    }
+
+    return saved;
+  }
+
+  private resolveOrderExpertUserId(order: Order): string | null {
+    if (order.item?.executorUserId) {
+      return order.item.executorUserId;
+    }
+    // Legacy contractor path — only honour it when the linked service is
+    // explicitly of type Contractor, otherwise service.userId is the
+    // catalogue owner (typically an admin), NOT the expert.
+    const service = order.item?.service;
+    if (service?.type === ServiceType.Contractor && service.userId) {
+      return service.userId;
+    }
+    return null;
   }
 
   async updateStatusForAdmin(id: string, dto: UpdateOrderStatusDto): Promise<Order> {

@@ -4,6 +4,7 @@ import { PaymentModule } from '../payment/payment.module';
 import { AuthModule } from '../auth/auth.module';
 import { BalanceTransactionsModule } from '../balance-transactions/balance-transactions.module';
 import { CartModule } from '../cart/cart.module';
+import { ChatModule } from '../chat/chat.module';
 import { ExpertsModule } from '../experts/experts.module';
 import { OrderNotificationsModule } from './order-notifications.module';
 import { ServicePackage } from '../packages/entities/package.entity';
@@ -33,6 +34,7 @@ import { OrdersController } from './orders.controller';
     AuthModule,
     BalanceTransactionsModule,
     CartModule,
+    ChatModule,
     ExpertsModule,
     OrderNotificationsModule,
   ],
