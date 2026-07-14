@@ -525,6 +525,31 @@ describe('LlmProxyService', () => {
     expect(serializedLogs).not.toContain(rawMarker);
   });
 
+  it('inconsistent anonymizer placeholders fail at anonymization before downstream', async () => {
+    anonymizerProvider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [{ role: 'user', content: 'Contact {{PII_EMAIL_0001}}' }],
+        entities: [],
+        placeholderMap: {},
+        stats: {},
+      }),
+    );
+    const chatSpy = jest.spyOn(provider, 'chat');
+
+    await expect(service.chat(baseRequest)).rejects.toMatchObject({
+      message: 'LLM request validation failed',
+      safeErrorCode: 'AI_VALIDATION_FAILED',
+    });
+    expect(chatSpy).not.toHaveBeenCalled();
+    expect(loggerLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: AiMonitoringEventName.AiStageFailed,
+        stage: AiMonitoringStage.Anonymization,
+        errorCode: 'AI_VALIDATION_FAILED',
+      }),
+    );
+  });
+
   it('changed message count fails closed', async () => {
     anonymizerProvider.anonymize.mockResolvedValueOnce(
       JSON.stringify({
@@ -609,6 +634,52 @@ describe('LlmProxyService', () => {
     expect(response.content).toBe('Email: user@example.com');
     expect(response.dataClass).toBe(DataClass.AnonymizedPii);
     expect(response.anonymizationStats).toEqual({ email: 1 });
+  });
+
+  it('restores a valid subset of anonymizer placeholders from the main provider response', async () => {
+    anonymizerProvider.anonymize.mockResolvedValueOnce(
+      JSON.stringify({
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Contact {{PII_PERSON_0001}} at {{PII_EMAIL_0001}} or {{PII_PHONE_0001}}',
+          },
+        ],
+        entities: [
+          {
+            placeholder: '{{PII_PERSON_0001}}',
+            type: 'person',
+            description: 'person name',
+          },
+          {
+            placeholder: '{{PII_EMAIL_0001}}',
+            type: 'email',
+            description: 'email address',
+          },
+          {
+            placeholder: '{{PII_PHONE_0001}}',
+            type: 'phone',
+            description: 'phone number',
+          },
+        ],
+        placeholderMap: {
+          '{{PII_PERSON_0001}}': 'Synthetic Person',
+          '{{PII_EMAIL_0001}}': 'synthetic@example.test',
+          '{{PII_PHONE_0001}}': '+7 999 000-00-00',
+        },
+        stats: { person: 1, email: 1, phone: 1 },
+      }),
+    );
+    jest.spyOn(provider, 'chat').mockResolvedValueOnce({
+      content: 'Contact: {{PII_PERSON_0001}}',
+      usage: usage(),
+    });
+
+    const response = await service.chat(baseRequest);
+
+    expect(response.content).toBe('Contact: Synthetic Person');
+    expect(response.dataClass).toBe(DataClass.AnonymizedPii);
   });
 
   it('unresolved placeholders fail closed', async () => {
