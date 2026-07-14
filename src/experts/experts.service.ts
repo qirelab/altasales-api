@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -266,6 +267,8 @@ export interface ExpertCheckoutResolveResult {
 
 @Injectable()
 export class ExpertsService {
+  private readonly logger = new Logger(ExpertsService.name);
+
   constructor(
     @InjectRepository(ExpertPosition)
     private readonly positionRepository: Repository<ExpertPosition>,
@@ -1694,9 +1697,29 @@ export class ExpertsService {
           'У эксперта нет привязки к Firebase — пароль изменить нельзя',
         );
       }
-      await this.firebaseService
-        .getAuth()
-        .updateUser(user.firebaseUid, { password: dto.password });
+      try {
+        await this.firebaseService
+          .getAuth()
+          .updateUser(user.firebaseUid, { password: dto.password });
+      } catch (error) {
+        const code = (error as { code?: string })?.code;
+        this.logger.error(
+          `Firebase updateUser failed for expert ${userId} (uid=${user.firebaseUid}, code=${code ?? 'unknown'}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        if (code === 'auth/user-not-found') {
+          throw new BadRequestException(
+            'Firebase-аккаунт эксперта не найден — привязка в БД устарела. Пересоздайте аккаунт эксперта.',
+          );
+        }
+        if (code === 'auth/invalid-password') {
+          throw new BadRequestException(
+            'Пароль отклонён Firebase — проверьте формат (минимум 6 символов).',
+          );
+        }
+        throw error;
+      }
     }
 
     let profileEntity = await this.expertProfileRepository.findOne({ where: { userId } });
