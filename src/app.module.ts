@@ -19,6 +19,7 @@ import { PackagesModule } from './packages/packages.module';
 import { CategoriesModule } from './categories/categories.module';
 import { TranscriptionModule } from './transcription/transcription.module';
 import { CatalogStorageModule } from './catalog-storage/catalog-storage.module';
+import { ChatbotModule } from './chatbot/chatbot.module';
 import { ExpertsModule } from './experts/experts.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { SettingsModule } from './settings/settings.module';
@@ -45,6 +46,7 @@ import { SettingsModule } from './settings/settings.module';
     CategoriesModule,
     TranscriptionModule,
     CatalogStorageModule,
+    ChatbotModule,
     ExpertsModule,
     FeedbackModule,
     SettingsModule,
