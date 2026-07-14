@@ -36,6 +36,8 @@ function buildService(overrides: {
   llmContent?: string;
   llmError?: Error;
   configOverrides?: Record<string, number | string>;
+  historyMessages?: { role: 'user' | 'assistant'; content: string }[];
+  rewrittenQuery?: string;
 } = {}) {
   const knowledgeSearch = {
     search: overrides.searchError
@@ -55,15 +57,29 @@ function buildService(overrides: {
         dataClass: 'no_pii',
       }),
   };
+  const historyMessages = overrides.historyMessages ?? [];
+  const conversationalContext = {
+    build: jest.fn().mockReturnValue({
+      historyMessages,
+      usedHistoryCount: historyMessages.length,
+    }),
+  };
+  const queryRewriter = {
+    // Mirrors the real rewriter: return the original question unless a rewrite
+    // is explicitly configured, so existing "no history" tests keep working.
+    rewrite: jest.fn(async (question: string) => overrides.rewrittenQuery ?? question),
+  };
   const configService = overrides.configOverrides
     ? { get: jest.fn((key: string) => overrides.configOverrides?.[key]) }
     : undefined;
   const service = new ChatbotRagService(
     knowledgeSearch as never,
     llmProxy as never,
+    conversationalContext as never,
+    queryRewriter as never,
     configService as never,
   );
-  return { service, knowledgeSearch, llmProxy };
+  return { service, knowledgeSearch, llmProxy, conversationalContext, queryRewriter };
 }
 
 describe('ChatbotRagService', () => {
@@ -88,6 +104,8 @@ describe('ChatbotRagService', () => {
     expect(chatArg.task).toBe(LlmTask.Reason);
     expect(chatArg.declaredDataClass).toBe(DataClass.NoPii);
     expect(chatArg.messages[0].role).toBe('system');
+    // No history → augmented user prompt is the second (and last) message.
+    expect(chatArg.messages).toHaveLength(2);
     expect(chatArg.messages[1].role).toBe('user');
     expect(chatArg.messages[1].content).toContain('Пакет CRM Silver стоит 100 000 ₽.');
     expect(chatArg.messages[1].content).toContain('Сколько стоит CRM Silver?');
@@ -103,6 +121,65 @@ describe('ChatbotRagService', () => {
       chunkIndex: 0,
       score: 0.9,
     });
+  });
+
+  it('splices history between system and augmented user prompt and uses rewritten query for retrieval', async () => {
+    const { service, knowledgeSearch, llmProxy, conversationalContext, queryRewriter } = buildService({
+      historyMessages: [
+        { role: 'user', content: 'Что такое CRM Silver?' },
+        { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+      ],
+      rewrittenQuery: 'Сколько стоит CRM Silver?',
+    });
+
+    await service.askQuestion({
+      question: 'А сколько он стоит?',
+      history: [
+        { role: 'user', content: 'Что такое CRM Silver?' },
+        { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+      ],
+    });
+
+    expect(conversationalContext.build).toHaveBeenCalledWith([
+      { role: 'user', content: 'Что такое CRM Silver?' },
+      { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+    ]);
+    expect(queryRewriter.rewrite).toHaveBeenCalledWith(
+      'А сколько он стоит?',
+      [
+        { role: 'user', content: 'Что такое CRM Silver?' },
+        { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+      ],
+    );
+    // Retrieval must use the rewritten (standalone) query.
+    expect(knowledgeSearch.search).toHaveBeenCalledWith({
+      purpose: KnowledgeBasePurpose.QA_CHATBOT,
+      query: 'Сколько стоит CRM Silver?',
+      limit: 6,
+    });
+
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    // system + 2 history messages + augmented user
+    expect(chatArg.messages).toHaveLength(4);
+    expect(chatArg.messages[0].role).toBe('system');
+    expect(chatArg.messages[1]).toEqual({ role: 'user', content: 'Что такое CRM Silver?' });
+    expect(chatArg.messages[2]).toEqual({ role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' });
+    // The augmented user prompt still contains the ORIGINAL question, not the rewrite.
+    expect(chatArg.messages[3].role).toBe('user');
+    expect(chatArg.messages[3].content).toContain('А сколько он стоит?');
+    expect(chatArg.messages[3].content).not.toContain('Сколько стоит CRM Silver?');
+  });
+
+  it('skips history entirely when input.history is not provided (backwards-compatible call)', async () => {
+    const { service, llmProxy, conversationalContext, queryRewriter } = buildService();
+
+    await service.askQuestion({ question: 'Что такое CRM?' });
+
+    expect(conversationalContext.build).toHaveBeenCalledWith([]);
+    // Rewriter is still invoked, but with empty history it returns the original query.
+    expect(queryRewriter.rewrite).toHaveBeenCalledWith('Что такое CRM?', []);
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    expect(chatArg.messages).toHaveLength(2);
   });
 
   it('refuses with no_results and shows the no-info message when knowledge search returns nothing', async () => {
@@ -207,6 +284,7 @@ describe('ChatbotRagService', () => {
     const chatArg = llmProxy.chat.mock.calls[0][0];
     expect(result.sources).toHaveLength(1);
     expect(result.sources[0].chunkIndex).toBe(0);
+    // Only system + augmented user (no history in this scenario).
     expect(chatArg.messages[1].content.length).toBeLessThan(10_000);
   });
 
