@@ -58,6 +58,6 @@ import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-com
       inject: [OpenAICompatibleEmbeddingProviderAdapter],
     },
   ],
-  exports: [LlmProxyService, EmbeddingProxyService, AiCacheService],
+  exports: [LlmProxyService, EmbeddingProxyService, AiCacheService, PiiAnonymizerService],
 })
 export class AiModule {}
