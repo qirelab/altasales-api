@@ -63,6 +63,10 @@ function categoriesRefs(ids: string[]): Category[] {
   return ids.map((id) => ({ id } as Category));
 }
 
+function normalizePackageName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ');
+}
+
 function attachLegacyPackageCategory<T extends { categories?: Category[] | null }>(
   entity: T,
 ): T & { category: Category | null; categoryId: string | null } {
@@ -90,6 +94,9 @@ export class PackagesService {
   ) { }
 
   async create(createPackageDto: CreatePackageDto): Promise<ServicePackage> {
+    const normalizedName = normalizePackageName(createPackageDto.name);
+    await this.ensurePackageNameUnique(normalizedName);
+
     const categoryIds = resolvePackageCategoryIds(createPackageDto) ?? [];
     await this.ensureCategoriesExist(categoryIds);
 
@@ -98,6 +105,7 @@ export class PackagesService {
     const { categoryId: _legacyId, categoryIds: _newIds, ...rest } = createPackageDto;
     const servicePackage = this.packageRepository.create({
       ...rest,
+      name: normalizedName,
       tags: createPackageDto.tags ?? [],
       image: createPackageDto.image ?? null,
       services,
@@ -112,39 +120,49 @@ export class PackagesService {
     const packages = await applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false'),
+        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false')
+        .leftJoinAndSelect(
+          'sp.services',
+          's',
+          's."deletedAt" IS NULL AND s."isHidden" = false',
+        ),
       'sp',
     )
-      .andWhere(`
+      .andWhere(`(
         NOT EXISTS (
           SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
         ) OR category.id IS NOT NULL
-      `)
+      )`)
       .orderBy('sp."createdAt"', 'DESC')
       .getMany();
-    return packages.map((pkg) => attachLegacyPackageCategory(this.withPublicPackageServices(pkg)));
+    return packages.map((pkg) => attachLegacyPackageCategory(pkg));
   }
 
   async findOne(id: string): Promise<ServicePackage> {
     const servicePackage = await applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false'),
+        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false')
+        .leftJoinAndSelect(
+          'sp.services',
+          's',
+          's."deletedAt" IS NULL AND s."isHidden" = false',
+        ),
       'sp',
     )
       .andWhere('sp.id = :id', { id })
-      .andWhere(`
+      .andWhere(`(
         NOT EXISTS (
           SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
         ) OR category.id IS NOT NULL
-      `)
+      )`)
       .getOne();
 
     if (!servicePackage) {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
-    return attachLegacyPackageCategory(this.withPublicPackageServices(servicePackage));
+    return attachLegacyPackageCategory(servicePackage);
   }
 
   private async loadWithCategories(id: string): Promise<ServicePackage> {
@@ -159,13 +177,28 @@ export class PackagesService {
   }
 
   async update(id: string, updatePackageDto: UpdatePackageDto): Promise<ServicePackage> {
-    const servicePackage = await this.findOne(id);
+    const servicePackage = await this.packageRepository.findOne({
+      where: { id, ...activePackageWhere() },
+      relations: ['categories', 'services'],
+    });
+
+    if (!servicePackage) {
+      throw new NotFoundException(`Пакет с ID ${id} не найден`);
+    }
+
     const {
       serviceIds,
       categoryId: _legacyId,
       categoryIds: _newIds,
       ...packageFields
     } = updatePackageDto;
+
+    if (packageFields.name !== undefined) {
+      packageFields.name = normalizePackageName(packageFields.name);
+      if (packageFields.name !== servicePackage.name) {
+        await this.ensurePackageNameUnique(packageFields.name, id);
+      }
+    }
 
     const categoryIds = resolvePackageCategoryIds(updatePackageDto);
     if (categoryIds !== null) {
@@ -376,6 +409,22 @@ export class PackagesService {
     };
   }
 
+  private async ensurePackageNameUnique(name: string, excludeId?: string): Promise<void> {
+    const qb = this.packageRepository
+      .createQueryBuilder('sp')
+      .where('LOWER(sp.name) = LOWER(:name)', { name })
+      .andWhere('sp."deletedAt" IS NULL');
+
+    if (excludeId) {
+      qb.andWhere('sp.id != :excludeId', { excludeId });
+    }
+
+    const conflict = await qb.getOne();
+    if (conflict) {
+      throw new ConflictException('Пакет с таким названием уже существует');
+    }
+  }
+
   private async ensureCategoriesExist(categoryIds: string[]): Promise<void> {
     if (!categoryIds.length) return;
     const found = await this.categoryRepository.find({ where: { id: In(categoryIds) } });
@@ -417,11 +466,6 @@ export class PackagesService {
     return services;
   }
 
-  private withActivePackageServices(servicePackage: ServicePackage): ServicePackage {
-    servicePackage.services = filterActiveServices(servicePackage.services);
-    return servicePackage;
-  }
-
   async setVisibilityForAdmin(id: string, isHidden: boolean): Promise<ServicePackage> {
     const servicePackage = await this.findOneEntityForAdmin(id);
     servicePackage.isHidden = isHidden;
@@ -441,8 +485,4 @@ export class PackagesService {
     return servicePackage;
   }
 
-  private withPublicPackageServices(servicePackage: ServicePackage): ServicePackage {
-    servicePackage.services = filterActiveServices(servicePackage.services).filter((service) => !service.isHidden);
-    return servicePackage;
-  }
 }
