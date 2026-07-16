@@ -114,14 +114,19 @@ export class ServicesService {
     const packageQb = applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false'),
+        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false')
+        .leftJoinAndSelect(
+          'sp.services',
+          's',
+          's."deletedAt" IS NULL AND s."isHidden" = false',
+        ),
       'sp',
     );
-    packageQb.andWhere(`
+    packageQb.andWhere(`(
       NOT EXISTS (
         SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
       ) OR category.id IS NOT NULL
-    `);
+    )`);
 
     if (categoryIds.length > 0) {
       packageQb.andWhere((sqb) => {
@@ -155,10 +160,6 @@ export class ServicesService {
       query.type && query.type !== ServiceType.Service ? Promise.resolve([]) : packageQb.getMany(),
       this.getCategoryContentForFilter(categoryIds),
     ]);
-
-    for (const pkg of packages) {
-      pkg.services = filterActiveServices(pkg.services).filter((service) => !service.isHidden);
-    }
 
     return {
       packages,

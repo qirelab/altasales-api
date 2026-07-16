@@ -10,7 +10,7 @@ export type RecommendationCatalogEntry = {
 
 export const RECOMMENDATION_CATALOG = {
   salesDepartmentFromZero: {
-    id: 'ef4b6f8c-78ad-4ac7-a2ae-e8b9f1d525ca',
+    id: '48bb369e-3fce-442c-bdbb-e587c2b1051f',
     kind: 'package',
     displayName: 'Отдел продаж с нуля',
     legacyAliases: ['отдел продаж с нуля'],

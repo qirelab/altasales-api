@@ -52,7 +52,7 @@ const PII_PATTERNS: Record<Exclude<PiiKind, 'bank_card'>, RegExp> = {
 
 const CARD_CANDIDATE_PATTERN = /\b(?:\d[ -]*?){13,19}\b/g;
 const PLACEHOLDER_PATTERN = /^\{\{PII_[A-Z_]+_\d{4}\}\}$/;
-const ANY_PLACEHOLDER_PATTERN = /\{\{PII_[A-Z_]+_\d{4}\}\}/g;
+const PII_PLACEHOLDER_CANDIDATE_PATTERN = /\{\{\s*PII[^{}]*\}\}/gi;
 
 // The LLM anonymizer is the primary detector; regexes are safety checks only.
 @Injectable()
@@ -159,7 +159,11 @@ export class PiiAnonymizerService {
       .map((message: LlmMessage) => message.content)
       .join('\n');
 
-    this.validatePlaceholderMap(placeholderMap, normalizedEntities);
+    this.validatePlaceholderConsistency(
+      anonymizedText,
+      placeholderMap,
+      normalizedEntities,
+    );
     this.assertRawValuesAreNotPresent(anonymizedText, placeholderMap);
 
     const safetyScan = this.scanText(anonymizedText);
@@ -232,23 +236,50 @@ export class PiiAnonymizerService {
     };
   }
 
-  private validatePlaceholderMap(
+  private validatePlaceholderConsistency(
+    anonymizedText: string,
     placeholderMap: PlaceholderMap,
     entities: DetectedPiiEntity[],
   ): void {
+    const extractedMessagePlaceholders =
+      this.extractPlaceholders(anonymizedText);
+    if (
+      extractedMessagePlaceholders.some(
+        (placeholder) => !PLACEHOLDER_PATTERN.test(placeholder),
+      )
+    ) {
+      throw new Error('validation_error');
+    }
+
+    const messagePlaceholders = new Set(extractedMessagePlaceholders);
     const entityPlaceholders = new Set(
       entities.map((entity) => entity.placeholder),
     );
+    const mapPlaceholders = new Set(Object.keys(placeholderMap));
 
-    for (const placeholder of Object.keys(placeholderMap)) {
+    if (entityPlaceholders.size !== entities.length) {
+      throw new Error('validation_error');
+    }
+
+    for (const placeholder of mapPlaceholders) {
       if (!PLACEHOLDER_PATTERN.test(placeholder)) {
         throw new Error('validation_error');
       }
-
-      if (!entityPlaceholders.has(placeholder)) {
-        throw new Error('validation_error');
-      }
     }
+
+    if (
+      !this.haveSameMembers(messagePlaceholders, entityPlaceholders) ||
+      !this.haveSameMembers(messagePlaceholders, mapPlaceholders)
+    ) {
+      throw new Error('validation_error');
+    }
+  }
+
+  private haveSameMembers(left: Set<string>, right: Set<string>): boolean {
+    return (
+      left.size === right.size &&
+      Array.from(left).every((placeholder) => right.has(placeholder))
+    );
   }
 
   private assertRawValuesAreNotPresent(
@@ -364,7 +395,9 @@ export class PiiAnonymizerService {
   }
 
   private extractPlaceholders(content: string): string[] {
-    return Array.from(new Set(content.match(ANY_PLACEHOLDER_PATTERN) ?? []));
+    return Array.from(
+      new Set(content.match(PII_PLACEHOLDER_CANDIDATE_PATTERN) ?? []),
+    );
   }
 
   private placeholderMatchesType(
