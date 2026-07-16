@@ -71,9 +71,12 @@ export function selectNonOverlappingRecommendations<
       continue;
     }
 
-    const selectedItemsCoveredByPackage = selected.filter((candidate) =>
-      coversAllServices(itemCoverage, getCoverageIds(candidate)),
-    );
+    const selectedItemsCoveredByPackage = selected.filter((candidate) => {
+      const candidateCoverage = getCoverageIds(candidate);
+      return candidate.packageId
+        ? coversAllServices(itemCoverage, candidateCoverage)
+        : hasCoverageIntersection(itemCoverage, candidateCoverage);
+    });
     const selectedPackageCoveringItem = selected.some(
       (candidate) =>
         Boolean(candidate.packageId) &&
@@ -118,7 +121,13 @@ export function getCoverageRecommendationTargetId(
 }
 
 export function getCoverageIds(item: CoverageRecommendationItem): Set<string> {
-  const ids = (item.coveredServiceIds ?? []).filter(isPublicCoverageId);
+  const overlapIds = (item.coveredServiceIds ?? []).filter(isOverlapCoverageId);
+  const exactNameIds = overlapIds.filter((id) =>
+    id.startsWith('catalog_name:'),
+  );
+  const ids = item.packageId && exactNameIds.length > 0
+    ? exactNameIds
+    : overlapIds;
   if (ids.length === 0 && item.serviceId) ids.push(item.serviceId);
   return new Set(ids);
 }
@@ -131,7 +140,7 @@ function getBlockedCoverageExceptTarget(
   existingCoverage.forEach((entry) => {
     if (!entry.blocksOverlaps || entry.targetId === targetId) return;
     entry.coveredServiceIds.forEach((serviceId) => {
-      if (isPublicCoverageId(serviceId)) result.add(serviceId);
+      if (isOverlapCoverageId(serviceId)) result.add(serviceId);
     });
   });
   return result;
@@ -154,6 +163,9 @@ function coversAllServices(
   );
 }
 
-function isPublicCoverageId(id: string): boolean {
-  return !id.startsWith('catalog_name:') && !id.startsWith('catalog_semantic:');
+function isOverlapCoverageId(id: string): boolean {
+  // Exact normalized names are safe internal identities for catalog rows that
+  // were duplicated in the database under different UUIDs. Broad semantic
+  // keys may describe related, but distinct, services and remain excluded.
+  return !id.startsWith('catalog_semantic:');
 }

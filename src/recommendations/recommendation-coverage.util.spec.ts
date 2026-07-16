@@ -116,6 +116,30 @@ describe('recommendation coverage selection', () => {
     ]);
   });
 
+  it('matches a package child to a duplicated catalog service by exact name', () => {
+    const result = selectNonOverlappingRecommendations([
+      {
+        serviceId: 'canonical-dashboard-id',
+        packageId: null,
+        coveredServiceIds: [
+          'canonical-dashboard-id',
+          'catalog_name:??????? ??',
+        ],
+        score: 95,
+      },
+      {
+        serviceId: null,
+        packageId: 'documents-package-id',
+        coveredServiceIds: ['legacy-dashboard-id', 'catalog_name:??????? ??'],
+        score: 90,
+      },
+    ]);
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'documents-package-id',
+    ]);
+  });
+
   it('keeps partially overlapping packages that each cover independent services', () => {
     const result = selectNonOverlappingRecommendations([
       {

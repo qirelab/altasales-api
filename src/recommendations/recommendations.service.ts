@@ -13,7 +13,7 @@ import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
-import { activePackageWhere } from '../packages/package-visibility';
+import { publicPackageWhere } from '../packages/package-visibility';
 import { filterActiveServices } from '../services/service-visibility';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
@@ -47,7 +47,6 @@ import {
   validateDependencyIds,
 } from './dependency-graph.utils';
 import {
-  getCoverageIds,
   getCoverageRecommendationTargetId,
   selectNonOverlappingRecommendations,
 } from './recommendation-coverage.util';
@@ -261,7 +260,7 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."orderId"', 'orderId')
       .addSelect('COALESCE(service.name, package.name)', 'name')
       .addSelect(
-        "COALESCE(service.description, package.description, '')",
+        `COALESCE(service.description, package.description, '')`,
         'description',
       )
       .addSelect(`COALESCE(service.type, 'Пакет услуг')`, 'type')
@@ -321,21 +320,23 @@ export class RecommendationsService implements OnModuleInit {
     packagesWithServices.forEach((pkg) => {
       innerServicesByPackageId.set(
         pkg.id,
-        filterActiveServices(pkg.services).map((service) => ({
-          id: service.id,
-          name: service.name,
-          description: service.description ?? '',
-          type: service.type,
-          price: Number(service.price),
-          giftEligible: service.giftEligible,
-          status: null,
-        })),
+        filterActiveServices(pkg.services)
+          .filter((service) => !service.isHidden)
+          .map((service) => ({
+            id: service.id,
+            name: service.name,
+            description: service.description ?? '',
+            type: service.type,
+            price: Number(service.price),
+            giftEligible: service.giftEligible,
+            status: null,
+          })),
       );
     });
 
     const subStatusByRecId = await this.loadPackageSubItemStatuses(packageRows);
 
-    return rows.map((row) => {
+    const rowsWithPackageServices = rows.map((row) => {
       if (!row.packageId) return row;
       const innerServices = innerServicesByPackageId.get(row.packageId) ?? [];
       const subStatusMap = subStatusByRecId.get(row.id);
@@ -344,6 +345,44 @@ export class RecommendationsService implements OnModuleInit {
         status: subStatusMap?.get(service.id) ?? null,
       }));
       return { ...row, services };
+    });
+
+    return this.filterPackageCoveredStandaloneRecommendations(
+      rowsWithPackageServices,
+      packagesWithServices,
+    );
+  }
+
+  private filterPackageCoveredStandaloneRecommendations(
+    rows: UserRecommendationListItem[],
+    packages: ServicePackage[],
+  ): UserRecommendationListItem[] {
+    const packageIds = new Set(
+      rows.flatMap((row) => (row.packageId ? [row.packageId] : [])),
+    );
+    if (packageIds.size === 0) return rows;
+
+    const coveredServiceIds = new Set<string>();
+    const coveredServiceNames = new Set<string>();
+    packages.forEach((servicePackage) => {
+      if (!packageIds.has(servicePackage.id)) return;
+      filterActiveServices(servicePackage.services)
+        .filter((service) => !service.isHidden)
+        .forEach((service) => {
+          coveredServiceIds.add(service.id);
+          coveredServiceNames.add(this.normalizeCatalogName(service.name));
+        });
+    });
+
+    return rows.filter((row) => {
+      if (!row.serviceId || row.status !== RecommendationStatus.Recommended) {
+        return true;
+      }
+
+      return (
+        !coveredServiceIds.has(row.serviceId) &&
+        !coveredServiceNames.has(this.normalizeCatalogName(row.name))
+      );
     });
   }
 
@@ -475,6 +514,12 @@ export class RecommendationsService implements OnModuleInit {
     });
 
     const saved = await this.recommendationRepository.save(recommendation);
+    if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+      await this.pruneReplaceableRecommendationsCoveredByPackage(
+        saved.userId,
+        saved.packageId,
+      );
+    }
 
     if (shouldNotify) {
       await this.notificationService.notifyUserAboutRecommendations(
@@ -545,6 +590,12 @@ export class RecommendationsService implements OnModuleInit {
     }
 
     const saved = await this.recommendationRepository.save(recommendation);
+    if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+      await this.pruneReplaceableRecommendationsCoveredByPackage(
+        saved.userId,
+        saved.packageId,
+      );
+    }
     return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
 
@@ -670,8 +721,14 @@ export class RecommendationsService implements OnModuleInit {
     }
 
     await this.pruneStaleGeneratedRecommendations(dto.userId, ranked);
+    const compactedRecommendationIds =
+      await this.compactReplaceableRecommendationSnapshot(dto.userId);
 
-    return persisted;
+    return persisted.filter(
+      (item) =>
+        !item.recommendation?.id ||
+        !compactedRecommendationIds.has(item.recommendation.id),
+    );
   }
 
   // ── Admin delete ──────────────────────────────────────────────────
@@ -736,18 +793,21 @@ export class RecommendationsService implements OnModuleInit {
           serviceTypes: [ServiceType.Service, ServiceType.Document],
         })
         .andWhere('service."deletedAt" IS NULL')
+        .andWhere('service."isHidden" = false')
         .orderBy('service.createdAt', 'DESC')
         .take(RECOMMENDABLE_SERVICE_SCAN_LIMIT)
         .getMany(),
       this.packageRepository.find({
-        where: activePackageWhere(),
+        where: publicPackageWhere(),
         relations: ['categories', 'services', 'services.category'],
         order: { createdAt: 'DESC' },
       }),
     ]);
-    const packageCandidates = packages
+    const packageCandidates = this.deduplicatePackagesByName(packages)
       .map((servicePackage) => {
-        const activeServices = filterActiveServices(servicePackage.services);
+        const activeServices = filterActiveServices(
+          servicePackage.services,
+        ).filter((service) => !service.isHidden);
         if (activeServices.length === 0) return null;
         if (this.isPlaceholderPackageCandidate(servicePackage)) return null;
         const coverageIds = this.getPackageCoverageIds(activeServices);
@@ -810,6 +870,48 @@ export class RecommendationsService implements OnModuleInit {
     return [...packageCandidates, ...serviceCandidates];
   }
 
+  private deduplicatePackagesByName(
+    packages: ServicePackage[],
+  ): ServicePackage[] {
+    const byName = new Map<string, ServicePackage>();
+
+    packages.forEach((servicePackage) => {
+      const key = this.normalizeCatalogName(servicePackage.name);
+      const existing = byName.get(key);
+      if (
+        !existing ||
+        this.shouldPreferDuplicatePackage(servicePackage, existing)
+      ) {
+        byName.set(key, servicePackage);
+      }
+    });
+
+    return Array.from(byName.values());
+  }
+
+  private shouldPreferDuplicatePackage(
+    candidate: ServicePackage,
+    existing: ServicePackage,
+  ): boolean {
+    const candidateServices = filterActiveServices(candidate.services).filter(
+      (service) => !service.isHidden,
+    ).length;
+    const existingServices = filterActiveServices(existing.services).filter(
+      (service) => !service.isHidden,
+    ).length;
+    if (candidateServices !== existingServices) {
+      return candidateServices > existingServices;
+    }
+
+    const candidateCreatedAt = candidate.createdAt?.getTime?.() ?? 0;
+    const existingCreatedAt = existing.createdAt?.getTime?.() ?? 0;
+    if (candidateCreatedAt !== existingCreatedAt) {
+      return candidateCreatedAt > existingCreatedAt;
+    }
+
+    return candidate.id.localeCompare(existing.id) < 0;
+  }
+
   private deduplicateServicesByName(services: Service[]): Service[] {
     const byName = new Map<string, Service>();
 
@@ -838,10 +940,20 @@ export class RecommendationsService implements OnModuleInit {
       return candidateIsRegistered;
     }
 
-    return (
-      candidate.type === ServiceType.Service &&
-      existing.type === ServiceType.Document
-    );
+    if (candidate.type !== existing.type) {
+      return (
+        candidate.type === ServiceType.Service &&
+        existing.type === ServiceType.Document
+      );
+    }
+
+    const candidateCreatedAt = candidate.createdAt?.getTime?.() ?? 0;
+    const existingCreatedAt = existing.createdAt?.getTime?.() ?? 0;
+    if (candidateCreatedAt !== existingCreatedAt) {
+      return candidateCreatedAt > existingCreatedAt;
+    }
+
+    return candidate.id.localeCompare(existing.id) < 0;
   }
 
   private isDuplicateLegacyPackageService(
@@ -868,7 +980,10 @@ export class RecommendationsService implements OnModuleInit {
     return this.uniqueIds(
       activeServices
         .filter((service) => !service.deletedAt)
-        .map((service) => service.id),
+        .flatMap((service) => [
+          service.id,
+          ...this.getServiceCoverageKeys(service),
+        ]),
     );
   }
 
@@ -1066,6 +1181,7 @@ export class RecommendationsService implements OnModuleInit {
     const coverage: ExistingRecommendationCoverage[] = [];
 
     recommendations.forEach((recommendation) => {
+      if (!this.isRecommendationTargetAvailable(recommendation)) return;
       const targetId = this.getRecommendationTargetId(recommendation);
       if (!targetId) return;
       coverage.push({
@@ -1078,6 +1194,26 @@ export class RecommendationsService implements OnModuleInit {
     });
 
     return coverage;
+  }
+
+  private isRecommendationTargetAvailable(
+    recommendation: Recommendation,
+  ): boolean {
+    if (recommendation.serviceId) {
+      return Boolean(
+        !recommendation.service ||
+        (recommendation.service &&
+          recommendation.service.deletedAt == null &&
+          !recommendation.service.isHidden),
+      );
+    }
+
+    return Boolean(
+      !recommendation.package ||
+      (recommendation.package &&
+        recommendation.package.deletedAt == null &&
+        !recommendation.package.isHidden),
+    );
   }
 
   private filterOverlappingRecommendations(
@@ -1156,6 +1292,95 @@ export class RecommendationsService implements OnModuleInit {
     await this.recommendationRepository.delete(idsToDelete);
   }
 
+  /**
+   * Reconciles the persisted recommendation snapshot after a successful
+   * generation. The ranking stage intentionally has score-based protections,
+   * but persisted package recommendations must still be compacted by actual
+   * coverage: a complete package wins over a replaceable child package.
+   *
+   * Manual recommendations, recommendations with an order, and lifecycle
+   * records that are no longer in the replaceable `recommended` state are
+   * treated as locked and are never deleted here.
+   */
+  private async compactReplaceableRecommendationSnapshot(
+    userId: string,
+  ): Promise<Set<string>> {
+    const recommendations = await this.recommendationRepository.find({
+      where: { userId },
+      relations: [
+        'service',
+        'service.category',
+        'package',
+        'package.services',
+        'package.services.category',
+      ],
+    });
+
+    const replaceableRecommendations = recommendations.filter((recommendation) =>
+      this.isReplaceableRecommendation(recommendation),
+    );
+    if (replaceableRecommendations.length < 2) return new Set();
+
+    const coverageByRecommendationId = new Map<string, Set<string>>();
+    recommendations.forEach((recommendation) => {
+      coverageByRecommendationId.set(
+        recommendation.id,
+        new Set(this.getRecommendationOverlapCoverageIds(recommendation)),
+      );
+    });
+
+    const packageRecommendations = recommendations.filter(
+      (recommendation) =>
+        recommendation.packageId &&
+        recommendation.package &&
+        recommendation.package.deletedAt == null &&
+        !recommendation.package.isHidden &&
+        (coverageByRecommendationId.get(recommendation.id)?.size ?? 0) > 0,
+    );
+    const coversAll = (coveringId: string, coveredId: string): boolean => {
+      const covering = coverageByRecommendationId.get(coveringId) ?? new Set();
+      const covered = coverageByRecommendationId.get(coveredId) ?? new Set();
+      return (
+        covered.size > 0 && [...covered].every((coverageId) => covering.has(coverageId))
+      );
+    };
+    const isPreferredCover = (coveringId: string, coveredId: string): boolean => {
+      const covering = coverageByRecommendationId.get(coveringId)?.size ?? 0;
+      const covered = coverageByRecommendationId.get(coveredId)?.size ?? 0;
+      if (covering !== covered) return covering > covered;
+      return coveringId.localeCompare(coveredId) < 0;
+    };
+
+    const idsToDelete = replaceableRecommendations
+      .filter((recommendation) => {
+        if (!coverageByRecommendationId.get(recommendation.id)?.size) {
+          return false;
+        }
+
+        if (recommendation.packageId) {
+          return packageRecommendations.some(
+            (covering) =>
+              covering.id !== recommendation.id &&
+              coversAll(covering.id, recommendation.id) &&
+              (isPreferredCover(covering.id, recommendation.id) ||
+                !this.isReplaceableRecommendation(covering)),
+          );
+        }
+
+        // Standalone services are deliberately left untouched here. If a
+        // service is relevant, it must remain a recommendation in its own
+        // right; package-package compaction must not silently delete it.
+        return false;
+      })
+      .map((recommendation) => recommendation.id);
+
+    if (idsToDelete.length > 0) {
+      await this.recommendationRepository.delete(idsToDelete);
+    }
+
+    return new Set(idsToDelete);
+  }
+
   private isReplaceableRecommendation(
     recommendation: Pick<
       Recommendation,
@@ -1207,7 +1432,9 @@ export class RecommendationsService implements OnModuleInit {
     if (recommendation.packageId && recommendation.package) {
       return this.uniqueIds(
         this.getPackageCoverageIds(
-          filterActiveServices(recommendation.package?.services),
+          filterActiveServices(recommendation.package?.services).filter(
+            (service) => !service.isHidden,
+          ),
         ),
       );
     }
@@ -1220,6 +1447,19 @@ export class RecommendationsService implements OnModuleInit {
         ? this.getServiceCoverageKeys(recommendation.service)
         : []),
     ]);
+  }
+
+  private getRecommendationOverlapCoverageIds(
+    recommendation: Recommendation,
+  ): string[] {
+    const coverageIds = this.getRecommendationCoveredServiceIds(
+      recommendation,
+    ).filter((coverageId) => !coverageId.startsWith('catalog_semantic:'));
+    const exactNameIds = coverageIds.filter((coverageId) =>
+      coverageId.startsWith('catalog_name:'),
+    );
+
+    return exactNameIds.length > 0 ? exactNameIds : coverageIds;
   }
 
   private async upsertGeneratedRecommendation(
@@ -1405,7 +1645,7 @@ export class RecommendationsService implements OnModuleInit {
     serviceId: string,
   ): Promise<void> {
     const service = await this.serviceRepository.findOne({
-      where: { id: serviceId, deletedAt: IsNull() },
+      where: { id: serviceId, deletedAt: IsNull(), isHidden: false },
     });
     if (!service) {
       throw new NotFoundException(`Service with id ${serviceId} not found`);
@@ -1424,7 +1664,7 @@ export class RecommendationsService implements OnModuleInit {
     packageId: string,
   ): Promise<void> {
     const servicePackage = await this.packageRepository.findOne({
-      where: { id: packageId, ...activePackageWhere() },
+      where: { id: packageId, ...publicPackageWhere() },
     });
     if (!servicePackage) {
       throw new NotFoundException(`Package with id ${packageId} not found`);
@@ -1470,6 +1710,94 @@ export class RecommendationsService implements OnModuleInit {
           : 'This package is already recommended to this user',
       );
     }
+    if (
+      serviceId &&
+      (await this.isServiceCoveredByRecommendedPackage(
+        userId,
+        serviceId,
+        excludeRecommendationId,
+      ))
+    ) {
+      throw new ConflictException(
+        'This service is already included in a recommended package',
+      );
+    }
+  }
+
+  private async isServiceCoveredByRecommendedPackage(
+    userId: string,
+    serviceId: string,
+    excludeRecommendationId?: string,
+  ): Promise<boolean> {
+    const [service, recommendations] = await Promise.all([
+      this.serviceRepository.findOne({
+        where: { id: serviceId, deletedAt: IsNull(), isHidden: false },
+        relations: ['category'],
+      }),
+      this.recommendationRepository.find({
+        where: { userId, status: RecommendationStatus.Recommended },
+        relations: ['package', 'package.services', 'package.services.category'],
+      }),
+    ]);
+    if (!service) return false;
+
+    const serviceCoverage = new Set([
+      service.id,
+      ...this.getServiceCoverageKeys(service),
+    ]);
+    return recommendations.some((recommendation) => {
+      if (
+        recommendation.id === excludeRecommendationId ||
+        !recommendation.packageId ||
+        !this.isRecommendationTargetAvailable(recommendation)
+      ) {
+        return false;
+      }
+
+      return this.getRecommendationCoveredServiceIds(recommendation).some(
+        (coverageId) => serviceCoverage.has(coverageId),
+      );
+    });
+  }
+
+  private async pruneReplaceableRecommendationsCoveredByPackage(
+    userId: string,
+    packageId: string,
+  ): Promise<void> {
+    const [servicePackage, recommendations] = await Promise.all([
+      this.packageRepository.findOne({
+        where: { id: packageId, ...publicPackageWhere() },
+        relations: ['services', 'services.category'],
+      }),
+      this.recommendationRepository.find({
+        where: { userId },
+        relations: ['service', 'service.category'],
+      }),
+    ]);
+    if (!servicePackage) return;
+
+    const packageCoverage = new Set(
+      this.getPackageCoverageIds(
+        filterActiveServices(servicePackage.services).filter(
+          (service) => !service.isHidden,
+        ),
+      ),
+    );
+    const idsToDelete = recommendations
+      .filter(
+        (recommendation) =>
+          recommendation.serviceId &&
+          recommendation.service &&
+          this.isReplaceableRecommendation(recommendation) &&
+          this.getRecommendationCoveredServiceIds(recommendation).some(
+            (coverageId) => packageCoverage.has(coverageId),
+          ),
+      )
+      .map((recommendation) => recommendation.id);
+
+    if (idsToDelete.length > 0) {
+      await this.recommendationRepository.delete(idsToDelete);
+    }
   }
 
   private uniqueIds(ids: string[]): string[] {
@@ -1487,9 +1815,11 @@ export class RecommendationsService implements OnModuleInit {
   private visibleRecommendationTargetFilter(): Brackets {
     return new Brackets((qb) => {
       qb.where(
-        'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL',
+        'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL AND service."isHidden" = false',
         { serviceTypes: [ServiceType.Service, ServiceType.Document] },
-      ).orWhere('package.id IS NOT NULL AND package."deletedAt" IS NULL');
+      ).orWhere(
+        'package.id IS NOT NULL AND package."deletedAt" IS NULL AND package."isHidden" = false',
+      );
     });
   }
 }

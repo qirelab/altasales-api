@@ -29,6 +29,7 @@ describe('RecommendationsService', () => {
 
   const createService = () => {
     const recommendationRepository = {
+      createQueryBuilder: jest.fn(),
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
       create: jest.fn((value) => value),
@@ -123,6 +124,93 @@ describe('RecommendationsService', () => {
       generationJobService,
     };
   };
+
+  it('compacts a persisted package and child service with different UUIDs', async () => {
+    const { service, recommendationRepository, packageRepository } =
+      createService();
+    const qb = {
+      leftJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'package-recommendation-id',
+          serviceId: null,
+          packageId: 'documents-package-id',
+          orderId: null,
+          name: 'Пакет документов отдела продаж',
+          description: 'Документы для отдела продаж',
+          type: 'Пакет услуг',
+          category: 'Отдел продаж',
+          price: '25000',
+          giftEligible: false,
+          status: RecommendationStatus.Recommended,
+          priority: RecommendationPriority.Medium,
+          rationale: 'package fit',
+          dependencyIds: [],
+          diagnosticSignals: [],
+          createdAt: new Date('2026-07-15T10:00:00Z'),
+        },
+        {
+          id: 'dashboard-recommendation-id',
+          serviceId: 'standalone-dashboard-id',
+          packageId: null,
+          orderId: null,
+          name: 'Дашборд ОП',
+          description: 'Отдельный дашборд',
+          type: ServiceType.Service,
+          category: 'Аналитика',
+          price: '10000',
+          giftEligible: false,
+          status: RecommendationStatus.Recommended,
+          priority: RecommendationPriority.Medium,
+          rationale: 'analytics',
+          dependencyIds: [],
+          diagnosticSignals: [],
+          createdAt: new Date('2026-07-15T09:00:00Z'),
+        },
+      ]),
+    };
+    recommendationRepository.createQueryBuilder.mockReturnValue(qb);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'documents-package-id',
+        name: 'Пакет документов отдела продаж',
+        services: [
+          {
+            id: 'package-dashboard-id',
+            name: 'Дашборд ОП',
+            description: 'Дашборд внутри пакета',
+            type: ServiceType.Service,
+            price: 10000,
+            giftEligible: false,
+            isHidden: false,
+            deletedAt: null,
+          },
+        ],
+      },
+    ]);
+
+    const result = await service.findAssignedToUserList(userId);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(
+      expect.objectContaining({
+        id: 'package-recommendation-id',
+        packageId: 'documents-package-id',
+        services: [
+          expect.objectContaining({
+            id: 'package-dashboard-id',
+            name: 'Дашборд ОП',
+          }),
+        ],
+      }),
+    );
+  });
 
   it('merges an explicit generation clientProfile from the demo page over saved answers', async () => {
     const { service, questionnaireRepository, generationJobService } =
@@ -384,6 +472,76 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('keeps only the fuller package when catalog names are duplicated', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([]);
+
+    const recruitment = {
+      id: 'recruitment-service-id',
+      name: 'Подбор менеджеров',
+      description: 'Подбор команды продаж',
+      isHidden: false,
+      deletedAt: null,
+      skills: ['подбор'],
+      category: { name: 'Отдел продаж' },
+    };
+    const crmSetup = {
+      id: 'crm-setup-service-id',
+      name: 'Настройка CRM',
+      description: 'Настройка системы продаж',
+      isHidden: false,
+      deletedAt: null,
+      skills: ['crm'],
+      category: { name: 'CRM система' },
+    };
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'obsolete-package-id',
+        name: 'Отдел продаж с нуля',
+        description: 'Устаревший пакет',
+        price: 10000,
+        tags: ['продажи'],
+        categories: [],
+        services: [recruitment],
+        isHidden: false,
+        createdAt: new Date('2025-01-01T00:00:00Z'),
+        deletedAt: null,
+      },
+      {
+        id: 'complete-package-id',
+        name: 'Отдел продаж с нуля',
+        description: 'Полный пакет',
+        price: 100000,
+        tags: ['продажи', 'crm'],
+        categories: [],
+        services: [recruitment, crmSetup],
+        isHidden: false,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({ userId, persist: false });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    const matchingPackages = candidates.filter(
+      (candidate) => candidate.name === 'Отдел продаж с нуля',
+    );
+    expect(matchingPackages).toHaveLength(1);
+    expect(matchingPackages[0]).toEqual(
+      expect.objectContaining({
+        packageId: 'complete-package-id',
+        coveredServiceIds: expect.arrayContaining([
+          'recruitment-service-id',
+          'crm-setup-service-id',
+        ]),
+      }),
+    );
+  });
+
   it('adds logical duplicate services to package coverage', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();
@@ -487,16 +645,18 @@ describe('RecommendationsService', () => {
     const packageCandidate = candidates.find(
       (item) => item.packageId === 'crm-silver-package-id',
     );
-    expect(packageCandidate.coveredServiceIds).toEqual(['inner-tz-service-id']);
+    expect(packageCandidate.coveredServiceIds).toEqual(
+      expect.arrayContaining(['inner-tz-service-id']),
+    );
     expect(packageCandidate.coveredServiceIds).not.toEqual(
       expect.arrayContaining(['tech-spec-service-id', 'crm-audit-service-id']),
     );
     const documentsPackageCandidate = candidates.find(
       (item) => item.packageId === 'documents-package-id',
     );
-    expect(documentsPackageCandidate.coveredServiceIds).toEqual([
-      'instruction-service-id',
-    ]);
+    expect(documentsPackageCandidate.coveredServiceIds).toEqual(
+      expect.arrayContaining(['instruction-service-id']),
+    );
     expect(documentsPackageCandidate.coveredServiceIds).not.toContain(
       'dashboard-service-id',
     );
@@ -1414,6 +1574,194 @@ describe('RecommendationsService', () => {
     expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
       'full-package-id',
     ]);
+  });
+
+  it('compacts persisted packages by logical coverage, even when service UUIDs differ', async () => {
+    const { service, recommendationRepository } = createService();
+    const staleChild = {
+      id: 'stale-office-recommendation-id',
+      serviceId: null,
+      packageId: 'office-package-id',
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      orderId: null,
+      diagnosticSignals: [],
+      package: {
+        services: [
+          {
+            id: 'legacy-profile-id',
+            name: 'Профиль вакансии',
+            deletedAt: null,
+            isHidden: false,
+            skills: [],
+          },
+        ],
+      },
+    };
+    const completePackage = {
+      id: 'full-package-recommendation-id',
+      serviceId: null,
+      packageId: 'full-package-id',
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      orderId: null,
+      diagnosticSignals: [],
+      package: {
+        services: [
+          {
+            id: 'canonical-profile-id',
+            name: 'Профиль вакансии',
+            deletedAt: null,
+            isHidden: false,
+            skills: [],
+          },
+          {
+            id: 'canonical-dashboard-id',
+            name: 'Дашборд ОП',
+            deletedAt: null,
+            isHidden: false,
+            skills: [],
+          },
+        ],
+      },
+    };
+    recommendationRepository.find.mockResolvedValue([
+      staleChild,
+      completePackage,
+    ]);
+
+    const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
+      userId,
+    );
+
+    expect(deleted).toEqual(new Set(['stale-office-recommendation-id']));
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'stale-office-recommendation-id',
+    ]);
+  });
+
+  it('keeps standalone relevant services when a package recommendation is compacted', async () => {
+    const { service, recommendationRepository } = createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'stale-office-recommendation-id',
+        serviceId: null,
+        packageId: 'office-package-id',
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        package: {
+          services: [
+            {
+              id: 'legacy-profile-id',
+              name: 'Профиль вакансии',
+              deletedAt: null,
+              isHidden: false,
+              skills: [],
+            },
+          ],
+        },
+      },
+      {
+        id: 'full-package-recommendation-id',
+        serviceId: null,
+        packageId: 'full-package-id',
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        package: {
+          services: [
+            {
+              id: 'canonical-profile-id',
+              name: 'Профиль вакансии',
+              deletedAt: null,
+              isHidden: false,
+              skills: [],
+            },
+          ],
+        },
+      },
+      {
+        id: 'standalone-service-recommendation-id',
+        serviceId: 'standalone-service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        service: {
+          id: 'standalone-service-id',
+          name: 'Аудит CRM',
+          deletedAt: null,
+          isHidden: false,
+          skills: [],
+        },
+      },
+    ]);
+
+    const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
+      userId,
+    );
+
+    expect(deleted).toEqual(new Set(['stale-office-recommendation-id']));
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'stale-office-recommendation-id',
+    ]);
+  });
+
+  it('does not compact a manual package recommendation', async () => {
+    const { service, recommendationRepository } = createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'manual-office-recommendation-id',
+        serviceId: null,
+        packageId: 'office-package-id',
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+        orderId: null,
+        diagnosticSignals: [],
+        package: {
+          services: [
+            {
+              id: 'legacy-profile-id',
+              name: 'Профиль вакансии',
+              deletedAt: null,
+              isHidden: false,
+              skills: [],
+            },
+          ],
+        },
+      },
+      {
+        id: 'generated-full-package-recommendation-id',
+        serviceId: null,
+        packageId: 'full-package-id',
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        package: {
+          services: [
+            {
+              id: 'canonical-profile-id',
+              name: 'Профиль вакансии',
+              deletedAt: null,
+              isHidden: false,
+              skills: [],
+            },
+          ],
+        },
+      },
+    ]);
+
+    const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
+      userId,
+    );
+
+    expect(deleted).toEqual(new Set());
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
 
   it('prefers a relevant package over covered services even when they scored higher', async () => {
