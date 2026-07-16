@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
@@ -19,9 +18,11 @@ import {
   RopIntervalDashboardQueryDto,
   RopMonthDashboardQueryDto,
 } from './dto/rop-indicators-query.dto';
+import { RopMeetingResponseDto } from './dto/rop-meeting-response.dto';
 import { RopTaskResponseDto } from './dto/rop-task-response.dto';
 import { RopDocumentsService } from './rop-documents.service';
 import { RopIndicatorsService } from './rop-indicators.service';
+import { RopMeetingsService } from './rop-meetings.service';
 import { RopTasksService } from './rop-tasks.service';
 
 @ApiTags('rop')
@@ -31,6 +32,7 @@ export class RopController {
   constructor(
     private readonly ropDocumentsService: RopDocumentsService,
     private readonly ropIndicatorsService: RopIndicatorsService,
+    private readonly ropMeetingsService: RopMeetingsService,
     private readonly ropTasksService: RopTasksService,
   ) {}
 
@@ -90,6 +92,24 @@ export class RopController {
     @Param('documentId') documentId: string,
   ): Promise<RopDocumentResponseDto> {
     return this.ropDocumentsService.getForUser(user.id, documentId);
+  }
+
+  @Get('meetings')
+  @ApiOperation({ summary: 'List ROP project meetings for the current user' })
+  @ApiOkResponse({ type: RopMeetingResponseDto, isArray: true })
+  async listMeetings(@CurrentUser() user: CurrentUserData): Promise<RopMeetingResponseDto[]> {
+    return this.ropMeetingsService.listForUser(user.id);
+  }
+
+  @Get('meetings/:meetingId')
+  @ApiOperation({ summary: 'Get a ROP project meeting by ID' })
+  @ApiParam({ name: 'meetingId', description: 'ROP meeting ID' })
+  @ApiOkResponse({ type: RopMeetingResponseDto })
+  async getMeeting(
+    @CurrentUser() user: CurrentUserData,
+    @Param('meetingId') meetingId: string,
+  ): Promise<RopMeetingResponseDto> {
+    return this.ropMeetingsService.getForUser(user.id, meetingId);
   }
 
   @Get('tasks')

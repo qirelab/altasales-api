@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
-
 import {
   RopDocumentRecord,
+  RopMeetingRecord,
   RopTaskListFilters,
   RopTaskRecord,
 } from './rop.types';
@@ -339,5 +339,46 @@ export class RopService {
     }
 
     return response.json() as Promise<Record<string, unknown>>;
+  }
+
+  async listMeetings(projectId: string): Promise<RopMeetingRecord[]> {
+    this.ensureConfigured();
+
+    const response = await fetch(`${this.apiUrl}/projects/${projectId}/meetings`, {
+      method: 'GET',
+      headers: this.jsonHeaders,
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('list meetings', response, error);
+      throw new InternalServerErrorException('Failed to list meetings from ROP');
+    }
+
+    return response.json() as Promise<RopMeetingRecord[]>;
+  }
+
+  async getMeeting(projectId: string, meetingId: string): Promise<RopMeetingRecord> {
+    this.ensureConfigured();
+
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/meetings/${meetingId}`,
+      {
+        method: 'GET',
+        headers: this.jsonHeaders,
+      },
+    );
+
+    if (response.status === 404) {
+      throw new NotFoundException('Встреча не найдена');
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get meeting', response, error);
+      throw new InternalServerErrorException('Failed to get meeting from ROP');
+    }
+
+    return response.json() as Promise<RopMeetingRecord>;
   }
 }
