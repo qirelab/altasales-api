@@ -212,6 +212,85 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('keeps hidden targets available in the admin recommendation list', async () => {
+    const { service, recommendationRepository } = createService();
+    const qb = {
+      leftJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'hidden-service-recommendation-id',
+          serviceId: 'hidden-service-id',
+          packageId: null,
+          name: 'Скрытая услуга',
+          category: '',
+          price: '1000',
+          status: RecommendationStatus.Completed,
+          source: RecommendationSource.AI,
+          priority: RecommendationPriority.Medium,
+          rationale: null,
+          dependencyIds: [],
+          diagnosticSignals: [],
+          createdAt: new Date(),
+        },
+      ]),
+    };
+    recommendationRepository.createQueryBuilder.mockReturnValue(qb);
+
+    const result = await service.findAssignedToUserForAdmin(userId);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('hidden-service-recommendation-id');
+    expect(qb.andWhere).not.toHaveBeenCalled();
+  });
+
+  it('does not hide a standalone recommendation behind a completed package', () => {
+    const { service } = createService();
+    const rows = [
+      {
+        id: 'completed-package-recommendation-id',
+        packageId: 'completed-package-id',
+        serviceId: null,
+        status: RecommendationStatus.Completed,
+      },
+      {
+        id: 'active-service-recommendation-id',
+        packageId: null,
+        serviceId: 'dashboard-id',
+        status: RecommendationStatus.Recommended,
+        name: 'Дашборд ОП',
+      },
+    ];
+    const packages = [
+      {
+        id: 'completed-package-id',
+        services: [
+          {
+            id: 'dashboard-id',
+            name: 'Дашборд ОП',
+            isHidden: false,
+            deletedAt: null,
+          },
+        ],
+      },
+    ];
+
+    const result = (service as any).filterPackageCoveredStandaloneRecommendations(
+      rows,
+      packages,
+    );
+
+    expect(result.map((row: { id: string }) => row.id)).toEqual([
+      'completed-package-recommendation-id',
+      'active-service-recommendation-id',
+    ]);
+  });
+
   it('merges an explicit generation clientProfile from the demo page over saved answers', async () => {
     const { service, questionnaireRepository, generationJobService } =
       createService();
@@ -540,6 +619,39 @@ describe('RecommendationsService', () => {
         ]),
       }),
     );
+  });
+
+  it('prefers the registered package ID over a fuller duplicate', () => {
+    const { service } = createService();
+    const serviceItem = (id: string) => ({
+      id,
+      name: id,
+      isHidden: false,
+      deletedAt: null,
+    });
+    const registeredPackage = {
+      id: RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+      name: 'Отдел продаж с нуля',
+      services: [serviceItem('registered-service')],
+      createdAt: new Date('2025-01-01T00:00:00Z'),
+    };
+    const fullerDuplicate = {
+      id: 'fuller-duplicate-package-id',
+      name: 'Отдел продаж с нуля',
+      services: [
+        serviceItem('duplicate-service-1'),
+        serviceItem('duplicate-service-2'),
+      ],
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+    };
+
+    const result = (service as any).deduplicatePackagesByName([
+      fullerDuplicate,
+      registeredPackage,
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(RECOMMENDATION_CATALOG.salesDepartmentFromZero.id);
   });
 
   it('adds logical duplicate services to package coverage', async () => {

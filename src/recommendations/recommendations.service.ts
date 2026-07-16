@@ -240,7 +240,7 @@ export class RecommendationsService implements OnModuleInit {
       .leftJoinAndSelect('package.categories', 'packageCategory')
       .leftJoinAndSelect('recommendation.order', 'order')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(this.visibleRecommendationTargetFilter())
+      .andWhere(this.userRecommendationTargetFilter())
       .orderBy('recommendation."createdAt"', 'DESC')
       .addOrderBy('recommendation.id', 'DESC')
       .getMany();
@@ -287,7 +287,7 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(this.visibleRecommendationTargetFilter())
+      .andWhere(this.userRecommendationTargetFilter())
       .orderBy('recommendation."createdAt"', 'DESC')
       .addOrderBy('recommendation.id', 'DESC')
       .getRawMany<
@@ -358,7 +358,11 @@ export class RecommendationsService implements OnModuleInit {
     packages: ServicePackage[],
   ): UserRecommendationListItem[] {
     const packageIds = new Set(
-      rows.flatMap((row) => (row.packageId ? [row.packageId] : [])),
+      rows.flatMap((row) =>
+        row.packageId && row.status === RecommendationStatus.Recommended
+          ? [row.packageId]
+          : [],
+      ),
     );
     if (packageIds.size === 0) return rows;
 
@@ -460,7 +464,6 @@ export class RecommendationsService implements OnModuleInit {
       .addSelect('recommendation."diagnosticSignals"', 'diagnosticSignals')
       .addSelect('recommendation."createdAt"', 'createdAt')
       .where('recommendation."userId" = :userId', { userId })
-      .andWhere(this.visibleRecommendationTargetFilter())
       .orderBy('recommendation."createdAt"', 'DESC')
       .addOrderBy('recommendation.id', 'DESC')
       .getRawMany<AdminRecommendationListItem>();
@@ -893,6 +896,16 @@ export class RecommendationsService implements OnModuleInit {
     candidate: ServicePackage,
     existing: ServicePackage,
   ): boolean {
+    const candidateIsRegistered = REGISTERED_RECOMMENDATION_CATALOG_IDS.has(
+      candidate.id,
+    );
+    const existingIsRegistered = REGISTERED_RECOMMENDATION_CATALOG_IDS.has(
+      existing.id,
+    );
+    if (candidateIsRegistered !== existingIsRegistered) {
+      return candidateIsRegistered;
+    }
+
     const candidateServices = filterActiveServices(candidate.services).filter(
       (service) => !service.isHidden,
     ).length;
@@ -1812,7 +1825,7 @@ export class RecommendationsService implements OnModuleInit {
     );
   }
 
-  private visibleRecommendationTargetFilter(): Brackets {
+  private publicRecommendationTargetFilter(): Brackets {
     return new Brackets((qb) => {
       qb.where(
         'service.type IN (:...serviceTypes) AND service."deletedAt" IS NULL AND service."isHidden" = false',
@@ -1820,6 +1833,16 @@ export class RecommendationsService implements OnModuleInit {
       ).orWhere(
         'package.id IS NOT NULL AND package."deletedAt" IS NULL AND package."isHidden" = false',
       );
+    });
+  }
+
+  private userRecommendationTargetFilter(): Brackets {
+    return new Brackets((qb) => {
+      qb.where(this.publicRecommendationTargetFilter())
+        .orWhere('recommendation.status <> :recommendedStatus', {
+          recommendedStatus: RecommendationStatus.Recommended,
+        })
+        .orWhere('recommendation."orderId" IS NOT NULL');
     });
   }
 }
