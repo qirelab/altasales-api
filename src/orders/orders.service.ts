@@ -869,32 +869,73 @@ export class OrdersService {
     }
 
     const wasGranted = order.contractorChatAccess === true;
-    order.contractorChatAccess = dto.contractorChatAccess;
-    const saved = await this.orderRepository.save(order);
+    const willGrant = dto.contractorChatAccess === true;
+    const expertUserId = this.resolveOrderExpertUserId(order);
+    const shouldSyncParticipant = expertUserId !== null
+      && expertUserId !== order.userId;
 
-    // When admin flips access on, add the expert to the client's platform
-    // chat so they can jump into the ongoing AI-consultant thread. The
-    // orchestrator keeps AI as the primary responder — see QIR-256 spec 3.4.
-    if (dto.contractorChatAccess === true && !wasGranted) {
-      const expertUserId = this.resolveOrderExpertUserId(order);
-      if (expertUserId && expertUserId !== order.userId) {
-        try {
-          await this.chatService.addExpertToClientPlatformChat(
-            order.userId,
-            expertUserId,
-          );
-        } catch (error) {
-          this.logger.error(
-            `Failed to attach expert ${expertUserId} to platform chat of `
-            + `client ${order.userId} for order ${order.id}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
+    // Sync platform-chat membership BEFORE persisting the flag so a failed
+    // participant mutation leaves the durable order row unchanged. Retries
+    // stay idempotent: ensureParticipant is check-then-insert on grant, and
+    // the delete on revoke targets a specific (conversation, user, role)
+    // tuple that is a no-op if the expert is already absent.
+    if (willGrant && shouldSyncParticipant) {
+      await this.chatService.addExpertToClientPlatformChat(
+        order.userId,
+        expertUserId,
+      );
+    } else if (!willGrant && wasGranted && shouldSyncParticipant) {
+      const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
+        order.id,
+        order.userId,
+        expertUserId,
+      );
+      if (!hasOtherGrant) {
+        await this.chatService.removeExpertFromClientPlatformChat(
+          order.userId,
+          expertUserId,
+        );
       }
     }
 
-    return saved;
+    order.contractorChatAccess = dto.contractorChatAccess;
+    return this.orderRepository.save(order);
+  }
+
+  /**
+   * True when the same (client, expert) pair is entitled to platform-chat
+   * access through another still-active order. Used on revoke to preserve
+   * membership while any grant remains — the expert only loses access when
+   * every order that granted it is revoked (or removed).
+   */
+  private async hasOtherActiveContractorChatGrant(
+    excludeOrderId: string,
+    clientUserId: string,
+    expertUserId: string,
+  ): Promise<boolean> {
+    const qb = this.orderRepository
+      .createQueryBuilder('o')
+      .leftJoin('o.item', 'oi')
+      .leftJoin('oi.service', 's')
+      .where('o.id != :excludeOrderId', { excludeOrderId })
+      .andWhere('o."userId" = :clientUserId', { clientUserId })
+      .andWhere('o."contractorChatAccess" = true')
+      .andWhere(
+        new Brackets((qbInner) => {
+          qbInner
+            .where('oi."executorUserId" = :expertUserId', { expertUserId })
+            .orWhere(
+              's."userId" = :expertUserId AND s."type" = :contractorType',
+              {
+                expertUserId,
+                contractorType: ServiceType.Contractor,
+              },
+            );
+        }),
+      );
+
+    const count = await qb.getCount();
+    return count > 0;
   }
 
   private resolveOrderExpertUserId(order: Order): string | null {

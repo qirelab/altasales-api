@@ -324,3 +324,47 @@ describe('ChatService.addExpertToClientPlatformChat', () => {
     );
   });
 });
+
+describe('ChatService.removeExpertFromClientPlatformChat', () => {
+  it('is a no-op when the client has no platform conversation yet', async () => {
+    const { service, participantRepository } = buildService({
+      existingConversation: null,
+    });
+
+    await service.removeExpertFromClientPlatformChat('client-1', 'expert-99');
+
+    expect(participantRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('deletes only the expert participant when the conversation exists', async () => {
+    const conversationRow = {
+      id: 'conv-1',
+      type: ChatConversationType.Platform,
+      participantOneId: AI_SYSTEM_USER_ID,
+      participantTwoId: 'client-1',
+      orderId: null,
+    };
+    const { service, participantRepository, conversationRepository } = buildService({
+      existingConversation: conversationRow,
+    });
+    (participantRepository as unknown as { delete: jest.Mock }).delete =
+      jest.fn().mockResolvedValue({ affected: 1 });
+
+    await service.removeExpertFromClientPlatformChat('client-1', 'expert-99');
+
+    expect(conversationRepository.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          type: ChatConversationType.Platform,
+        }),
+      }),
+    );
+    expect(
+      (participantRepository as unknown as { delete: jest.Mock }).delete,
+    ).toHaveBeenCalledWith({
+      conversationId: 'conv-1',
+      userId: 'expert-99',
+      role: ChatParticipantRole.Expert,
+    });
+  });
+});

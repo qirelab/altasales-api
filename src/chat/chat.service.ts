@@ -503,6 +503,42 @@ export class ChatService {
     );
   }
 
+  /**
+   * Remove an expert from the given client's platform conversation.
+   *
+   * Called by OrdersService when contractorChatAccess is revoked (and no
+   * other active grant keeps the expert entitled). Idempotent: if the client
+   * has no platform conversation yet, or the expert was never a participant,
+   * this is a no-op — nothing to detach.
+   */
+  async removeExpertFromClientPlatformChat(
+    clientUserId: string,
+    expertUserId: string,
+  ): Promise<void> {
+    const [participantOneId, participantTwoId] =
+      AI_SYSTEM_USER_ID < clientUserId
+        ? [AI_SYSTEM_USER_ID, clientUserId]
+        : [clientUserId, AI_SYSTEM_USER_ID];
+
+    const conversation = await this.conversationRepository.findOne({
+      where: {
+        participantOneId,
+        participantTwoId,
+        orderId: IsNull(),
+        type: ChatConversationType.Platform,
+      },
+    });
+    if (!conversation) {
+      return;
+    }
+
+    await this.participantRepository.delete({
+      conversationId: conversation.id,
+      userId: expertUserId,
+      role: ChatParticipantRole.Expert,
+    });
+  }
+
   async markAsRead(userId: string, conversationId: string) {
     const conversation = await this.conversationRepository.findOne({
       where: { id: conversationId },
