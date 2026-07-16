@@ -32,23 +32,32 @@ function buildService(
     transactionThrows?: Error;
     users?: Record<string, unknown>;
     historyMessages?: unknown[];
+    conditionalUpdateAffected?: number;
   } = {},
 ) {
   const users = opts.users ?? { 'client-1': makeUser() };
+  const conditionalExecute = jest.fn().mockResolvedValue({
+    affected: opts.conditionalUpdateAffected ?? 1,
+  });
   const conversationRepository = {
     findOne: jest.fn().mockResolvedValue(opts.existingConversation ?? null),
     createQueryBuilder: jest.fn(() => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
       setParameter: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      execute: conditionalExecute,
     })),
     create: jest.fn((entity) => ({ ...entity, id: 'new-conv' })),
     save: jest.fn(async (entity) => ({ ...entity, id: 'new-conv' })),
     update: jest.fn().mockResolvedValue(undefined),
+    conditionalExecute,
   };
   const messageRepository = {
     findOne: jest.fn().mockResolvedValue(null),
@@ -317,7 +326,7 @@ describe('ChatService.sendPlatformMessage', () => {
 
   it('resolves a pending handoff when an operator writes into the conversation', async () => {
     const { service, conversationRepository, participantRepository, wsGateway } =
-      buildService();
+      buildService({ conditionalUpdateAffected: 1 });
     conversationRepository.findOne.mockResolvedValueOnce(
       makeConversation({ needsHumanHandoff: true }),
     );
@@ -336,16 +345,10 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'Hello, I am the manager',
     } as never);
 
-    // Conversation update carries the reset payload.
-    expect(conversationRepository.update).toHaveBeenCalledWith(
-      'conv-1',
-      expect.objectContaining({
-        needsHumanHandoff: false,
-        handoffTrigger: null,
-        handoffRequestedAt: null,
-      }),
-    );
-    // Every recipient (sender + client) got a handoff_resolved event.
+    // Conditional UPDATE was issued to clear the flag atomically.
+    expect(conversationRepository.createQueryBuilder).toHaveBeenCalled();
+    // Every recipient (sender + client) got a handoff_resolved event
+    // because the mocked conditional UPDATE reports affected=1.
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
     );
@@ -372,17 +375,20 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'follow-up',
     } as never);
 
-    const updatePayload = conversationRepository.update.mock.calls[0][1];
-    expect(updatePayload).not.toHaveProperty('needsHumanHandoff');
+    // A client turn never issues the conditional resolve UPDATE.
+    expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
     );
     expect(resolvedEvents).toHaveLength(0);
   });
 
-  it('does not emit handoff_resolved when there was no pending handoff to begin with', async () => {
+  it('does not emit handoff_resolved when the conditional UPDATE affects zero rows', async () => {
+    // Simulates the race where orchestrator has not yet flipped the flag
+    // (or another operator already cleared it) — conditional UPDATE reports
+    // affected=0, so we must NOT broadcast a false-positive resolved event.
     const { service, conversationRepository, participantRepository, wsGateway } =
-      buildService();
+      buildService({ conditionalUpdateAffected: 0 });
     conversationRepository.findOne.mockResolvedValueOnce(
       makeConversation({ needsHumanHandoff: false }),
     );
@@ -400,8 +406,9 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'checking in',
     } as never);
 
-    const updatePayload = conversationRepository.update.mock.calls[0][1];
-    expect(updatePayload).not.toHaveProperty('needsHumanHandoff');
+    // The conditional UPDATE was attempted, but affected=0 means no state
+    // actually transitioned — we stay silent on the WS channel.
+    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
     );

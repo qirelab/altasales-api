@@ -92,8 +92,17 @@ describe('AiChatOrchestratorService', () => {
       create: jest.fn((entity) => ({ ...entity, id: 'ai-msg-1' })),
       save: jest.fn(async (entity) => ({ ...entity, id: 'ai-msg-1' })),
     };
+    const conditionalExecute = jest.fn().mockResolvedValue({ affected: 1 });
     const conversationRepository = {
       update: jest.fn().mockResolvedValue(undefined),
+      createQueryBuilder: jest.fn(() => ({
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: conditionalExecute,
+      })),
+      conditionalExecute,
     };
     const participantRepository = {
       find: jest
@@ -479,14 +488,7 @@ describe('AiChatOrchestratorService', () => {
         isAiGenerated: true,
       }),
     );
-    expect(conversationRepository.update).toHaveBeenCalledWith(
-      'conv-1',
-      expect.objectContaining({
-        needsHumanHandoff: true,
-        handoffTrigger: ChatHandoffTrigger.UserExplicitRequest,
-        handoffRequestedAt: expect.any(Date),
-      }),
-    );
+    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
 
     const eventNames = wsGateway.emitToUser.mock.calls.map((call) => call[1]);
     expect(eventNames.filter((e) => e === 'chat:new_message')).toHaveLength(2);
@@ -520,17 +522,42 @@ describe('AiChatOrchestratorService', () => {
       question: 'какой-то невозможный вопрос',
     });
 
-    expect(conversationRepository.update).toHaveBeenCalledWith(
-      'conv-1',
-      expect.objectContaining({
-        needsHumanHandoff: true,
-        handoffTrigger: ChatHandoffTrigger.RagNoContext,
-      }),
-    );
+    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
     const handoffCalls = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_requested',
     );
     expect(handoffCalls).toHaveLength(1);
+  });
+
+  it('does not emit chat:handoff_requested when the conditional UPDATE affects zero rows', async () => {
+    // Simulates the race where the flag was already set on a previous
+    // turn — conditional UPDATE with WHERE needsHumanHandoff = false hits
+    // nothing, so no duplicate WS event goes out and handoffRequestedAt
+    // stays at its original value.
+    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
+      historyRows: [
+        makeMessage({ id: 'm1', senderId: clientUserId, text: 'q1' }),
+      ],
+      ragRefusalReason: 'no_results',
+    });
+    conversationRepository.conditionalExecute.mockResolvedValueOnce({
+      affected: 0,
+    });
+
+    await (orchestrator as unknown as {
+      respondToClientMessage: (input: unknown) => Promise<void>;
+    }).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'ещё один невозможный вопрос',
+      recipientIds: ['client-1'],
+    });
+
+    const handoffCalls = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_requested',
+    );
+    expect(handoffCalls).toHaveLength(0);
   });
 
   it('does not flag handoff when RAG returned a normal answer', async () => {
@@ -550,9 +577,7 @@ describe('AiChatOrchestratorService', () => {
       question: 'обычный вопрос про CRM Silver',
     });
 
-    const updatePayload = conversationRepository.update.mock.calls[0][1];
-    expect(updatePayload).not.toHaveProperty('needsHumanHandoff');
-    expect(updatePayload).not.toHaveProperty('handoffTrigger');
+    expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
 
     const handoffCalls = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_requested',

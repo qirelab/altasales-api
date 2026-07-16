@@ -183,28 +183,38 @@ export class AiChatOrchestratorService {
     const savedAnswer = await this.messageRepository.save(answerMessage);
 
     const now = new Date();
-    const requestedAt = handoff.needsHandoff ? now : null;
-    const trigger: ChatHandoffTrigger | null = handoff.needsHandoff
-      ? handoff.trigger
-      : null;
 
-    // Persist handoff state on the conversation. We update needsHumanHandoff
-    // only when transitioning to true — leaving a stale true across turns is
-    // fine, ChatService.sendPlatformMessage clears it once a human replies.
+    // updatedAt bump is unconditional so the conversation surfaces at the
+    // top of the client's list every turn.
     await this.conversationRepository.update(input.conversation.id, {
       updatedAt: now,
-      ...(handoff.needsHandoff
-        ? {
-          needsHumanHandoff: true,
-          handoffTrigger: trigger,
-          handoffRequestedAt: requestedAt,
-        }
-        : {}),
     });
 
     // Re-read participants NOW (not at schedule time) so a revoke during
     // AI generation immediately stops delivery to the revoked user.
     const recipientIds = await this.resolveRecipientIds(input.conversation);
+
+    let handoffRegistered = false;
+    let handoffTriggerType: ChatHandoffTrigger | null = null;
+    let handoffRequestedAt: Date | null = null;
+    if (handoff.needsHandoff) {
+      const result = await this.conversationRepository
+        .createQueryBuilder()
+        .update(ChatConversation)
+        .set({
+          needsHumanHandoff: true,
+          handoffTrigger: handoff.trigger,
+          handoffRequestedAt: now,
+        })
+        .where('id = :id', { id: input.conversation.id })
+        .andWhere('"needsHumanHandoff" = false')
+        .execute();
+      handoffRegistered = (result.affected ?? 0) > 0;
+      if (handoffRegistered) {
+        handoffTriggerType = handoff.trigger;
+        handoffRequestedAt = now;
+      }
+    }
 
     const messagePayload = {
       message: { ...savedAnswer, files: [] },
@@ -218,11 +228,11 @@ export class AiChatOrchestratorService {
       this.wsGateway.emitToUser(recipientId, 'chat:new_message', messagePayload);
     }
 
-    if (handoff.needsHandoff) {
+    if (handoffRegistered) {
       const handoffPayload = {
         conversationId: input.conversation.id,
-        trigger,
-        requestedAt,
+        trigger: handoffTriggerType,
+        requestedAt: handoffRequestedAt,
       };
       for (const recipientId of recipientIds) {
         this.wsGateway.emitToUser(

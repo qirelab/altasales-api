@@ -431,19 +431,24 @@ export class ChatService {
 
     const isHumanReplierTurn = membership.role !== ChatParticipantRole.Client
       && membership.role !== ChatParticipantRole.Ai;
-    const wasHandoffPending = conversation.needsHumanHandoff === true;
-    const resolveHandoff = isHumanReplierTurn && wasHandoffPending;
 
-    await this.conversationRepository.update(conversation.id, {
-      updatedAt: now,
-      ...(resolveHandoff
-        ? {
+    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+
+    let handoffResolved = false;
+    if (isHumanReplierTurn) {
+      const result = await this.conversationRepository
+        .createQueryBuilder()
+        .update(ChatConversation)
+        .set({
           needsHumanHandoff: false,
           handoffTrigger: null,
           handoffRequestedAt: null,
-        }
-        : {}),
-    });
+        })
+        .where('id = :id', { id: conversation.id })
+        .andWhere('"needsHumanHandoff" = true')
+        .execute();
+      handoffResolved = (result.affected ?? 0) > 0;
+    }
 
     const recipientIds = await this.getRecipientIds(conversation, userId);
     const payload = {
@@ -455,7 +460,7 @@ export class ChatService {
       this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
     }
 
-    if (resolveHandoff) {
+    if (handoffResolved) {
       const handoffPayload = {
         conversationId: conversation.id,
         resolvedAt: now,

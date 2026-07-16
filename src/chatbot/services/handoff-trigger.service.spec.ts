@@ -109,6 +109,44 @@ describe('HandoffTriggerService.detect', () => {
     expect(result).toEqual({ needsHandoff: false });
   });
 
+  it.each([
+    'Оператор сотовой связи задерживает подтверждение',
+    'Наш специалист по маркетингу спросил про CRM',
+    'Менеджерский подход в вашей компании',
+    'Я работаю оператором call-центра',
+    'Наши менеджеры обучились в прошлом квартале',
+    'Есть ли у вас специалист по интеграциям?',
+  ])(
+    'does not fire when the noun appears without a call-to-action verb (%s)',
+    (message) => {
+      expect(service.detect({ clientMessage: message })).toEqual({
+        needsHandoff: false,
+      });
+    },
+  );
+
+  it('fires on «хочу к человеку» — CTA + человек without «живой»', () => {
+    expect(
+      service.detect({
+        clientMessage: 'Спасибо, хочу к человеку, а не боту',
+      }),
+    ).toEqual({
+      needsHandoff: true,
+      trigger: ChatHandoffTrigger.UserExplicitRequest,
+    });
+  });
+
+  it('fires on «дайте оператора» — imperative + оператор', () => {
+    expect(
+      service.detect({
+        clientMessage: 'Дайте оператора уже, надоел бот',
+      }),
+    ).toEqual({
+      needsHandoff: true,
+      trigger: ChatHandoffTrigger.UserExplicitRequest,
+    });
+  });
+
   it('exports a non-empty pattern list so callers can extend it', () => {
     expect(HANDOFF_KEYWORD_PATTERNS.length).toBeGreaterThan(0);
     HANDOFF_KEYWORD_PATTERNS.forEach((rx) => {
