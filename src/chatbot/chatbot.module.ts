@@ -5,6 +5,7 @@ import { ChatbotConversationalContextService } from './services/chatbot-conversa
 import { ChatbotHistorySlicerService } from './services/chatbot-history-slicer.service';
 import { ChatbotQueryRewriterService } from './services/chatbot-query-rewriter.service';
 import { ChatbotRagService } from './services/chatbot-rag.service';
+import { HandoffTriggerService } from './services/handoff-trigger.service';
 
 @Module({
   imports: [AiModule, KnowledgeModule],
@@ -13,10 +14,12 @@ import { ChatbotRagService } from './services/chatbot-rag.service';
     ChatbotQueryRewriterService,
     ChatbotConversationalContextService,
     ChatbotRagService,
+    HandoffTriggerService,
   ],
   exports: [
     ChatbotRagService,
     ChatbotConversationalContextService,
+    HandoffTriggerService,
   ],
 })
 export class ChatbotModule {}

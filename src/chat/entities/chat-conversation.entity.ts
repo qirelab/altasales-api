@@ -9,11 +9,12 @@ import {
   JoinColumn,
   Unique,
 } from 'typeorm';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { Order } from '../../orders/entities/order.entity';
 import { ChatConversationType } from './chat-conversation-type.enum';
 import { ChatConversationParticipant } from './chat-conversation-participant.entity';
+import { ChatHandoffTrigger } from './chat-handoff-trigger.enum';
 import { ChatMessage } from './chat-message.entity';
 
 @Entity()
@@ -80,4 +81,34 @@ export class ChatConversation {
     (participant) => participant.conversation,
   )
   participants: ChatConversationParticipant[];
+
+  @ApiProperty({
+    description:
+      'True when the AI could not close the last client turn and a human '
+      + 'operator is expected to step in. Set by the orchestrator, cleared '
+      + 'when any non-AI participant sends a message in the conversation.',
+  })
+  @Column({ type: 'boolean', default: false })
+  needsHumanHandoff: boolean;
+
+  @ApiPropertyOptional({
+    enum: ChatHandoffTrigger,
+    description:
+      'Reason the handoff was requested. Null when needsHumanHandoff is false.',
+    nullable: true,
+  })
+  @Column({
+    type: 'enum',
+    enum: ChatHandoffTrigger,
+    nullable: true,
+    default: null,
+  })
+  handoffTrigger: ChatHandoffTrigger | null;
+
+  @ApiPropertyOptional({
+    description: 'Timestamp the handoff was requested. Null when not pending.',
+    nullable: true,
+  })
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  handoffRequestedAt: Date | null;
 }

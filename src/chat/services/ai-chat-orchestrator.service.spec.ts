@@ -1,5 +1,7 @@
-import { AI_SYSTEM_USER_ID } from '../chat.constants';
+import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
 import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
+import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
 import { AiChatOrchestratorService } from './ai-chat-orchestrator.service';
 import { ChatHistoryMapperService } from './chat-history-mapper.service';
 
@@ -118,6 +120,7 @@ describe('AiChatOrchestratorService', () => {
       emitToUser: jest.fn(),
     };
     const historyMapper = new ChatHistoryMapperService();
+    const handoffTrigger = new HandoffTriggerService();
     const orchestrator = new AiChatOrchestratorService(
       messageRepository as never,
       conversationRepository as never,
@@ -125,6 +128,7 @@ describe('AiChatOrchestratorService', () => {
       ragService as never,
       historyMapper,
       wsGateway as never,
+      handoffTrigger,
     );
     return {
       orchestrator,
@@ -133,6 +137,7 @@ describe('AiChatOrchestratorService', () => {
       participantRepository,
       ragService,
       wsGateway,
+      handoffTrigger,
     };
   }
 
@@ -440,6 +445,119 @@ describe('AiChatOrchestratorService', () => {
 
     // m3's task must finish before m4's task even starts loading its message.
     expect(finished).toEqual(['q1', 'q2']);
+  });
+
+  it('short-circuits RAG and marks handoff when the client explicitly asks for a manager', async () => {
+    const {
+      orchestrator,
+      messageRepository,
+      conversationRepository,
+      ragService,
+      wsGateway,
+    } = buildOrchestrator({
+      participants: [
+        { userId: 'client-1' },
+        { userId: 'expert-1' },
+        { userId: AI_SYSTEM_USER_ID },
+      ],
+    });
+
+    await (orchestrator as unknown as {
+      respondToClientMessage: (input: unknown) => Promise<void>;
+    }).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'Позовите менеджера, пожалуйста',
+    });
+
+    expect(ragService.askQuestion).not.toHaveBeenCalled();
+    expect(messageRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        senderId: AI_SYSTEM_USER_ID,
+        text: HANDOFF_ANNOUNCE_MESSAGE,
+        isAiGenerated: true,
+      }),
+    );
+    expect(conversationRepository.update).toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({
+        needsHumanHandoff: true,
+        handoffTrigger: ChatHandoffTrigger.UserExplicitRequest,
+        handoffRequestedAt: expect.any(Date),
+      }),
+    );
+
+    const eventNames = wsGateway.emitToUser.mock.calls.map((call) => call[1]);
+    expect(eventNames.filter((e) => e === 'chat:new_message')).toHaveLength(2);
+    expect(eventNames.filter((e) => e === 'chat:handoff_requested')).toHaveLength(2);
+    const handoffPayload = wsGateway.emitToUser.mock.calls.find(
+      (call) => call[1] === 'chat:handoff_requested',
+    )?.[2];
+    expect(handoffPayload).toEqual(
+      expect.objectContaining({
+        conversationId: 'conv-1',
+        trigger: ChatHandoffTrigger.UserExplicitRequest,
+      }),
+    );
+  });
+
+  it('marks rag_no_context handoff when RAG refuses with no_results', async () => {
+    const clientMsg = makeMessage({ id: 'm1', senderId: clientUserId, text: 'q' });
+    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
+      historyRows: [clientMsg],
+      currentMessage: clientMsg,
+      ragRefusalReason: 'no_results',
+      ragAnswer: 'Я не нашёл информации',
+    });
+
+    await (orchestrator as unknown as {
+      respondToClientMessage: (input: unknown) => Promise<void>;
+    }).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'какой-то невозможный вопрос',
+    });
+
+    expect(conversationRepository.update).toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({
+        needsHumanHandoff: true,
+        handoffTrigger: ChatHandoffTrigger.RagNoContext,
+      }),
+    );
+    const handoffCalls = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_requested',
+    );
+    expect(handoffCalls).toHaveLength(1);
+  });
+
+  it('does not flag handoff when RAG returned a normal answer', async () => {
+    const clientMsg = makeMessage({ id: 'm1', senderId: clientUserId, text: 'q' });
+    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
+      historyRows: [clientMsg],
+      currentMessage: clientMsg,
+      ragAnswer: 'вот ответ',
+    });
+
+    await (orchestrator as unknown as {
+      respondToClientMessage: (input: unknown) => Promise<void>;
+    }).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'обычный вопрос про CRM Silver',
+    });
+
+    const updatePayload = conversationRepository.update.mock.calls[0][1];
+    expect(updatePayload).not.toHaveProperty('needsHumanHandoff');
+    expect(updatePayload).not.toHaveProperty('handoffTrigger');
+
+    const handoffCalls = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_requested',
+    );
+    expect(handoffCalls).toHaveLength(0);
   });
 
   it('scheduleReply swallows any error from the async task (never throws to caller)', async () => {

@@ -314,6 +314,99 @@ describe('ChatService.sendPlatformMessage', () => {
     } as never);
     expect(aiOrchestrator.scheduleReply).not.toHaveBeenCalled();
   });
+
+  it('resolves a pending handoff when an operator writes into the conversation', async () => {
+    const { service, conversationRepository, participantRepository, wsGateway } =
+      buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeConversation({ needsHumanHandoff: true }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      conversationId: 'conv-1',
+      userId: 'op-1',
+      role: ChatParticipantRole.Operator,
+    });
+    participantRepository.find.mockResolvedValueOnce([
+      { userId: 'client-1', role: ChatParticipantRole.Client },
+      { userId: 'op-1', role: ChatParticipantRole.Operator },
+      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
+    ]);
+
+    await service.sendPlatformMessage('op-1', 'conv-1', {
+      text: 'Hello, I am the manager',
+    } as never);
+
+    // Conversation update carries the reset payload.
+    expect(conversationRepository.update).toHaveBeenCalledWith(
+      'conv-1',
+      expect.objectContaining({
+        needsHumanHandoff: false,
+        handoffTrigger: null,
+        handoffRequestedAt: null,
+      }),
+    );
+    // Every recipient (sender + client) got a handoff_resolved event.
+    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_resolved',
+    );
+    expect(resolvedEvents.length).toBeGreaterThan(0);
+  });
+
+  it('does not reset handoff when a client writes (only human replier resolves)', async () => {
+    const { service, conversationRepository, participantRepository, wsGateway } =
+      buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeConversation({ needsHumanHandoff: true }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      conversationId: 'conv-1',
+      userId: 'client-1',
+      role: ChatParticipantRole.Client,
+    });
+    participantRepository.find.mockResolvedValueOnce([
+      { userId: 'client-1', role: ChatParticipantRole.Client },
+      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
+    ]);
+
+    await service.sendPlatformMessage('client-1', 'conv-1', {
+      text: 'follow-up',
+    } as never);
+
+    const updatePayload = conversationRepository.update.mock.calls[0][1];
+    expect(updatePayload).not.toHaveProperty('needsHumanHandoff');
+    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_resolved',
+    );
+    expect(resolvedEvents).toHaveLength(0);
+  });
+
+  it('does not emit handoff_resolved when there was no pending handoff to begin with', async () => {
+    const { service, conversationRepository, participantRepository, wsGateway } =
+      buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeConversation({ needsHumanHandoff: false }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      conversationId: 'conv-1',
+      userId: 'op-1',
+      role: ChatParticipantRole.Operator,
+    });
+    participantRepository.find.mockResolvedValueOnce([
+      { userId: 'client-1', role: ChatParticipantRole.Client },
+      { userId: 'op-1', role: ChatParticipantRole.Operator },
+    ]);
+
+    await service.sendPlatformMessage('op-1', 'conv-1', {
+      text: 'checking in',
+    } as never);
+
+    const updatePayload = conversationRepository.update.mock.calls[0][1];
+    expect(updatePayload).not.toHaveProperty('needsHumanHandoff');
+    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_resolved',
+    );
+    expect(resolvedEvents).toHaveLength(0);
+  });
 });
 
 describe('ChatService.addExpertToClientPlatformChat', () => {
