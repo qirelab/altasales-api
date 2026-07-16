@@ -1866,6 +1866,22 @@ describe('RecommendationsService', () => {
           ],
         },
       },
+      {
+        id: 'unrelated-ai-service-recommendation-id',
+        serviceId: 'unrelated-ai-service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        service: {
+          id: 'unrelated-ai-service-id',
+          name: 'Аудит CRM',
+          deletedAt: null,
+          isHidden: false,
+          skills: [],
+        },
+      },
     ]);
 
     const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
@@ -1873,6 +1889,97 @@ describe('RecommendationsService', () => {
     );
 
     expect(deleted).toEqual(new Set());
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not treat different interview services as covered by a shared semantic key', async () => {
+    const { service, serviceRepository, recommendationRepository } = createService();
+    (serviceRepository as any).findOne = jest.fn().mockResolvedValue({
+      id: 'phone-interview-service-id',
+      name: 'Телефонное интервью',
+      description: null,
+      category: null,
+      skills: [],
+      deletedAt: null,
+      isHidden: false,
+    });
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'candidate-interview-package-recommendation-id',
+        serviceId: null,
+        packageId: 'candidate-interview-package-id',
+        status: RecommendationStatus.Recommended,
+        package: {
+          id: 'candidate-interview-package-id',
+          deletedAt: null,
+          isHidden: false,
+          services: [
+            {
+              id: 'video-interview-service-id',
+              name: 'Видео-интервью',
+              description: null,
+              category: null,
+              skills: [],
+              deletedAt: null,
+              isHidden: false,
+            },
+          ],
+        },
+      },
+    ]);
+
+    const covered = await (service as any).isServiceCoveredByRecommendedPackage(
+      userId,
+      'phone-interview-service-id',
+    );
+
+    expect(covered).toBe(false);
+  });
+
+  it('does not prune an AI service for a package with only shared semantic coverage', async () => {
+    const { service, packageRepository, recommendationRepository } = createService();
+    packageRepository.findOne.mockResolvedValue({
+      id: 'candidate-interview-package-id',
+      deletedAt: null,
+      isHidden: false,
+      services: [
+        {
+          id: 'video-interview-service-id',
+          name: 'Видео-интервью',
+          description: null,
+          category: null,
+          skills: [],
+          deletedAt: null,
+          isHidden: false,
+        },
+      ],
+    });
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'phone-interview-recommendation-id',
+        serviceId: 'phone-interview-service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        service: {
+          id: 'phone-interview-service-id',
+          name: 'Телефонное интервью',
+          description: null,
+          category: null,
+          skills: [],
+          deletedAt: null,
+          isHidden: false,
+        },
+      },
+    ]);
+
+    await (service as any).pruneReplaceableRecommendationsCoveredByPackage(
+      userId,
+      'candidate-interview-package-id',
+    );
+
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
 

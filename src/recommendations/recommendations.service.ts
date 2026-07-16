@@ -1332,7 +1332,7 @@ export class RecommendationsService implements OnModuleInit {
     const replaceableRecommendations = recommendations.filter((recommendation) =>
       this.isReplaceableRecommendation(recommendation),
     );
-    if (replaceableRecommendations.length < 2) return new Set();
+    if (replaceableRecommendations.length === 0) return new Set();
 
     const coverageByRecommendationId = new Map<string, Set<string>>();
     recommendations.forEach((recommendation) => {
@@ -1342,7 +1342,7 @@ export class RecommendationsService implements OnModuleInit {
       );
     });
 
-    const packageRecommendations = recommendations.filter(
+    const packageRecommendations = replaceableRecommendations.filter(
       (recommendation) =>
         recommendation.packageId &&
         recommendation.package &&
@@ -1350,6 +1350,7 @@ export class RecommendationsService implements OnModuleInit {
         !recommendation.package.isHidden &&
         (coverageByRecommendationId.get(recommendation.id)?.size ?? 0) > 0,
     );
+    if (packageRecommendations.length < 2) return new Set();
     const coversAll = (coveringId: string, coveredId: string): boolean => {
       const covering = coverageByRecommendationId.get(coveringId) ?? new Set();
       const covered = coverageByRecommendationId.get(coveredId) ?? new Set();
@@ -1375,8 +1376,7 @@ export class RecommendationsService implements OnModuleInit {
             (covering) =>
               covering.id !== recommendation.id &&
               coversAll(covering.id, recommendation.id) &&
-              (isPreferredCover(covering.id, recommendation.id) ||
-                !this.isReplaceableRecommendation(covering)),
+              isPreferredCover(covering.id, recommendation.id),
           );
         }
 
@@ -1465,14 +1465,20 @@ export class RecommendationsService implements OnModuleInit {
   private getRecommendationOverlapCoverageIds(
     recommendation: Recommendation,
   ): string[] {
-    const coverageIds = this.getRecommendationCoveredServiceIds(
-      recommendation,
-    ).filter((coverageId) => !coverageId.startsWith('catalog_semantic:'));
-    const exactNameIds = coverageIds.filter((coverageId) =>
+    return this.getSafeOverlapCoverageIds(
+      this.getRecommendationCoveredServiceIds(recommendation),
+    );
+  }
+
+  private getSafeOverlapCoverageIds(coverageIds: string[]): string[] {
+    const safeCoverageIds = coverageIds.filter(
+      (coverageId) => !coverageId.startsWith('catalog_semantic:'),
+    );
+    const exactNameIds = safeCoverageIds.filter((coverageId) =>
       coverageId.startsWith('catalog_name:'),
     );
 
-    return exactNameIds.length > 0 ? exactNameIds : coverageIds;
+    return exactNameIds.length > 0 ? exactNameIds : safeCoverageIds;
   }
 
   private async upsertGeneratedRecommendation(
@@ -1754,10 +1760,12 @@ export class RecommendationsService implements OnModuleInit {
     ]);
     if (!service) return false;
 
-    const serviceCoverage = new Set([
-      service.id,
-      ...this.getServiceCoverageKeys(service),
-    ]);
+    const serviceCoverage = new Set(
+      this.getSafeOverlapCoverageIds([
+        service.id,
+        ...this.getServiceCoverageKeys(service),
+      ]),
+    );
     return recommendations.some((recommendation) => {
       if (
         recommendation.id === excludeRecommendationId ||
@@ -1790,9 +1798,11 @@ export class RecommendationsService implements OnModuleInit {
     if (!servicePackage) return;
 
     const packageCoverage = new Set(
-      this.getPackageCoverageIds(
-        filterActiveServices(servicePackage.services).filter(
-          (service) => !service.isHidden,
+      this.getSafeOverlapCoverageIds(
+        this.getPackageCoverageIds(
+          filterActiveServices(servicePackage.services).filter(
+            (service) => !service.isHidden,
+          ),
         ),
       ),
     );
