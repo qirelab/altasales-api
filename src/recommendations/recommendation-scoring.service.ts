@@ -15,6 +15,7 @@ export type ServiceCandidate = Omit<Service, 'type'> & {
   packageId?: string | null;
   type: ServiceType | 'Пакет услуг';
   coveredServiceIds?: string[];
+  coverageKeys?: string[];
 };
 
 export type GeneratedRecommendationItem = {
@@ -26,6 +27,7 @@ export type GeneratedRecommendationItem = {
   diagnosticSignals: string[];
   score: number;
   coveredServiceIds?: string[];
+  coverageKeys?: string[];
   recommendation?: Recommendation;
 };
 
@@ -105,6 +107,7 @@ export class RecommendationScoringService {
       diagnosticSignals: matchedSignals.map((group) => group.signal),
       score,
       coveredServiceIds: this.getCandidateCoveredServiceIds(service, serviceId),
+      coverageKeys: this.getCandidateCoverageKeys(service, serviceId),
     };
   }
 
@@ -201,6 +204,7 @@ export class RecommendationScoringService {
           diagnosticSignals,
           score,
           coveredServiceIds: fallback.coveredServiceIds,
+          coverageKeys: fallback.coverageKeys,
         });
       }
 
@@ -325,6 +329,15 @@ export class RecommendationScoringService {
     if (service.coveredServiceIds?.length) {
       return service.coveredServiceIds;
     }
+    return serviceId ? [serviceId] : [];
+  }
+
+  private getCandidateCoverageKeys(
+    service: ServiceCandidate,
+    serviceId: string | null,
+  ): string[] {
+    if (service.coverageKeys?.length) return service.coverageKeys;
+    if (service.coveredServiceIds?.length) return service.coveredServiceIds;
     return serviceId ? [serviceId] : [];
   }
 

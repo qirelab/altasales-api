@@ -985,6 +985,7 @@ export class QuestionnaireRelevanceRankerService {
         ]),
         score,
         coveredServiceIds: base.coveredServiceIds,
+        coverageKeys: base.coverageKeys,
       });
 
       if (selected.length >= limit) break;
@@ -1731,6 +1732,7 @@ export class QuestionnaireRelevanceRankerService {
         ]),
         score: Math.max(Number(base.score || 0), rule.score),
         coveredServiceIds: base.coveredServiceIds,
+        coverageKeys: base.coverageKeys,
       });
 
       if (selected.length >= limit) break;

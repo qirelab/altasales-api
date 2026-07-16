@@ -2,6 +2,7 @@ export type CoverageRecommendationItem = {
   serviceId: string | null;
   packageId?: string | null;
   coveredServiceIds?: string[];
+  coverageKeys?: string[];
   score?: number;
 };
 
@@ -121,7 +122,10 @@ export function getCoverageRecommendationTargetId(
 }
 
 export function getCoverageIds(item: CoverageRecommendationItem): Set<string> {
-  const overlapIds = (item.coveredServiceIds ?? []).filter(isOverlapCoverageId);
+  const overlapIds = (item.coverageKeys?.length
+    ? item.coverageKeys
+    : item.coveredServiceIds ?? []
+  ).filter(isOverlapCoverageId);
   const ids = overlapIds;
   if (ids.length === 0 && item.serviceId) ids.push(item.serviceId);
   return new Set(ids);

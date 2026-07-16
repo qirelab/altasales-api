@@ -7,7 +7,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, IsNull, Repository } from 'typeorm';
+import { Brackets, DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
@@ -154,6 +154,11 @@ function mapOrderStatusToRecommendationStatus(
   }
 }
 
+type PackageSubItemState = {
+  serviceIds: Set<string>;
+  statusByServiceId: Map<string, RecommendationStatus>;
+};
+
 export type UserRecommendationListItem = {
   id: string;
   serviceId: string | null;
@@ -218,6 +223,7 @@ export class RecommendationsService implements OnModuleInit {
     private readonly relevanceRanker: QuestionnaireRelevanceRankerService,
     private readonly generationJobService: RecommendationGenerationJobService,
     private readonly notificationService: RecommendationNotificationService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -313,37 +319,35 @@ export class RecommendationsService implements OnModuleInit {
       where: packageIds.map((id) => ({ id })),
       relations: ['services'],
     });
-    const innerServicesByPackageId = new Map<
-      string,
-      PackageInnerServiceItem[]
-    >();
+    const servicesByPackageId = new Map<string, Service[]>();
     packagesWithServices.forEach((pkg) => {
-      innerServicesByPackageId.set(
-        pkg.id,
-        filterActiveServices(pkg.services)
-          .filter((service) => !service.isHidden)
-          .map((service) => ({
-            id: service.id,
-            name: service.name,
-            description: service.description ?? '',
-            type: service.type,
-            price: Number(service.price),
-            giftEligible: service.giftEligible,
-            status: null,
-          })),
-      );
+      servicesByPackageId.set(pkg.id, filterActiveServices(pkg.services));
     });
 
-    const subStatusByRecId = await this.loadPackageSubItemStatuses(packageRows);
+    const subStateByRecId = await this.loadPackageSubItemStatuses(packageRows);
 
     const rowsWithPackageServices = rows.map((row) => {
       if (!row.packageId) return row;
-      const innerServices = innerServicesByPackageId.get(row.packageId) ?? [];
-      const subStatusMap = subStatusByRecId.get(row.id);
-      const services = innerServices.map((service) => ({
-        ...service,
-        status: subStatusMap?.get(service.id) ?? null,
-      }));
+      const packageServices = servicesByPackageId.get(row.packageId) ?? [];
+      const subState = subStateByRecId.get(row.id);
+      const servicesForRow = subState
+        ? packageServices.filter((service) =>
+            subState.serviceIds.has(service.id),
+          )
+        : this.deduplicateServicesByName(
+            packageServices.filter((service) => !service.isHidden),
+          );
+      const services = this.deduplicateServicesByName(servicesForRow).map(
+        (service) => ({
+          id: service.id,
+          name: service.name,
+          description: service.description ?? '',
+          type: service.type,
+          price: Number(service.price),
+          giftEligible: service.giftEligible,
+          status: subState?.statusByServiceId.get(service.id) ?? null,
+        }),
+      );
       return { ...row, services };
     });
 
@@ -396,11 +400,11 @@ export class RecommendationsService implements OnModuleInit {
       packageId: string | null;
       orderId: string | null;
     }>,
-  ): Promise<Map<string, Map<string, RecommendationStatus>>> {
+  ): Promise<Map<string, PackageSubItemState>> {
     const orderIds = packageRows.flatMap((row) =>
       row.orderId ? [row.orderId] : [],
     );
-    const result = new Map<string, Map<string, RecommendationStatus>>();
+    const result = new Map<string, PackageSubItemState>();
     if (orderIds.length === 0) return result;
 
     const orderItems = await this.orderItemRepository.find({
@@ -408,20 +412,19 @@ export class RecommendationsService implements OnModuleInit {
       relations: ['subItems'],
     });
 
-    const subItemMapByKey = new Map<
-      string,
-      Map<string, RecommendationStatus>
-    >();
+    const subItemMapByKey = new Map<string, PackageSubItemState>();
     orderItems.forEach((item) => {
       if (!item.packageId) return;
       const key = `${item.orderId}:${item.packageId}`;
-      const inner = new Map<string, RecommendationStatus>();
-      item.subItems.forEach((sub) => {
+      const serviceIds = new Set<string>();
+      const statusByServiceId = new Map<string, RecommendationStatus>();
+      (item.subItems ?? []).forEach((sub) => {
         if (!sub.serviceId) return;
+        serviceIds.add(sub.serviceId);
         const mapped = mapOrderStatusToRecommendationStatus(sub.status);
-        if (mapped) inner.set(sub.serviceId, mapped);
+        if (mapped) statusByServiceId.set(sub.serviceId, mapped);
       });
-      subItemMapByKey.set(key, inner);
+      subItemMapByKey.set(key, { serviceIds, statusByServiceId });
     });
 
     packageRows.forEach((row) => {
@@ -500,29 +503,35 @@ export class RecommendationsService implements OnModuleInit {
     const shouldNotify =
       await this.notificationService.shouldNotifyAboutNewRecommendation(user);
 
-    const recommendation = this.recommendationRepository.create({
-      userId: dto.userId,
-      serviceId: target.serviceId,
-      packageId: target.packageId,
-      status: dto.status ?? RecommendationStatus.Recommended,
-      priority: dto.priority ?? RecommendationPriority.Medium,
-      rationale: dto.rationale ?? null,
-      dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
-      diagnosticSignals: this.scoringService.normalizeSignals(
-        dto.diagnosticSignals ?? [],
-      ),
-      generatedAt: null,
-      source: RecommendationSource.Manual,
-      orderId: null,
-    });
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const recommendationRepository = manager.getRepository(Recommendation);
+      const recommendation = recommendationRepository.create({
+        userId: dto.userId,
+        serviceId: target.serviceId,
+        packageId: target.packageId,
+        status: dto.status ?? RecommendationStatus.Recommended,
+        priority: dto.priority ?? RecommendationPriority.Medium,
+        rationale: dto.rationale ?? null,
+        dependencyIds: this.uniqueIds(dto.dependencyIds ?? []),
+        diagnosticSignals: this.scoringService.normalizeSignals(
+          dto.diagnosticSignals ?? [],
+        ),
+        generatedAt: null,
+        source: RecommendationSource.Manual,
+        orderId: null,
+      });
 
-    const saved = await this.recommendationRepository.save(recommendation);
-    if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
-      await this.pruneReplaceableRecommendationsCoveredByPackage(
-        saved.userId,
-        saved.packageId,
-      );
-    }
+      const saved = await recommendationRepository.save(recommendation);
+      if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+        await this.pruneReplaceableRecommendationsCoveredByPackage(
+          saved.userId,
+          saved.packageId,
+          saved.id,
+          manager,
+        );
+      }
+      return saved;
+    });
 
     if (shouldNotify) {
       await this.notificationService.notifyUserAboutRecommendations(
@@ -592,13 +601,19 @@ export class RecommendationsService implements OnModuleInit {
       );
     }
 
-    const saved = await this.recommendationRepository.save(recommendation);
-    if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
-      await this.pruneReplaceableRecommendationsCoveredByPackage(
-        saved.userId,
-        saved.packageId,
-      );
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const recommendationRepository = manager.getRepository(Recommendation);
+      const saved = await recommendationRepository.save(recommendation);
+      if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+        await this.pruneReplaceableRecommendationsCoveredByPackage(
+          saved.userId,
+          saved.packageId,
+          saved.id,
+          manager,
+        );
+      }
+      return saved;
+    });
     return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
 
@@ -711,21 +726,37 @@ export class RecommendationsService implements OnModuleInit {
       );
     }
 
-    const persisted: GeneratedRecommendationItem[] = [];
+    const { persisted, compactedRecommendationIds } =
+      await this.dataSource.transaction(async (manager) => {
+        const persisted: GeneratedRecommendationItem[] = [];
 
-    for (const item of ranked) {
-      const recommendation = await this.upsertGeneratedRecommendation(
-        dto.userId,
-        item,
-      );
-      persisted.push(
-        this.toPublicGeneratedRecommendationItem({ ...item, recommendation }),
-      );
-    }
+        for (const item of ranked) {
+          const recommendation = await this.upsertGeneratedRecommendation(
+            dto.userId,
+            item,
+            manager,
+          );
+          persisted.push(
+            this.toPublicGeneratedRecommendationItem({
+              ...item,
+              recommendation,
+            }),
+          );
+        }
 
-    await this.pruneStaleGeneratedRecommendations(dto.userId, ranked);
-    const compactedRecommendationIds =
-      await this.compactReplaceableRecommendationSnapshot(dto.userId);
+        await this.pruneStaleGeneratedRecommendations(
+          dto.userId,
+          ranked,
+          manager,
+        );
+        const compactedRecommendationIds =
+          await this.compactReplaceableRecommendationSnapshot(
+            dto.userId,
+            manager,
+          );
+
+        return { persisted, compactedRecommendationIds };
+      });
 
     return persisted.filter(
       (item) =>
@@ -737,12 +768,27 @@ export class RecommendationsService implements OnModuleInit {
   // ── Admin delete ──────────────────────────────────────────────────
 
   async removeForAdmin(id: string): Promise<void> {
-    const result = await this.recommendationRepository.delete({ id });
-    if (!result.affected) {
-      throw new NotFoundException(`Recommendation with id ${id} not found`);
+    const deleted = await this.dataSource.transaction(async (manager) => {
+      const recommendationRepository = manager.getRepository(Recommendation);
+      const recommendation = await recommendationRepository.findOne({
+        where: { id },
+      });
+      if (!recommendation) return false;
+
+      const deletedIds = await this.deleteRecommendationIdsSafely(
+        recommendation.userId,
+        [id],
+        new Map(),
+        manager,
+      );
+      return deletedIds.length > 0;
+    });
+    if (!deleted) {
+      throw new NotFoundException(
+        'Recommendation with id ' + id + ' not found',
+      );
     }
   }
-
   // ── Private helpers ───────────────────────────────────────────────
 
   private async getRecommendationOrThrow(id: string): Promise<Recommendation> {
@@ -850,7 +896,10 @@ export class RecommendationsService implements OnModuleInit {
           packages: [],
           createdAt: servicePackage.createdAt,
           deletedAt: servicePackage.deletedAt,
-          coveredServiceIds: coverageIds,
+          coveredServiceIds: this.uniqueIds(
+            activeServices.map((service) => service.id),
+          ),
+          coverageKeys: coverageIds,
         } as unknown as ServiceCandidate;
       })
       .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
@@ -864,7 +913,8 @@ export class RecommendationsService implements OnModuleInit {
       ...service,
       serviceId: service.id,
       packageId: null,
-      coveredServiceIds: this.uniqueIds([
+      coveredServiceIds: [service.id],
+      coverageKeys: this.uniqueIds([
         service.id,
         ...this.getServiceCoverageKeys(service),
       ]),
@@ -1278,13 +1328,16 @@ export class RecommendationsService implements OnModuleInit {
   private async pruneStaleGeneratedRecommendations(
     userId: string,
     currentItems: GeneratedRecommendationItem[],
+    manager?: EntityManager,
   ): Promise<void> {
     const currentTargetIds = new Set(
       currentItems
         .map((item) => this.getGeneratedRecommendationTargetId(item))
         .filter((targetId): targetId is string => Boolean(targetId)),
     );
-    const generatedRecommendations = await this.recommendationRepository.find({
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
+    const generatedRecommendations = await recommendationRepository.find({
       where: {
         userId,
         status: RecommendationStatus.Recommended,
@@ -1299,13 +1352,15 @@ export class RecommendationsService implements OnModuleInit {
       })
       .map((recommendation) => recommendation.id);
 
-    const idsToDelete = staleGeneratedIds;
+    if (staleGeneratedIds.length === 0) return;
 
-    if (idsToDelete.length === 0) return;
-
-    await this.recommendationRepository.delete(idsToDelete);
+    await this.deleteRecommendationIdsSafely(
+      userId,
+      staleGeneratedIds,
+      new Map(),
+      manager,
+    );
   }
-
   /**
    * Reconciles the persisted recommendation snapshot after a successful
    * generation. The ranking stage intentionally has score-based protections,
@@ -1318,8 +1373,11 @@ export class RecommendationsService implements OnModuleInit {
    */
   private async compactReplaceableRecommendationSnapshot(
     userId: string,
+    manager?: EntityManager,
   ): Promise<Set<string>> {
-    const recommendations = await this.recommendationRepository.find({
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
+    const recommendations = await recommendationRepository.find({
       where: { userId },
       relations: [
         'service',
@@ -1352,11 +1410,13 @@ export class RecommendationsService implements OnModuleInit {
         (coverageByRecommendationId.get(recommendation.id)?.size ?? 0) > 0,
     );
     if (packageRecommendations.length < 2) return new Set();
+
     const coversAll = (coveringId: string, coveredId: string): boolean => {
       const covering = coverageByRecommendationId.get(coveringId) ?? new Set();
       const covered = coverageByRecommendationId.get(coveredId) ?? new Set();
       return (
-        covered.size > 0 && [...covered].every((coverageId) => covering.has(coverageId))
+        covered.size > 0 &&
+        [...covered].every((coverageId) => covering.has(coverageId))
       );
     };
     const isPreferredCover = (coveringId: string, coveredId: string): boolean => {
@@ -1366,35 +1426,34 @@ export class RecommendationsService implements OnModuleInit {
       return coveringId.localeCompare(coveredId) < 0;
     };
 
+    const replacementByDeletedId = new Map<string, string>();
     const idsToDelete = replaceableRecommendations
       .filter((recommendation) => {
+        if (!recommendation.packageId) return false;
         if (!coverageByRecommendationId.get(recommendation.id)?.size) {
           return false;
         }
 
-        if (recommendation.packageId) {
-          return packageRecommendations.some(
-            (covering) =>
-              covering.id !== recommendation.id &&
-              coversAll(covering.id, recommendation.id) &&
-              isPreferredCover(covering.id, recommendation.id),
-          );
-        }
-
-        // Standalone services are deliberately left untouched here. If a
-        // service is relevant, it must remain a recommendation in its own
-        // right; package-package compaction must not silently delete it.
-        return false;
+        const covering = packageRecommendations.find(
+          (candidate) =>
+            candidate.id !== recommendation.id &&
+            coversAll(candidate.id, recommendation.id) &&
+            isPreferredCover(candidate.id, recommendation.id),
+        );
+        if (!covering) return false;
+        replacementByDeletedId.set(recommendation.id, covering.id);
+        return true;
       })
       .map((recommendation) => recommendation.id);
 
-    if (idsToDelete.length > 0) {
-      await this.recommendationRepository.delete(idsToDelete);
-    }
-
-    return new Set(idsToDelete);
+    const deletedIds = await this.deleteRecommendationIdsSafely(
+      userId,
+      idsToDelete,
+      replacementByDeletedId,
+      manager,
+    );
+    return new Set(deletedIds);
   }
-
   private isReplaceableRecommendation(
     recommendation: Pick<
       Recommendation,
@@ -1418,16 +1477,19 @@ export class RecommendationsService implements OnModuleInit {
   private toPublicGeneratedRecommendationItem(
     item: GeneratedRecommendationItem,
   ): GeneratedRecommendationItem {
+    const { coverageKeys: _coverageKeys, ...publicItem } = item;
     return {
-      ...item,
+      ...publicItem,
       coveredServiceIds: this.toPublicCoveredServiceIds(
-        item.coveredServiceIds ?? [],
+        publicItem.coveredServiceIds ?? [],
       ),
     };
   }
 
   private toPublicCoveredServiceIds(coveredServiceIds: string[]): string[] {
-    return coveredServiceIds.filter((id) => !this.isInternalCoverageKey(id));
+    return this.uniqueIds(
+      coveredServiceIds.filter((id) => !this.isInternalCoverageKey(id)),
+    );
   }
 
   private isInternalCoverageKey(id: string): boolean {
@@ -1481,6 +1543,7 @@ export class RecommendationsService implements OnModuleInit {
   private async upsertGeneratedRecommendation(
     userId: string,
     item: GeneratedRecommendationItem,
+    manager?: EntityManager,
   ): Promise<Recommendation> {
     const serviceId = item.serviceId ?? null;
     const packageId = item.packageId ?? null;
@@ -1489,14 +1552,14 @@ export class RecommendationsService implements OnModuleInit {
         'Generated recommendation target is missing',
       );
     }
+
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
     const where = serviceId
       ? { userId, serviceId }
       : { userId, packageId: packageId as string };
 
-    const existing = await this.recommendationRepository.findOne({
-      where,
-    });
-
+    const existing = await recommendationRepository.findOne({ where });
     if (existing) {
       if (existing.source === RecommendationSource.Manual) {
         return existing;
@@ -1506,10 +1569,10 @@ export class RecommendationsService implements OnModuleInit {
       existing.diagnosticSignals = item.diagnosticSignals;
       existing.source = RecommendationSource.AI;
       existing.generatedAt = new Date();
-      return this.recommendationRepository.save(existing);
+      return recommendationRepository.save(existing);
     }
 
-    const recommendation = this.recommendationRepository.create({
+    const recommendation = recommendationRepository.create({
       userId,
       serviceId,
       packageId,
@@ -1524,12 +1587,12 @@ export class RecommendationsService implements OnModuleInit {
     });
 
     try {
-      return await this.recommendationRepository.save(recommendation);
+      return await recommendationRepository.save(recommendation);
     } catch (error) {
       if (!this.isUniqueConstraintViolation(error)) {
         throw error;
       }
-      const retryExisting = await this.recommendationRepository.findOne({
+      const retryExisting = await recommendationRepository.findOne({
         where,
       });
       if (!retryExisting) throw error;
@@ -1538,10 +1601,9 @@ export class RecommendationsService implements OnModuleInit {
       retryExisting.diagnosticSignals = item.diagnosticSignals;
       retryExisting.source = RecommendationSource.AI;
       retryExisting.generatedAt = new Date();
-      return this.recommendationRepository.save(retryExisting);
+      return recommendationRepository.save(retryExisting);
     }
   }
-
   // ── Job processing ────────────────────────────────────────────────
 
   // ── Resolve target (from develop) ─────────────────────────────────
@@ -1727,6 +1789,18 @@ export class RecommendationsService implements OnModuleInit {
       );
     }
     if (
+      packageId &&
+      (await this.isEquivalentPackageAlreadyRecommended(
+        userId,
+        packageId,
+        excludeRecommendationId,
+      ))
+    ) {
+      throw new ConflictException(
+        'This package or an equivalent package is already recommended to this user',
+      );
+    }
+    if (
       serviceId &&
       (await this.isServiceCoveredByRecommendedPackage(
         userId,
@@ -1740,6 +1814,56 @@ export class RecommendationsService implements OnModuleInit {
     }
   }
 
+  private async isEquivalentPackageAlreadyRecommended(
+    userId: string,
+    packageId: string,
+    excludeRecommendationId?: string,
+  ): Promise<boolean> {
+    const [targetPackage, recommendations] = await Promise.all([
+      this.packageRepository.findOne({
+        where: { id: packageId, ...publicPackageWhere() },
+        relations: ['services', 'services.category'],
+      }),
+      this.recommendationRepository.find({
+        where: { userId },
+        relations: ['package', 'package.services', 'package.services.category'],
+      }),
+    ]);
+    if (!targetPackage) return false;
+
+    const targetName = this.normalizeCatalogName(targetPackage.name);
+    const targetCoverage = this.getSafeOverlapCoverageIds(
+      this.getPackageCoverageIds(
+        filterActiveServices(targetPackage.services ?? []).filter(
+          (service) => !service.isHidden,
+        ),
+      ),
+    );
+    return recommendations.some((recommendation) => {
+      if (
+        recommendation.id === excludeRecommendationId ||
+        !recommendation.packageId ||
+        !recommendation.package
+      ) {
+        return false;
+      }
+      const existingName = this.normalizeCatalogName(recommendation.package.name);
+      if (existingName === targetName) return true;
+
+      const existingCoverage = this.getSafeOverlapCoverageIds(
+        this.getPackageCoverageIds(
+          filterActiveServices(recommendation.package.services ?? []).filter(
+            (service) => !service.isHidden,
+          ),
+        ),
+      );
+      return (
+        targetCoverage.length > 0 &&
+        existingCoverage.length === targetCoverage.length &&
+        targetCoverage.every((coverageId) => existingCoverage.includes(coverageId))
+      );
+    });
+  }
   private async isServiceCoveredByRecommendedPackage(
     userId: string,
     serviceId: string,
@@ -1781,13 +1905,19 @@ export class RecommendationsService implements OnModuleInit {
   private async pruneReplaceableRecommendationsCoveredByPackage(
     userId: string,
     packageId: string,
+    replacementRecommendationId?: string,
+    manager?: EntityManager,
   ): Promise<void> {
+    const packageRepository =
+      manager?.getRepository(ServicePackage) ?? this.packageRepository;
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
     const [servicePackage, recommendations] = await Promise.all([
-      this.packageRepository.findOne({
+      packageRepository.findOne({
         where: { id: packageId, ...publicPackageWhere() },
         relations: ['services', 'services.category'],
       }),
-      this.recommendationRepository.find({
+      recommendationRepository.find({
         where: { userId },
         relations: ['service', 'service.category'],
       }),
@@ -1806,6 +1936,7 @@ export class RecommendationsService implements OnModuleInit {
     const idsToDelete = recommendations
       .filter(
         (recommendation) =>
+          recommendation.id !== replacementRecommendationId &&
           recommendation.serviceId &&
           recommendation.service &&
           this.isReplaceableRecommendation(recommendation) &&
@@ -1815,9 +1946,73 @@ export class RecommendationsService implements OnModuleInit {
       )
       .map((recommendation) => recommendation.id);
 
-    if (idsToDelete.length > 0) {
-      await this.recommendationRepository.delete(idsToDelete);
+    if (idsToDelete.length === 0) return;
+
+    const replacementByDeletedId = new Map<string, string>();
+    if (replacementRecommendationId) {
+      idsToDelete.forEach((id) =>
+        replacementByDeletedId.set(id, replacementRecommendationId),
+      );
     }
+    await this.deleteRecommendationIdsSafely(
+      userId,
+      idsToDelete,
+      replacementByDeletedId,
+      manager,
+    );
+  }
+
+  private async deleteRecommendationIdsSafely(
+    userId: string,
+    idsToDelete: string[],
+    replacementByDeletedId: ReadonlyMap<string, string>,
+    manager?: EntityManager,
+  ): Promise<string[]> {
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
+    const uniqueIdsToDelete = this.uniqueIds(idsToDelete);
+    if (uniqueIdsToDelete.length === 0) return [];
+
+    const recommendations = await recommendationRepository.find({
+      where: { userId },
+      select: { id: true, dependencyIds: true },
+    });
+    const deletingIds = new Set(uniqueIdsToDelete);
+    const protectedIds = new Set<string>();
+
+    for (const recommendation of recommendations) {
+      if (deletingIds.has(recommendation.id)) continue;
+
+      let changed = false;
+      const dependencyIds = recommendation.dependencyIds ?? [];
+      const nextDependencyIds = dependencyIds.map((dependencyId) => {
+        if (!deletingIds.has(dependencyId)) return dependencyId;
+
+        const replacementId = replacementByDeletedId.get(dependencyId);
+        if (
+          !replacementId ||
+          deletingIds.has(replacementId) ||
+          replacementId === recommendation.id
+        ) {
+          protectedIds.add(dependencyId);
+          return dependencyId;
+        }
+
+        changed = true;
+        return replacementId;
+      });
+
+      if (changed) {
+        recommendation.dependencyIds = this.uniqueIds(nextDependencyIds);
+        await recommendationRepository.save(recommendation);
+      }
+    }
+
+    const safeIds = uniqueIdsToDelete.filter((id) => !protectedIds.has(id));
+    if (safeIds.length > 0) {
+      await recommendationRepository.delete(safeIds);
+    }
+    return safeIds;
   }
 
   private uniqueIds(ids: string[]): string[] {

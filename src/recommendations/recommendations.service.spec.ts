@@ -5,6 +5,7 @@ import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { RECOMMENDATION_CATALOG } from './recommendation-catalog.registry';
 import { RecommendationsService } from './recommendations.service';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { OrderStatus } from '../orders/entities/order-status.enum';
 
 describe('RecommendationsService', () => {
   const userId = 'user-id';
@@ -99,6 +100,18 @@ describe('RecommendationsService', () => {
       markSeen: jest.fn(),
     };
 
+    const dataSource = {
+      transaction: jest.fn(async (callback: (manager: any) => unknown) =>
+        callback({
+          getRepository: jest.fn((entity: { name?: string }) =>
+            entity.name === 'ServicePackage'
+              ? packageRepository
+              : recommendationRepository,
+          ),
+        }),
+      ),
+    };
+
     const service = new RecommendationsService(
       recommendationRepository as any,
       userRepository as any,
@@ -111,6 +124,7 @@ describe('RecommendationsService', () => {
       relevanceRanker as any,
       generationJobService as any,
       notificationService as any,
+      dataSource as any,
     );
 
     return {
@@ -119,9 +133,11 @@ describe('RecommendationsService', () => {
       recommendationRepository,
       serviceRepository,
       packageRepository,
+      orderItemRepository,
       scoringService,
       relevanceRanker,
       generationJobService,
+      dataSource,
     };
   };
 
@@ -191,6 +207,16 @@ describe('RecommendationsService', () => {
             isHidden: false,
             deletedAt: null,
           },
+          {
+            id: 'zz-duplicate-package-dashboard-id',
+            name: 'Дашборд ОП',
+            description: 'Дублирующая строка услуги',
+            type: ServiceType.Service,
+            price: 10000,
+            giftEligible: false,
+            isHidden: false,
+            deletedAt: null,
+          },
         ],
       },
     ]);
@@ -212,6 +238,235 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('keeps hidden purchased package services in recommendation history', async () => {
+    const {
+      service,
+      recommendationRepository,
+      packageRepository,
+      orderItemRepository,
+    } = createService();
+    const qb = {
+      leftJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'ordered-package-recommendation-id',
+          serviceId: null,
+          packageId: 'ordered-package-id',
+          orderId: 'order-id',
+          name: 'Заказанный пакет',
+          description: 'Пакет',
+          type: 'Пакет услуг',
+          category: 'CRM',
+          price: '10000',
+          giftEligible: false,
+          status: RecommendationStatus.Completed,
+          priority: RecommendationPriority.Medium,
+          rationale: null,
+          dependencyIds: [],
+          diagnosticSignals: [],
+          createdAt: new Date(),
+        },
+      ]),
+    };
+    recommendationRepository.createQueryBuilder.mockReturnValue(qb);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'ordered-package-id',
+        services: [
+          {
+            id: 'hidden-purchased-service-id',
+            name: 'Скрытая купленная услуга',
+            description: 'Услуга из заказа',
+            type: ServiceType.Service,
+            price: 5000,
+            giftEligible: false,
+            isHidden: true,
+            deletedAt: null,
+          },
+        ],
+      },
+    ]);
+    orderItemRepository.find.mockResolvedValue([
+      {
+        orderId: 'order-id',
+        packageId: 'ordered-package-id',
+        subItems: [
+          {
+            serviceId: 'hidden-purchased-service-id',
+            status: OrderStatus.Completed,
+          },
+        ],
+      },
+    ]);
+
+    const result = await service.findAssignedToUserList(userId);
+
+    expect(result[0].services).toEqual([
+      expect.objectContaining({
+        id: 'hidden-purchased-service-id',
+        status: RecommendationStatus.Completed,
+      }),
+    ]);
+  });
+
+  it('keeps real UUIDs in public package coverage while hiding internal keys', () => {
+    const { service } = createService();
+    const result = (service as any).toPublicGeneratedRecommendationItem({
+      serviceId: null,
+      packageId: 'package-id',
+      serviceName: 'Пакет',
+      priority: RecommendationPriority.Medium,
+      rationale: 'package fit',
+      diagnosticSignals: [],
+      score: 10,
+      coveredServiceIds: ['service-a', 'service-b'],
+      coverageKeys: [
+        'catalog_name:настройка crm',
+        'catalog_semantic:crm_audit',
+      ],
+    });
+
+    expect(result.coveredServiceIds).toEqual(['service-a', 'service-b']);
+    expect(result.coverageKeys).toBeUndefined();
+  });
+
+  it('replaces deleted package dependencies with the covering package', async () => {
+    const { service, recommendationRepository } = createService();
+    const serviceRow = (id: string, name: string) => ({
+      id,
+      name,
+      description: name,
+      type: ServiceType.Service,
+      price: 1000,
+      giftEligible: false,
+      isHidden: false,
+      deletedAt: null,
+    });
+    const smallPackage = {
+      id: 'small-package-id',
+      name: 'Малый пакет',
+      isHidden: false,
+      deletedAt: null,
+      services: [serviceRow('crm-service-id', 'Настройка CRM')],
+    };
+    const largePackage = {
+      id: 'large-package-id',
+      name: 'Большой пакет',
+      isHidden: false,
+      deletedAt: null,
+      services: [
+        serviceRow('crm-service-id', 'Настройка CRM'),
+        serviceRow('dashboard-service-id', 'Дашборд ОП'),
+      ],
+    };
+    const smallRecommendation = {
+      id: 'small-recommendation-id',
+      userId,
+      serviceId: null,
+      packageId: smallPackage.id,
+      package: smallPackage,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      orderId: null,
+      diagnosticSignals: [],
+      dependencyIds: [],
+    };
+    const largeRecommendation = {
+      id: 'large-recommendation-id',
+      userId,
+      serviceId: null,
+      packageId: largePackage.id,
+      package: largePackage,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      orderId: null,
+      diagnosticSignals: [],
+      dependencyIds: [],
+    };
+    const dependentRecommendation = {
+      id: 'dependent-recommendation-id',
+      userId,
+      serviceId: 'standalone-service-id',
+      packageId: null,
+      service: serviceRow('standalone-service-id', 'CRM аудит'),
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      orderId: null,
+      diagnosticSignals: [],
+      dependencyIds: [smallRecommendation.id],
+    };
+    recommendationRepository.find.mockResolvedValue([
+      smallRecommendation,
+      largeRecommendation,
+      dependentRecommendation,
+    ]);
+
+    await (service as any).compactReplaceableRecommendationSnapshot(userId);
+
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      smallRecommendation.id,
+    ]);
+    expect(dependentRecommendation.dependencyIds).toEqual([
+      largeRecommendation.id,
+    ]);
+  });
+
+  it('rejects logically duplicate packages with equal coverage', async () => {
+    const { service, recommendationRepository, packageRepository } =
+      createService();
+    const qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    recommendationRepository.createQueryBuilder.mockReturnValue(qb);
+    const packageServices = [
+      {
+        id: 'crm-service-id',
+        name: 'Настройка CRM',
+        deletedAt: null,
+        isHidden: false,
+      },
+      {
+        id: 'dashboard-service-id',
+        name: 'Дашборд ОП',
+        deletedAt: null,
+        isHidden: false,
+      },
+    ];
+    const targetPackage = {
+      id: 'logical-package-a',
+      name: 'CRM расширенный',
+      services: packageServices,
+    };
+    const existingPackage = {
+      id: 'logical-package-b',
+      name: 'CRM другой',
+      services: packageServices,
+    };
+    packageRepository.findOne.mockResolvedValue(targetPackage);
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'existing-package-recommendation-id',
+        packageId: existingPackage.id,
+        package: existingPackage,
+      },
+    ]);
+
+    await expect(
+      (service as any).ensureRecommendationIsUnique(
+        userId,
+        null,
+        targetPackage.id,
+      ),
+    ).rejects.toThrow('equivalent package');
+  });
   it('keeps hidden targets available in the admin recommendation list', async () => {
     const { service, recommendationRepository } = createService();
     const qb = {
@@ -546,7 +801,7 @@ describe('RecommendationsService', () => {
     const crmStart = candidates.find(
       (item) => item.packageId === '292a8ec3-ea07-4326-9bb8-fed6056b3b20',
     );
-    expect(crmStart.coveredServiceIds).toEqual(
+    expect(crmStart.coverageKeys).toEqual(
       expect.arrayContaining([
         'catalog_name:интеграция мессенджера',
         'catalog_name:интеграция почты',
@@ -639,7 +894,7 @@ describe('RecommendationsService', () => {
     expect(matchingPackages[0]).toEqual(
       expect.objectContaining({
         packageId: 'complete-package-id',
-        coveredServiceIds: expect.arrayContaining([
+        coverageKeys: expect.arrayContaining([
           'catalog_name:подбор менеджеров',
           'catalog_name:настройка crm',
         ]),
@@ -783,16 +1038,16 @@ describe('RecommendationsService', () => {
     const packageCandidate = candidates.find(
       (item) => item.packageId === 'crm-silver-package-id',
     );
-    expect(packageCandidate.coveredServiceIds).toEqual(
+    expect(packageCandidate.coverageKeys).toEqual(
       expect.arrayContaining(['catalog_name:подготовка тз']),
     );
-    expect(packageCandidate.coveredServiceIds).not.toEqual(
+    expect(packageCandidate.coverageKeys).not.toEqual(
       expect.arrayContaining(['tech-spec-service-id', 'crm-audit-service-id']),
     );
     const documentsPackageCandidate = candidates.find(
       (item) => item.packageId === 'documents-package-id',
     );
-    expect(documentsPackageCandidate.coveredServiceIds).toEqual(
+    expect(documentsPackageCandidate.coverageKeys).toEqual(
       expect.arrayContaining(['catalog_name:рабочая инструкция мп']),
     );
     expect(documentsPackageCandidate.coveredServiceIds).not.toContain(
