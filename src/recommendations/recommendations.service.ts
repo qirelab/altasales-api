@@ -157,6 +157,12 @@ function mapOrderStatusToRecommendationStatus(
 type PackageSubItemState = {
   serviceIds: Set<string>;
   statusByServiceId: Map<string, RecommendationStatus>;
+  services: Service[];
+};
+
+type RecommendationDeletionResult = {
+  deletedIds: string[];
+  blockedBy: Map<string, string[]>;
 };
 
 export type UserRecommendationListItem = {
@@ -330,24 +336,28 @@ export class RecommendationsService implements OnModuleInit {
       if (!row.packageId) return row;
       const packageServices = servicesByPackageId.get(row.packageId) ?? [];
       const subState = subStateByRecId.get(row.id);
-      const servicesForRow = subState
-        ? packageServices.filter((service) =>
-            subState.serviceIds.has(service.id),
-          )
-        : this.deduplicateServicesByName(
-            packageServices.filter((service) => !service.isHidden),
-          );
-      const services = this.deduplicateServicesByName(servicesForRow).map(
-        (service) => ({
-          id: service.id,
-          name: service.name,
-          description: service.description ?? '',
-          type: service.type,
-          price: Number(service.price),
-          giftEligible: service.giftEligible,
-          status: subState?.statusByServiceId.get(service.id) ?? null,
-        }),
-      );
+      const historicalServices = subState
+        ? this.deduplicateServicesByName([
+            ...subState.services,
+            ...packageServices.filter((service) =>
+              subState.serviceIds.has(service.id),
+            ),
+          ])
+        : null;
+      const servicesForRow =
+        historicalServices ??
+        this.deduplicateServicesByName(
+          packageServices.filter((service) => !service.isHidden),
+        );
+      const services = servicesForRow.map((service) => ({
+        id: service.id,
+        name: service.name,
+        description: service.description ?? '',
+        type: service.type,
+        price: Number(service.price),
+        giftEligible: service.giftEligible,
+        status: subState?.statusByServiceId.get(service.id) ?? null,
+      }));
       return { ...row, services };
     });
 
@@ -409,7 +419,7 @@ export class RecommendationsService implements OnModuleInit {
 
     const orderItems = await this.orderItemRepository.find({
       where: [...new Set(orderIds)].map((orderId) => ({ orderId })),
-      relations: ['subItems'],
+      relations: ['subItems', 'subItems.service', 'subItems.service.category'],
     });
 
     const subItemMapByKey = new Map<string, PackageSubItemState>();
@@ -418,13 +428,21 @@ export class RecommendationsService implements OnModuleInit {
       const key = `${item.orderId}:${item.packageId}`;
       const serviceIds = new Set<string>();
       const statusByServiceId = new Map<string, RecommendationStatus>();
+      const services: Service[] = [];
       (item.subItems ?? []).forEach((sub) => {
         if (!sub.serviceId) return;
         serviceIds.add(sub.serviceId);
+        if (sub.service) services.push(sub.service);
         const mapped = mapOrderStatusToRecommendationStatus(sub.status);
         if (mapped) statusByServiceId.set(sub.serviceId, mapped);
       });
-      subItemMapByKey.set(key, { serviceIds, statusByServiceId });
+      if (serviceIds.size > 0) {
+        subItemMapByKey.set(key, {
+          serviceIds,
+          statusByServiceId,
+          services,
+        });
+      }
     });
 
     packageRows.forEach((row) => {
@@ -489,22 +507,25 @@ export class RecommendationsService implements OnModuleInit {
       dto.serviceId,
       dto.packageId,
     );
-    await this.ensureRecommendationIsUnique(
-      dto.userId,
-      target.serviceId,
-      target.packageId,
-    );
-    await ensureDependencyGraphIsValid(
-      this.recommendationRepository,
-      dto.dependencyIds ?? [],
-      undefined,
-      dto.userId,
-    );
     const shouldNotify =
       await this.notificationService.shouldNotifyAboutNewRecommendation(user);
 
     const saved = await this.dataSource.transaction(async (manager) => {
+      await this.lockUserForRecommendationMutation(dto.userId, manager);
       const recommendationRepository = manager.getRepository(Recommendation);
+      await this.ensureRecommendationIsUnique(
+        dto.userId,
+        target.serviceId,
+        target.packageId,
+        undefined,
+        manager,
+      );
+      await ensureDependencyGraphIsValid(
+        recommendationRepository,
+        dto.dependencyIds ?? [],
+        undefined,
+        dto.userId,
+      );
       const recommendation = recommendationRepository.create({
         userId: dto.userId,
         serviceId: target.serviceId,
@@ -555,54 +576,57 @@ export class RecommendationsService implements OnModuleInit {
     dto: UpdateAdminRecommendationDto,
   ): Promise<Recommendation> {
     const recommendation = await this.getRecommendationOrThrow(id);
-
     const shouldUpdateTarget =
       dto.serviceId !== undefined || dto.packageId !== undefined;
-    if (shouldUpdateTarget) {
-      const target = await this.resolveUpdateRecommendationTarget(dto);
-      const changedTarget =
-        target.serviceId !== recommendation.serviceId ||
-        target.packageId !== recommendation.packageId;
+    const target = shouldUpdateTarget
+      ? await this.resolveUpdateRecommendationTarget(dto)
+      : null;
+    const changedTarget = Boolean(
+      target &&
+        (target.serviceId !== recommendation.serviceId ||
+          target.packageId !== recommendation.packageId),
+    );
 
-      if (changedTarget) {
+    if (dto.orderId !== undefined) {
+      await this.ensureOrderExists(dto.orderId);
+    }
+
+    const saved = await this.dataSource.transaction(async (manager) => {
+      await this.lockUserForRecommendationMutation(recommendation.userId, manager);
+      const recommendationRepository = manager.getRepository(Recommendation);
+
+      if (changedTarget && target) {
         await this.ensureRecommendationIsUnique(
           recommendation.userId,
           target.serviceId,
           target.packageId,
           recommendation.id,
+          manager,
+        );
+        recommendation.serviceId = target.serviceId;
+        recommendation.packageId = target.packageId;
+      }
+
+      if (dto.orderId !== undefined) recommendation.orderId = dto.orderId;
+      if (dto.status !== undefined) recommendation.status = dto.status;
+      if (dto.priority !== undefined) recommendation.priority = dto.priority;
+      if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
+
+      if (dto.dependencyIds) {
+        recommendation.dependencyIds = await validateDependencyIds(
+          recommendationRepository,
+          recommendation.id,
+          dto.dependencyIds,
+          recommendation.userId,
         );
       }
 
-      recommendation.serviceId = target.serviceId;
-      recommendation.packageId = target.packageId;
-    }
+      if (dto.diagnosticSignals) {
+        recommendation.diagnosticSignals = this.scoringService.normalizeSignals(
+          dto.diagnosticSignals,
+        );
+      }
 
-    if (dto.orderId !== undefined) {
-      await this.ensureOrderExists(dto.orderId);
-      recommendation.orderId = dto.orderId;
-    }
-
-    if (dto.status !== undefined) recommendation.status = dto.status;
-    if (dto.priority !== undefined) recommendation.priority = dto.priority;
-    if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
-
-    if (dto.dependencyIds) {
-      recommendation.dependencyIds = await validateDependencyIds(
-        this.recommendationRepository,
-        recommendation.id,
-        dto.dependencyIds,
-        recommendation.userId,
-      );
-    }
-
-    if (dto.diagnosticSignals) {
-      recommendation.diagnosticSignals = this.scoringService.normalizeSignals(
-        dto.diagnosticSignals,
-      );
-    }
-
-    const saved = await this.dataSource.transaction(async (manager) => {
-      const recommendationRepository = manager.getRepository(Recommendation);
       const saved = await recommendationRepository.save(recommendation);
       if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
         await this.pruneReplaceableRecommendationsCoveredByPackage(
@@ -616,7 +640,6 @@ export class RecommendationsService implements OnModuleInit {
     });
     return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
-
   // ── User self-service ─────────────────────────────────────────────
 
   async updateForUser(
@@ -728,6 +751,7 @@ export class RecommendationsService implements OnModuleInit {
 
     const { persisted, compactedRecommendationIds } =
       await this.dataSource.transaction(async (manager) => {
+        await this.lockUserForRecommendationMutation(dto.userId, manager);
         const persisted: GeneratedRecommendationItem[] = [];
 
         for (const item of ranked) {
@@ -773,24 +797,39 @@ export class RecommendationsService implements OnModuleInit {
       const recommendation = await recommendationRepository.findOne({
         where: { id },
       });
-      if (!recommendation) return false;
+      if (!recommendation) return null;
 
-      const deletedIds = await this.deleteRecommendationIdsSafely(
+      return this.deleteRecommendationIdsSafely(
         recommendation.userId,
         [id],
         new Map(),
         manager,
       );
-      return deletedIds.length > 0;
     });
     if (!deleted) {
-      throw new NotFoundException(
-        'Recommendation with id ' + id + ' not found',
+      throw new NotFoundException('Recommendation not found');
+    }
+    if (deleted.deletedIds.length === 0) {
+      const dependentIds = deleted.blockedBy.get(id) ?? [];
+      throw new ConflictException(
+        dependentIds.length > 0
+          ? 'Recommendation ' + id + ' is required by: ' + dependentIds.join(', ')
+          : 'Recommendation ' + id + ' cannot be deleted while preserving the dependency graph',
       );
     }
   }
   // ── Private helpers ───────────────────────────────────────────────
 
+  private async lockUserForRecommendationMutation(
+    userId: string,
+    manager: EntityManager,
+  ): Promise<void> {
+    await manager.getRepository(User).findOne({
+      where: { id: userId },
+      select: { id: true },
+      lock: { mode: 'pessimistic_write' },
+    });
+  }
   private async getRecommendationOrThrow(id: string): Promise<Recommendation> {
     const recommendation = await this.recommendationRepository.findOne({
       where: { id },
@@ -1033,7 +1072,7 @@ export class RecommendationsService implements OnModuleInit {
         candidateName === serviceName ||
         Boolean(candidate.coveredServiceIds?.includes(service.id)) ||
         serviceCoverageKeys.some((coverageKey) =>
-          candidate.coveredServiceIds?.includes(coverageKey),
+          candidate.coverageKeys?.includes(coverageKey),
         )
       );
     });
@@ -1446,13 +1485,13 @@ export class RecommendationsService implements OnModuleInit {
       })
       .map((recommendation) => recommendation.id);
 
-    const deletedIds = await this.deleteRecommendationIdsSafely(
+    const deletionResult = await this.deleteRecommendationIdsSafely(
       userId,
       idsToDelete,
       replacementByDeletedId,
       manager,
     );
-    return new Set(deletedIds);
+    return new Set(deletionResult.deletedIds);
   }
   private isReplaceableRecommendation(
     recommendation: Pick<
@@ -1540,6 +1579,19 @@ export class RecommendationsService implements OnModuleInit {
     return this.uniqueIds(safeCoverageIds);
   }
 
+  private async saveGeneratedRecommendation(
+    recommendationRepository: Repository<Recommendation>,
+    recommendation: Recommendation,
+    manager?: EntityManager,
+  ): Promise<Recommendation> {
+    if (!manager || typeof manager.transaction !== 'function') {
+      return recommendationRepository.save(recommendation);
+    }
+    return manager.transaction((savepointManager) =>
+      savepointManager.getRepository(Recommendation).save(recommendation),
+    );
+  }
+
   private async upsertGeneratedRecommendation(
     userId: string,
     item: GeneratedRecommendationItem,
@@ -1587,7 +1639,11 @@ export class RecommendationsService implements OnModuleInit {
     });
 
     try {
-      return await recommendationRepository.save(recommendation);
+      return await this.saveGeneratedRecommendation(
+        recommendationRepository,
+        recommendation,
+        manager,
+      );
     } catch (error) {
       if (!this.isUniqueConstraintViolation(error)) {
         throw error;
@@ -1601,7 +1657,11 @@ export class RecommendationsService implements OnModuleInit {
       retryExisting.diagnosticSignals = item.diagnosticSignals;
       retryExisting.source = RecommendationSource.AI;
       retryExisting.generatedAt = new Date();
-      return recommendationRepository.save(retryExisting);
+      return this.saveGeneratedRecommendation(
+        recommendationRepository,
+        retryExisting,
+        manager,
+      );
     }
   }
   // ── Job processing ────────────────────────────────────────────────
@@ -1763,8 +1823,11 @@ export class RecommendationsService implements OnModuleInit {
     serviceId: string | null,
     packageId: string | null,
     excludeRecommendationId?: string,
+    manager?: EntityManager,
   ): Promise<void> {
-    const qb = this.recommendationRepository
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
+    const qb = recommendationRepository
       .createQueryBuilder('recommendation')
       .where('recommendation."userId" = :userId', { userId });
 
@@ -1794,6 +1857,7 @@ export class RecommendationsService implements OnModuleInit {
         userId,
         packageId,
         excludeRecommendationId,
+        manager,
       ))
     ) {
       throw new ConflictException(
@@ -1806,6 +1870,7 @@ export class RecommendationsService implements OnModuleInit {
         userId,
         serviceId,
         excludeRecommendationId,
+        manager,
       ))
     ) {
       throw new ConflictException(
@@ -1818,13 +1883,18 @@ export class RecommendationsService implements OnModuleInit {
     userId: string,
     packageId: string,
     excludeRecommendationId?: string,
+    manager?: EntityManager,
   ): Promise<boolean> {
+    const packageRepository =
+      manager?.getRepository(ServicePackage) ?? this.packageRepository;
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
     const [targetPackage, recommendations] = await Promise.all([
-      this.packageRepository.findOne({
+      packageRepository.findOne({
         where: { id: packageId, ...publicPackageWhere() },
         relations: ['services', 'services.category'],
       }),
-      this.recommendationRepository.find({
+      recommendationRepository.find({
         where: { userId },
         relations: ['package', 'package.services', 'package.services.category'],
       }),
@@ -1868,13 +1938,18 @@ export class RecommendationsService implements OnModuleInit {
     userId: string,
     serviceId: string,
     excludeRecommendationId?: string,
+    manager?: EntityManager,
   ): Promise<boolean> {
+    const serviceRepository =
+      manager?.getRepository(Service) ?? this.serviceRepository;
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
     const [service, recommendations] = await Promise.all([
-      this.serviceRepository.findOne({
+      serviceRepository.findOne({
         where: { id: serviceId, deletedAt: IsNull(), isHidden: false },
         relations: ['category'],
       }),
-      this.recommendationRepository.find({
+      recommendationRepository.find({
         where: { userId, status: RecommendationStatus.Recommended },
         relations: ['package', 'package.services', 'package.services.category'],
       }),
@@ -1967,54 +2042,188 @@ export class RecommendationsService implements OnModuleInit {
     idsToDelete: string[],
     replacementByDeletedId: ReadonlyMap<string, string>,
     manager?: EntityManager,
-  ): Promise<string[]> {
+  ): Promise<RecommendationDeletionResult> {
     const recommendationRepository =
       manager?.getRepository(Recommendation) ?? this.recommendationRepository;
     const uniqueIdsToDelete = this.uniqueIds(idsToDelete);
-    if (uniqueIdsToDelete.length === 0) return [];
+    if (uniqueIdsToDelete.length === 0) {
+      return { deletedIds: [], blockedBy: new Map() };
+    }
 
     const recommendations = await recommendationRepository.find({
       where: { userId },
-      select: { id: true, dependencyIds: true },
+      select: { id: true, userId: true, dependencyIds: true },
+      ...(manager
+        ? { lock: { mode: 'pessimistic_write' as const } }
+        : {}),
     });
-    const deletingIds = new Set(uniqueIdsToDelete);
+    const recommendationsById = new Map(
+      recommendations.map((recommendation) => [recommendation.id, recommendation]),
+    );
+    const requestedDeleteIds = new Set(
+      uniqueIdsToDelete.filter((id) => recommendationsById.has(id)),
+    );
+    if (requestedDeleteIds.size === 0) {
+      return { deletedIds: [], blockedBy: new Map() };
+    }
+
     const protectedIds = new Set<string>();
+    let finalDependencies = new Map<string, string[]>();
+    const protectedBy = new Map<string, string[]>();
+    let finalBlockedBy = new Map<string, string[]>();
 
-    for (const recommendation of recommendations) {
-      if (deletingIds.has(recommendation.id)) continue;
+    const resolveReplacement = (
+      dependencyId: string,
+      activeDeleteIds: ReadonlySet<string>,
+    ): string | null => {
+      let currentId = dependencyId;
+      const visited = new Set<string>();
+      while (activeDeleteIds.has(currentId)) {
+        if (visited.has(currentId)) return null;
+        visited.add(currentId);
+        const replacementId = replacementByDeletedId.get(currentId);
+        if (!replacementId) return null;
+        currentId = replacementId;
+      }
+      return recommendationsById.has(currentId) ? currentId : null;
+    };
 
-      let changed = false;
-      const dependencyIds = recommendation.dependencyIds ?? [];
-      const nextDependencyIds = dependencyIds.map((dependencyId) => {
-        if (!deletingIds.has(dependencyId)) return dependencyId;
+    const findCycle = (
+      graph: ReadonlyMap<string, string[]>,
+    ): Set<string> | null => {
+      const state = new Map<string, 0 | 1 | 2>();
+      const stack: string[] = [];
 
-        const replacementId = replacementByDeletedId.get(dependencyId);
-        if (
-          !replacementId ||
-          deletingIds.has(replacementId) ||
-          replacementId === recommendation.id
-        ) {
-          protectedIds.add(dependencyId);
-          return dependencyId;
+      const visit = (id: string): Set<string> | null => {
+        state.set(id, 1);
+        stack.push(id);
+        for (const dependencyId of graph.get(id) ?? []) {
+          if (!graph.has(dependencyId)) continue;
+          const dependencyState = state.get(dependencyId) ?? 0;
+          if (dependencyState === 1) {
+            return new Set(stack.slice(stack.indexOf(dependencyId)));
+          }
+          if (dependencyState === 0) {
+            const cycle = visit(dependencyId);
+            if (cycle) return cycle;
+          }
         }
+        stack.pop();
+        state.set(id, 2);
+        return null;
+      };
 
-        changed = true;
-        return replacementId;
+      for (const id of graph.keys()) {
+        if ((state.get(id) ?? 0) === 0) {
+          const cycle = visit(id);
+          if (cycle) return cycle;
+        }
+      }
+      return null;
+    };
+
+    while (true) {
+      const activeDeleteIds = new Set(
+        [...requestedDeleteIds].filter((id) => !protectedIds.has(id)),
+      );
+      const nextDependencies = new Map<string, string[]>();
+      const blockedBy = new Map<string, string[]>();
+      const newlyProtectedIds = new Set<string>();
+
+      for (const recommendation of recommendations) {
+        if (activeDeleteIds.has(recommendation.id)) continue;
+        const nextDependencyIds: string[] = [];
+        for (const dependencyId of this.uniqueIds(
+          recommendation.dependencyIds ?? [],
+        )) {
+          if (!recommendationsById.has(dependencyId)) {
+            throw new ConflictException(
+              'Recommendation ' +
+                recommendation.id +
+                ' references missing dependency ' +
+                dependencyId,
+            );
+          }
+          if (!activeDeleteIds.has(dependencyId)) {
+            nextDependencyIds.push(dependencyId);
+            continue;
+          }
+
+          const replacementId = resolveReplacement(dependencyId, activeDeleteIds);
+          if (!replacementId || replacementId === recommendation.id) {
+            newlyProtectedIds.add(dependencyId);
+            const dependents = blockedBy.get(dependencyId) ?? [];
+            dependents.push(recommendation.id);
+            blockedBy.set(dependencyId, this.uniqueIds(dependents));
+            nextDependencyIds.push(dependencyId);
+          } else {
+            nextDependencyIds.push(replacementId);
+          }
+        }
+        nextDependencies.set(
+          recommendation.id,
+          this.uniqueIds(nextDependencyIds),
+        );
+      }
+
+      blockedBy.forEach((dependents, dependencyId) => {
+        protectedBy.set(
+          dependencyId,
+          this.uniqueIds([...(protectedBy.get(dependencyId) ?? []), ...dependents]),
+        );
       });
 
-      if (changed) {
-        recommendation.dependencyIds = this.uniqueIds(nextDependencyIds);
+      if (newlyProtectedIds.size > 0) {
+        newlyProtectedIds.forEach((id) => protectedIds.add(id));
+        continue;
+      }
+
+      for (const dependencies of nextDependencies.values()) {
+        if (dependencies.some((id) => !nextDependencies.has(id))) {
+          throw new ConflictException(
+            'Recommendation dependency graph would contain a dangling reference',
+          );
+        }
+      }
+      const cycle = findCycle(nextDependencies);
+      if (cycle) {
+        const cycleDeleteIds = [...cycle].filter((id) =>
+          activeDeleteIds.has(id),
+        );
+        if (cycleDeleteIds.length === 0) {
+          throw new ConflictException(
+            'Recommendation dependency graph already contains a cycle',
+          );
+        }
+        cycleDeleteIds.forEach((id) => protectedIds.add(id));
+        continue;
+      }
+
+      finalDependencies = nextDependencies;
+      finalBlockedBy = protectedBy;
+      break;
+    }
+
+    for (const recommendation of recommendations) {
+      const nextDependencyIds = finalDependencies.get(recommendation.id);
+      if (!nextDependencyIds) continue;
+      if (
+        this.uniqueIds(recommendation.dependencyIds ?? []).join(',') !==
+        nextDependencyIds.join(',')
+      ) {
+        recommendation.dependencyIds = nextDependencyIds;
         await recommendationRepository.save(recommendation);
       }
     }
 
-    const safeIds = uniqueIdsToDelete.filter((id) => !protectedIds.has(id));
+    const safeIds = [...requestedDeleteIds].filter(
+      (id) => !protectedIds.has(id),
+    );
     if (safeIds.length > 0) {
       await recommendationRepository.delete(safeIds);
     }
-    return safeIds;
+    return { deletedIds: safeIds, blockedBy: finalBlockedBy };
   }
-
   private uniqueIds(ids: string[]): string[] {
     return Array.from(new Set(ids));
   }

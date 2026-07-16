@@ -106,7 +106,9 @@ describe('RecommendationsService', () => {
           getRepository: jest.fn((entity: { name?: string }) =>
             entity.name === 'ServicePackage'
               ? packageRepository
-              : recommendationRepository,
+              : entity.name === 'User'
+                ? userRepository
+                : recommendationRepository,
           ),
         }),
       ),
@@ -417,6 +419,218 @@ describe('RecommendationsService', () => {
     ]);
   });
 
+  it('rejects a replacement that would create a dependency cycle', async () => {
+    const { service, recommendationRepository } = createService();
+    const row = (id: string, dependencyIds: string[]) => ({
+      id,
+      userId,
+      dependencyIds,
+    });
+    recommendationRepository.find.mockResolvedValue([
+      row('package-p', ['recommendation-q']),
+      row('recommendation-q', ['service-s']),
+      row('service-s', []),
+    ]);
+
+    await expect(
+      (service as any).deleteRecommendationIdsSafely(
+        userId,
+        ['service-s'],
+        new Map([['service-s', 'package-p']]),
+      ),
+    ).rejects.toThrow(/dependency graph|cycle/);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('protects the transitive dependency closure before deleting recommendations', async () => {
+    const { service, recommendationRepository } = createService();
+    const row = (id: string, dependencyIds: string[]) => ({
+      id,
+      userId,
+      dependencyIds,
+    });
+    recommendationRepository.find.mockResolvedValue([
+      row('recommendation-a', ['recommendation-b']),
+      row('recommendation-b', []),
+      row('recommendation-c', ['recommendation-a']),
+    ]);
+
+    const result = await (service as any).deleteRecommendationIdsSafely(
+      userId,
+      ['recommendation-a', 'recommendation-b'],
+      new Map(),
+    );
+
+    expect(result.deletedIds).toEqual([]);
+    expect(result.blockedBy.get('recommendation-a')).toEqual([
+      'recommendation-c',
+    ]);
+    expect(result.blockedBy.get('recommendation-b')).toEqual([
+      'recommendation-a',
+    ]);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('updates a protected recommendation when its deleted dependency is replaced', async () => {
+    const { service, recommendationRepository } = createService();
+    const row = (id: string, dependencyIds: string[]) => ({
+      id,
+      userId,
+      dependencyIds,
+    });
+    const packageRecommendation = row('package-recommendation-id', [
+      'service-recommendation-id',
+    ]);
+    recommendationRepository.find.mockResolvedValue([
+      packageRecommendation,
+      row('service-recommendation-id', []),
+      row('covering-package-id', []),
+      row('dependent-recommendation-id', [packageRecommendation.id]),
+    ]);
+
+    const result = await (service as any).deleteRecommendationIdsSafely(
+      userId,
+      ['package-recommendation-id', 'service-recommendation-id'],
+      new Map([['service-recommendation-id', 'covering-package-id']]),
+    );
+
+    expect(result.deletedIds).toEqual(['service-recommendation-id']);
+    expect(packageRecommendation.dependencyIds).toEqual([
+      'covering-package-id',
+    ]);
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'service-recommendation-id',
+    ]);
+  });
+  it('retries a generated insert through a savepoint after a unique conflict', async () => {
+    const { service, recommendationRepository } = createService();
+    const existing = {
+      id: 'existing-recommendation-id',
+      userId,
+      serviceId: 'service-id',
+      packageId: null,
+    };
+    const manager: any = {
+      getRepository: jest.fn(() => recommendationRepository),
+    };
+    manager.transaction = jest.fn(async (callback: (manager: any) => unknown) =>
+      callback(manager),
+    );
+    recommendationRepository.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(existing);
+    recommendationRepository.save
+      .mockRejectedValueOnce({ code: '23505' })
+      .mockResolvedValueOnce(existing);
+
+    const result = await (service as any).upsertGeneratedRecommendation(
+      userId,
+      {
+        serviceId: 'service-id',
+        packageId: null,
+        serviceName: 'CRM',
+        priority: RecommendationPriority.Medium,
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 50,
+        coveredServiceIds: ['service-id'],
+      },
+      manager,
+    );
+
+    expect(result).toBe(existing);
+    expect(manager.transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses order sub-item services when the live package composition changed', async () => {
+    const {
+      service,
+      recommendationRepository,
+      packageRepository,
+      orderItemRepository,
+    } = createService();
+    const qb = {
+      leftJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'ordered-package-recommendation-id',
+          serviceId: null,
+          packageId: 'ordered-package-id',
+          orderId: 'order-id',
+          name: 'Заказанный пакет',
+          description: 'Пакет',
+          type: 'Пакет услуг',
+          category: 'CRM',
+          price: '10000',
+          giftEligible: false,
+          status: RecommendationStatus.Completed,
+          priority: RecommendationPriority.Medium,
+          rationale: null,
+          dependencyIds: [],
+          diagnosticSignals: [],
+          createdAt: new Date(),
+        },
+      ]),
+    };
+    recommendationRepository.createQueryBuilder.mockReturnValue(qb);
+    packageRepository.find.mockResolvedValue([
+      { id: 'ordered-package-id', services: [] },
+    ]);
+    orderItemRepository.find.mockResolvedValue([
+      {
+        orderId: 'order-id',
+        packageId: 'ordered-package-id',
+        subItems: [
+          {
+            serviceId: 'removed-from-package-service-id',
+            status: OrderStatus.Completed,
+            service: {
+              id: 'removed-from-package-service-id',
+              name: 'Удалённая из состава услуга',
+              description: 'Историческая услуга',
+              type: ServiceType.Service,
+              price: 5000,
+              giftEligible: false,
+              isHidden: true,
+              deletedAt: null,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const result = await service.findAssignedToUserList(userId);
+
+    expect(result[0].services).toEqual([
+      expect.objectContaining({
+        id: 'removed-from-package-service-id',
+        status: RecommendationStatus.Completed,
+      }),
+    ]);
+  });
+
+  it('returns a conflict instead of a false success when a dependency blocks deletion', async () => {
+    const { service, recommendationRepository } = createService();
+    recommendationRepository.findOne.mockResolvedValue({
+      id: 'dependency-id',
+      userId,
+    });
+    recommendationRepository.find.mockResolvedValue([
+      { id: 'dependency-id', userId, dependencyIds: [] },
+      { id: 'dependent-id', userId, dependencyIds: ['dependency-id'] },
+    ]);
+
+    await expect(service.removeForAdmin('dependency-id')).rejects.toThrow(
+      'dependent-id',
+    );
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
   it('rejects logically duplicate packages with equal coverage', async () => {
     const { service, recommendationRepository, packageRepository } =
       createService();
@@ -701,6 +915,54 @@ describe('RecommendationsService', () => {
     );
   });
 
+  it('deduplicates legacy package services by coverage key across UUIDs', async () => {
+    const { service, serviceRepository, packageRepository, relevanceRanker } =
+      createService();
+    const qb = createQueryBuilder();
+    serviceRepository.createQueryBuilder.mockReturnValue(qb);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'legacy-dashboard-service-id',
+        name: 'Дашборд ОП',
+        description: 'Старая строка услуги',
+        type: ServiceType.Service,
+        price: 10000,
+        skills: ['дашборд'],
+        category: { name: 'Пакет услуг' },
+      },
+    ]);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'sales-package-id',
+        name: 'Sales package',
+        description: 'Полный пакет отдела продаж',
+        price: 50000,
+        tags: ['sales'],
+        categoryId: 'category-id',
+        category: { name: 'Пакет услуг' },
+        services: [
+          {
+            id: 'canonical-dashboard-service-id',
+            name: 'Дашборд ОП',
+            description: 'Каноническая услуга в пакете',
+            deletedAt: null,
+            isHidden: false,
+            skills: ['дашборд'],
+            category: { name: 'Аналитика' },
+          },
+        ],
+        createdAt: new Date(),
+        deletedAt: null,
+      },
+    ]);
+
+    await service.generateForUser({ userId, persist: false });
+
+    const candidates = relevanceRanker.rankRecommendations.mock.calls[0][1];
+    expect(candidates.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'sales-package-id',
+    ]);
+  });
   it('adds inner service descriptions to package recommendation candidates', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();
@@ -2562,6 +2824,22 @@ describe('RecommendationsService', () => {
           generatedAt: new Date('2026-01-01T00:00:00.000Z'),
         },
       ]);
+    recommendationRepository.find.mockResolvedValueOnce([
+      {
+        id: 'stale-service-recommendation-id',
+        serviceId: 'stale-service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+      {
+        id: 'current-package-recommendation-id',
+        serviceId: null,
+        packageId: 'package-id',
+        status: RecommendationStatus.Recommended,
+        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
     recommendationRepository.findOne.mockResolvedValue(null);
     relevanceRanker.rankRecommendations.mockReturnValue([
       {
@@ -2609,6 +2887,7 @@ describe('RecommendationsService', () => {
       },
     ];
     recommendationRepository.find
+      .mockResolvedValueOnce(staleGeneratedChildren)
       .mockResolvedValueOnce(staleGeneratedChildren)
       .mockResolvedValueOnce(staleGeneratedChildren);
     recommendationRepository.findOne.mockResolvedValue(null);
