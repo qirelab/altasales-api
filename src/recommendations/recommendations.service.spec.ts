@@ -547,10 +547,36 @@ describe('RecommendationsService', () => {
       (item) => item.packageId === '292a8ec3-ea07-4326-9bb8-fed6056b3b20',
     );
     expect(crmStart.coveredServiceIds).toEqual(
-      expect.arrayContaining(crmStartServices.map((item) => item.id)),
+      expect.arrayContaining([
+        'catalog_name:интеграция мессенджера',
+        'catalog_name:интеграция почты',
+        'catalog_name:интеграция телефонии',
+      ]),
     );
   });
 
+  it('canonicalizes duplicate same-name package services before global deduplication', () => {
+    const { service } = createService();
+    const duplicateServices = [
+      { id: 'dashboard-uuid-1', name: 'Дашборд ОП', deletedAt: null },
+      { id: 'dashboard-uuid-2', name: 'Дашборд ОП', deletedAt: null },
+    ];
+    const canonicalService = {
+      id: 'canonical-dashboard-id',
+      name: 'Дашборд ОП',
+      deletedAt: null,
+    };
+
+    const getCoverage = (services: unknown[]) =>
+      (service as any).getPackageCoverageIds(services);
+
+    expect(getCoverage(duplicateServices)).toEqual([
+      'catalog_name:дашборд оп',
+    ]);
+    expect(getCoverage([canonicalService])).toEqual([
+      'catalog_name:дашборд оп',
+    ]);
+  });
   it('keeps only the fuller package when catalog names are duplicated', async () => {
     const { service, serviceRepository, packageRepository, relevanceRanker } =
       createService();
@@ -614,8 +640,8 @@ describe('RecommendationsService', () => {
       expect.objectContaining({
         packageId: 'complete-package-id',
         coveredServiceIds: expect.arrayContaining([
-          'recruitment-service-id',
-          'crm-setup-service-id',
+          'catalog_name:подбор менеджеров',
+          'catalog_name:настройка crm',
         ]),
       }),
     );
@@ -758,7 +784,7 @@ describe('RecommendationsService', () => {
       (item) => item.packageId === 'crm-silver-package-id',
     );
     expect(packageCandidate.coveredServiceIds).toEqual(
-      expect.arrayContaining(['inner-tz-service-id']),
+      expect.arrayContaining(['catalog_name:подготовка тз']),
     );
     expect(packageCandidate.coveredServiceIds).not.toEqual(
       expect.arrayContaining(['tech-spec-service-id', 'crm-audit-service-id']),
@@ -767,7 +793,7 @@ describe('RecommendationsService', () => {
       (item) => item.packageId === 'documents-package-id',
     );
     expect(documentsPackageCandidate.coveredServiceIds).toEqual(
-      expect.arrayContaining(['instruction-service-id']),
+      expect.arrayContaining(['catalog_name:рабочая инструкция мп']),
     );
     expect(documentsPackageCandidate.coveredServiceIds).not.toContain(
       'dashboard-service-id',
@@ -1454,7 +1480,7 @@ describe('RecommendationsService', () => {
         rationale: 'partial package match',
         diagnosticSignals: [],
         score: 30,
-        coveredServiceIds: ['service-a'],
+        coveredServiceIds: ['service-a', 'catalog_name:service a'],
       },
     ]);
 

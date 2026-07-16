@@ -993,10 +993,11 @@ export class RecommendationsService implements OnModuleInit {
     return this.uniqueIds(
       activeServices
         .filter((service) => !service.deletedAt)
-        .flatMap((service) => [
-          service.id,
-          ...this.getServiceCoverageKeys(service),
-        ]),
+        .map((service) =>
+          this.getServiceCoverageKeys(service).find((coverageKey) =>
+            coverageKey.startsWith('catalog_name:'),
+          ) ?? service.id,
+        ),
     );
   }
 
@@ -1474,26 +1475,7 @@ export class RecommendationsService implements OnModuleInit {
     const safeCoverageIds = coverageIds.filter(
       (coverageId) => !coverageId.startsWith('catalog_semantic:'),
     );
-    const canonicalIds: string[] = [];
-    const pendingRawIds: string[] = [];
-
-    safeCoverageIds.forEach((coverageId) => {
-      if (!coverageId.startsWith('catalog_name:')) {
-        pendingRawIds.push(coverageId);
-        return;
-      }
-
-      if (pendingRawIds.length === 0) {
-        canonicalIds.push(coverageId);
-        return;
-      }
-
-      canonicalIds.push(...pendingRawIds.slice(0, -1), coverageId);
-      pendingRawIds.length = 0;
-    });
-
-    canonicalIds.push(...pendingRawIds);
-    return this.uniqueIds(canonicalIds);
+    return this.uniqueIds(safeCoverageIds);
   }
 
   private async upsertGeneratedRecommendation(

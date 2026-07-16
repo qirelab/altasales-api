@@ -122,37 +122,9 @@ export function getCoverageRecommendationTargetId(
 
 export function getCoverageIds(item: CoverageRecommendationItem): Set<string> {
   const overlapIds = (item.coveredServiceIds ?? []).filter(isOverlapCoverageId);
-  const ids = item.packageId
-    ? canonicalizePackageCoverageIds(overlapIds)
-    : overlapIds;
+  const ids = overlapIds;
   if (ids.length === 0 && item.serviceId) ids.push(item.serviceId);
   return new Set(ids);
-}
-
-function canonicalizePackageCoverageIds(coverageIds: string[]): string[] {
-  const canonicalIds: string[] = [];
-  const pendingRawIds: string[] = [];
-
-  coverageIds.forEach((coverageId) => {
-    if (!coverageId.startsWith('catalog_name:')) {
-      pendingRawIds.push(coverageId);
-      return;
-    }
-
-    if (pendingRawIds.length === 0) {
-      canonicalIds.push(coverageId);
-      return;
-    }
-
-    // getPackageCoverageIds emits one raw service UUID followed by that
-    // service's exact-name keys. Keep UUIDs for preceding short-named
-    // services, while replacing only the UUID paired with this name key.
-    canonicalIds.push(...pendingRawIds.slice(0, -1), coverageId);
-    pendingRawIds.length = 0;
-  });
-
-  canonicalIds.push(...pendingRawIds);
-  return canonicalIds;
 }
 
 function getBlockedCoverageExceptTarget(
