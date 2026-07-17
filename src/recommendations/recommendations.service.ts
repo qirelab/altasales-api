@@ -7,7 +7,13 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import {
+  Brackets,
+  DataSource,
+  EntityManager,
+  IsNull,
+  Repository,
+} from 'typeorm';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { Order } from '../orders/entities/order.entity';
@@ -545,7 +551,10 @@ export class RecommendationsService implements OnModuleInit {
       });
 
       const saved = await recommendationRepository.save(recommendation);
-      if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+      if (
+        saved.packageId &&
+        saved.status === RecommendationStatus.Recommended
+      ) {
         await this.pruneReplaceableRecommendationsCoveredByPackage(
           saved.userId,
           saved.packageId,
@@ -593,8 +602,8 @@ export class RecommendationsService implements OnModuleInit {
         const recommendationRepository = manager.getRepository(Recommendation);
         const changedTarget = Boolean(
           target &&
-            (target.serviceId !== recommendation.serviceId ||
-              target.packageId !== recommendation.packageId),
+          (target.serviceId !== recommendation.serviceId ||
+            target.packageId !== recommendation.packageId),
         );
 
         if (changedTarget && target) {
@@ -612,7 +621,8 @@ export class RecommendationsService implements OnModuleInit {
         if (dto.orderId !== undefined) recommendation.orderId = dto.orderId;
         if (dto.status !== undefined) recommendation.status = dto.status;
         if (dto.priority !== undefined) recommendation.priority = dto.priority;
-        if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
+        if (dto.rationale !== undefined)
+          recommendation.rationale = dto.rationale;
 
         if (dto.dependencyIds) {
           recommendation.dependencyIds = await validateDependencyIds(
@@ -629,7 +639,10 @@ export class RecommendationsService implements OnModuleInit {
         }
 
         const saved = await recommendationRepository.save(recommendation);
-        if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+        if (
+          saved.packageId &&
+          saved.status === RecommendationStatus.Recommended
+        ) {
           await this.pruneReplaceableRecommendationsCoveredByPackage(
             saved.userId,
             saved.packageId,
@@ -670,16 +683,19 @@ export class RecommendationsService implements OnModuleInit {
     id: string,
     dependencyIds: string[],
   ): Promise<Recommendation> {
-    return this.withRecommendationMutation(id, async (manager, recommendation) => {
-      const recommendationRepository = manager.getRepository(Recommendation);
-      recommendation.dependencyIds = await validateDependencyIds(
-        recommendationRepository,
-        recommendation.id,
-        dependencyIds,
-        recommendation.userId,
-      );
-      return recommendationRepository.save(recommendation);
-    });
+    return this.withRecommendationMutation(
+      id,
+      async (manager, recommendation) => {
+        const recommendationRepository = manager.getRepository(Recommendation);
+        recommendation.dependencyIds = await validateDependencyIds(
+          recommendationRepository,
+          recommendation.id,
+          dependencyIds,
+          recommendation.userId,
+        );
+        return recommendationRepository.save(recommendation);
+      },
+    );
   }
   // ── Async generation jobs ─────────────────────────────────────────
 
@@ -763,7 +779,9 @@ export class RecommendationsService implements OnModuleInit {
           ranked,
           await this.findExistingRecommendationCoverage(dto.userId, manager),
         );
-        currentRanked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
+        currentRanked.sort((a, b) =>
+          this.compareGeneratedRecommendations(a, b),
+        );
         if (limit !== undefined) {
           currentRanked = currentRanked.slice(0, limit);
         }
@@ -806,22 +824,30 @@ export class RecommendationsService implements OnModuleInit {
   // ── Admin delete ──────────────────────────────────────────────────
 
   async removeForAdmin(id: string): Promise<void> {
-    await this.withRecommendationMutation(id, async (manager, recommendation) => {
-      const deleted = await this.deleteRecommendationIdsSafely(
-        recommendation.userId,
-        [id],
-        new Map(),
-        manager,
-      );
-      if (deleted.deletedIds.length === 0) {
-        const dependentIds = deleted.blockedBy.get(id) ?? [];
-        throw new ConflictException(
-          dependentIds.length > 0
-            ? 'Recommendation ' + id + ' is required by: ' + dependentIds.join(', ')
-            : 'Recommendation ' + id + ' cannot be deleted while preserving the dependency graph',
+    await this.withRecommendationMutation(
+      id,
+      async (manager, recommendation) => {
+        const deleted = await this.deleteRecommendationIdsSafely(
+          recommendation.userId,
+          [id],
+          new Map(),
+          manager,
         );
-      }
-    });
+        if (deleted.deletedIds.length === 0) {
+          const dependentIds = deleted.blockedBy.get(id) ?? [];
+          throw new ConflictException(
+            dependentIds.length > 0
+              ? 'Recommendation ' +
+                  id +
+                  ' is required by: ' +
+                  dependentIds.join(', ')
+              : 'Recommendation ' +
+                  id +
+                  ' cannot be deleted while preserving the dependency graph',
+          );
+        }
+      },
+    );
   }
   // ── Private helpers ───────────────────────────────────────────────
 
@@ -1111,10 +1137,11 @@ export class RecommendationsService implements OnModuleInit {
     return this.uniqueIds(
       activeServices
         .filter((service) => !service.deletedAt)
-        .map((service) =>
-          this.getServiceCoverageKeys(service).find((coverageKey) =>
-            coverageKey.startsWith('catalog_name:'),
-          ) ?? service.id,
+        .map(
+          (service) =>
+            this.getServiceCoverageKeys(service).find((coverageKey) =>
+              coverageKey.startsWith('catalog_name:'),
+            ) ?? service.id,
         ),
     );
   }
@@ -1460,8 +1487,8 @@ export class RecommendationsService implements OnModuleInit {
       ],
     });
 
-    const replaceableRecommendations = recommendations.filter((recommendation) =>
-      this.isReplaceableRecommendation(recommendation),
+    const replaceableRecommendations = recommendations.filter(
+      (recommendation) => this.isReplaceableRecommendation(recommendation),
     );
     if (replaceableRecommendations.length === 0) return new Set();
 
@@ -1491,7 +1518,10 @@ export class RecommendationsService implements OnModuleInit {
         [...covered].every((coverageId) => covering.has(coverageId))
       );
     };
-    const isPreferredCover = (coveringId: string, coveredId: string): boolean => {
+    const isPreferredCover = (
+      coveringId: string,
+      coveredId: string,
+    ): boolean => {
       const covering = coverageByRecommendationId.get(coveringId)?.size ?? 0;
       const covered = coverageByRecommendationId.get(coveredId)?.size ?? 0;
       if (covering !== covered) return covering > covered;
@@ -1951,7 +1981,9 @@ export class RecommendationsService implements OnModuleInit {
       ) {
         return false;
       }
-      const existingName = this.normalizeCatalogName(recommendation.package.name);
+      const existingName = this.normalizeCatalogName(
+        recommendation.package.name,
+      );
       if (existingName === targetName) return true;
 
       const existingCoverage = this.getSafeOverlapCoverageIds(
@@ -1964,7 +1996,9 @@ export class RecommendationsService implements OnModuleInit {
       return (
         targetCoverage.length > 0 &&
         existingCoverage.length === targetCoverage.length &&
-        targetCoverage.every((coverageId) => existingCoverage.includes(coverageId))
+        targetCoverage.every((coverageId) =>
+          existingCoverage.includes(coverageId),
+        )
       );
     });
   }
@@ -2097,20 +2131,21 @@ export class RecommendationsService implements OnModuleInit {
         source: true,
         diagnosticSignals: true,
       },
-      ...(manager
-        ? { lock: { mode: 'pessimistic_write' as const } }
-        : {}),
+      ...(manager ? { lock: { mode: 'pessimistic_write' as const } } : {}),
     });
     const recommendationsById = new Map(
-      recommendations.map((recommendation) => [recommendation.id, recommendation]),
+      recommendations.map((recommendation) => [
+        recommendation.id,
+        recommendation,
+      ]),
     );
     const requestedDeleteIds = new Set(
       uniqueIdsToDelete.filter((id) => {
         const recommendation = recommendationsById.get(id);
         return Boolean(
           recommendation &&
-            (!requireReplaceable ||
-              this.isReplaceableRecommendation(recommendation)),
+          (!requireReplaceable ||
+            this.isReplaceableRecommendation(recommendation)),
         );
       }),
     );
@@ -2200,7 +2235,10 @@ export class RecommendationsService implements OnModuleInit {
             continue;
           }
 
-          const replacementId = resolveReplacement(dependencyId, activeDeleteIds);
+          const replacementId = resolveReplacement(
+            dependencyId,
+            activeDeleteIds,
+          );
           if (!replacementId || replacementId === recommendation.id) {
             newlyProtectedIds.add(dependencyId);
             const dependents = blockedBy.get(dependencyId) ?? [];
@@ -2220,7 +2258,10 @@ export class RecommendationsService implements OnModuleInit {
       blockedBy.forEach((dependents, dependencyId) => {
         protectedBy.set(
           dependencyId,
-          this.uniqueIds([...(protectedBy.get(dependencyId) ?? []), ...dependents]),
+          this.uniqueIds([
+            ...(protectedBy.get(dependencyId) ?? []),
+            ...dependents,
+          ]),
         );
       });
 

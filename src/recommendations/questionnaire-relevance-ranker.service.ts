@@ -690,11 +690,7 @@ export class QuestionnaireRelevanceRankerService {
 
       const serviceNameText = this.normalize(service.name);
       if (
-        this.shouldSkipCandidateByAntiFilters(
-          service,
-          normalizedProfile,
-          stage,
-        )
+        this.shouldSkipCandidateByAntiFilters(service, normalizedProfile, stage)
       ) {
         continue;
       }
@@ -772,8 +768,8 @@ export class QuestionnaireRelevanceRankerService {
   private collapseAlternativeHiringFormats(
     items: GeneratedRecommendationItem[],
   ): GeneratedRecommendationItem[] {
-    const hasOffice = items.some(
-      (item) => this.matchesCatalogRecommendation(item, 'hiringOffice'),
+    const hasOffice = items.some((item) =>
+      this.matchesCatalogRecommendation(item, 'hiringOffice'),
     );
     if (!hasOffice) return items;
 
@@ -795,8 +791,9 @@ export class QuestionnaireRelevanceRankerService {
 
     const supersededNames = [
       ...getRecommendationCatalogAliases('callAnalysis'),
-      ...getRecommendationCatalogLegacyAliases('communicationQualityControl')
-        .filter((alias) => this.normalize(alias).includes('рубичат')),
+      ...getRecommendationCatalogLegacyAliases(
+        'communicationQualityControl',
+      ).filter((alias) => this.normalize(alias).includes('рубичат')),
     ].map((alias) => this.normalize(alias));
 
     return items.filter((item) => {
@@ -1023,7 +1020,10 @@ export class QuestionnaireRelevanceRankerService {
       let candidate: ServiceCandidate | null | undefined = candidateById.get(
         entry.id,
       );
-      if (candidate && usedTargetIds.has(this.getCandidateTargetId(candidate))) {
+      if (
+        candidate &&
+        usedTargetIds.has(this.getCandidateTargetId(candidate))
+      ) {
         candidate = undefined;
       }
       if (!candidate) {
@@ -1112,9 +1112,7 @@ export class QuestionnaireRelevanceRankerService {
     names: string[],
     usedTargetIds: Set<string>,
   ): ServiceCandidate | null {
-    const normalizedNames = new Set(
-      names.map((name) => this.normalize(name)),
-    );
+    const normalizedNames = new Set(names.map((name) => this.normalize(name)));
     return (
       services.find((service) => {
         const targetId = this.getCandidateTargetId(service);
@@ -1173,7 +1171,8 @@ export class QuestionnaireRelevanceRankerService {
     catalogKey: RecommendationCatalogKey,
   ): boolean {
     return (
-      this.getCandidateTargetId(service) === RECOMMENDATION_CATALOG[catalogKey].id ||
+      this.getCandidateTargetId(service) ===
+        RECOMMENDATION_CATALOG[catalogKey].id ||
       getRecommendationCatalogAliases(catalogKey).some((alias) =>
         serviceNameText.includes(this.normalize(alias)),
       )
@@ -1192,9 +1191,9 @@ export class QuestionnaireRelevanceRankerService {
       matcher.catalogKeys?.some((catalogKey) =>
         this.matchesCatalogCandidate(service, serviceNameText, catalogKey),
       ) ||
-        matcher.terms?.some((term) =>
-          serviceNameText.includes(this.normalize(term)),
-        ),
+      matcher.terms?.some((term) =>
+        serviceNameText.includes(this.normalize(term)),
+      ),
     );
   }
 
@@ -1266,13 +1265,28 @@ export class QuestionnaireRelevanceRankerService {
         'new sales department always includes AI call analysis',
       );
       if (profile.selectedComponents.includes('crm')) {
-        add(['ии анализ crm', 'анализ crm'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ CRM');
+        add(
+          ['ии анализ crm', 'анализ crm'],
+          AI_ANALYSIS_COMPONENT_POINTS,
+          'для нового ОП нужен ИИ-анализ CRM',
+        );
       }
       if (profile.selectedComponents.includes('salesDocuments')) {
-        add(['ии анализ документов', 'анализ документов'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ документов');
+        add(
+          ['ии анализ документов', 'анализ документов'],
+          AI_ANALYSIS_COMPONENT_POINTS,
+          'для нового ОП нужен ИИ-анализ документов',
+        );
       }
-      if (profile.selectedComponents.includes('telephony') || profile.selectedComponents.includes('callAnalysis')) {
-        add(['ии анализ звонков и менеджеров', 'анализ звонков и менеджеров'], AI_ANALYSIS_COMPONENT_POINTS, 'для нового ОП нужен ИИ-анализ звонков и менеджеров');
+      if (
+        profile.selectedComponents.includes('telephony') ||
+        profile.selectedComponents.includes('callAnalysis')
+      ) {
+        add(
+          ['ии анализ звонков и менеджеров', 'анализ звонков и менеджеров'],
+          AI_ANALYSIS_COMPONENT_POINTS,
+          'для нового ОП нужен ИИ-анализ звонков и менеджеров',
+        );
       }
     }
 
@@ -1389,8 +1403,18 @@ export class QuestionnaireRelevanceRankerService {
       ? String(profile.desiredResult.period ?? '')
       : String(profile.period ?? '');
     const normalized = this.normalize(raw);
-    if (['1m', '1 месяц', 'месяц', 'на месяц'].some((value) => normalized.includes(this.normalize(value)))) return '1m';
-    if (['3m', '3 месяца', 'три месяца', 'на 3 месяца'].some((value) => normalized.includes(this.normalize(value)))) return '3m';
+    if (
+      ['1m', '1 месяц', 'месяц', 'на месяц'].some((value) =>
+        normalized.includes(this.normalize(value)),
+      )
+    )
+      return '1m';
+    if (
+      ['3m', '3 месяца', 'три месяца', 'на 3 месяца'].some((value) =>
+        normalized.includes(this.normalize(value)),
+      )
+    )
+      return '3m';
     return normalized;
   }
 
@@ -1485,10 +1509,7 @@ export class QuestionnaireRelevanceRankerService {
     const duplicatedExistingComponent = existingComponents.find(
       (component) =>
         !selectedComponents.includes(component) &&
-        !(
-          component === 'crm' &&
-          crmStartClosesRequestedIntegrations
-        ) &&
+        !(component === 'crm' && crmStartClosesRequestedIntegrations) &&
         this.matchesExistingComponentService(service, serviceText, component),
     );
     if (duplicatedExistingComponent) {
@@ -1536,41 +1557,53 @@ export class QuestionnaireRelevanceRankerService {
       (this.matchesCatalogCandidate(service, serviceText, 'aiSalesHead') ||
         this.matchesCatalogCandidate(service, serviceText, 'salesHeadFocus') ||
         this.matchesCatalogCandidate(service, serviceText, 'crmAudit') ||
-        this.matchesCatalogCandidate(service, serviceText, 'crmDealsAnalysis') ||
+        this.matchesCatalogCandidate(
+          service,
+          serviceText,
+          'crmDealsAnalysis',
+        ) ||
         this.matchesCatalogCandidate(service, serviceText, 'crmBronze') ||
         this.includesAny(serviceText, [
-        'ии роп',
-        'роп-фокус',
-        'топ-фокус',
-        'коммерческий директор',
-        'финансовый директор',
-        'эксперт-фокус',
-        'аудит crm',
-        'настройка воронок сделок',
-        'подготовка технического задания',
-        'отчет по ведению сделок',
-        'отчёт по ведению сделок',
-        'отчет с оценкой проанализированных переписок',
-        'отчёт с оценкой проанализированных переписок',
-        'аналитический отчет по отказным сделкам',
-        'аналитический отчёт по отказным сделкам',
-        'настройка отчета',
-        'настройка отчёта',
-        'на контроле',
-        'crm бронза',
-        'crm серебро',
-        'crm золото',
-        'стандарт online pro',
-        'офис pro',
-      ]))
+          'ии роп',
+          'роп-фокус',
+          'топ-фокус',
+          'коммерческий директор',
+          'финансовый директор',
+          'эксперт-фокус',
+          'аудит crm',
+          'настройка воронок сделок',
+          'подготовка технического задания',
+          'отчет по ведению сделок',
+          'отчёт по ведению сделок',
+          'отчет с оценкой проанализированных переписок',
+          'отчёт с оценкой проанализированных переписок',
+          'аналитический отчет по отказным сделкам',
+          'аналитический отчёт по отказным сделкам',
+          'настройка отчета',
+          'настройка отчёта',
+          'на контроле',
+          'crm бронза',
+          'crm серебро',
+          'crm золото',
+          'стандарт online pro',
+          'офис pro',
+        ]))
     ) {
       return 'услуга рассчитана на более зрелый отдел продаж';
     }
 
     if (
       stage === 'advanced_department' &&
-      (this.matchesCatalogCandidate(service, serviceText, 'salesDepartmentFromZero') ||
-        (this.matchesCatalogCandidate(service, serviceText, 'trainingOneMonth') &&
+      (this.matchesCatalogCandidate(
+        service,
+        serviceText,
+        'salesDepartmentFromZero',
+      ) ||
+        (this.matchesCatalogCandidate(
+          service,
+          serviceText,
+          'trainingOneMonth',
+        ) &&
           !explicitlyRequestedOneMonthTraining) ||
         (this.includesAny(desiredText, ['crm']) &&
           ((this.matchesCatalogCandidate(service, serviceText, 'crmStart') &&
@@ -1589,25 +1622,27 @@ export class QuestionnaireRelevanceRankerService {
       (this.matchesCatalogCandidate(service, serviceText, 'aiSalesHead') ||
         this.matchesCatalogCandidate(service, serviceText, 'salesHeadFocus') ||
         this.matchesCatalogCandidate(service, serviceText, 'salesHead') ||
-        this.includesAny(serviceText, [
-        'управление действующим оп',
-      ]))
+        this.includesAny(serviceText, ['управление действующим оп']))
     ) {
       return 'РОП не выбран в анкете базового отдела';
     }
 
     if (
       stage === 'basic_department' &&
-      (this.matchesCatalogCandidate(service, serviceText, 'salesDepartmentFromZero') ||
+      (this.matchesCatalogCandidate(
+        service,
+        serviceText,
+        'salesDepartmentFromZero',
+      ) ||
         this.includesAny(serviceText, [
-        'базовая настройка работы отдела продаж',
-        'crm серебро',
-        'crm золото',
-        'топ-фокус',
-        'коммерческий директор',
-        'финансовый директор',
-        'hrd',
-      ]))
+          'базовая настройка работы отдела продаж',
+          'crm серебро',
+          'crm золото',
+          'топ-фокус',
+          'коммерческий директор',
+          'финансовый директор',
+          'hrd',
+        ]))
     ) {
       return 'услуга не соответствует текущей стадии отдела продаж';
     }
@@ -1621,11 +1656,11 @@ export class QuestionnaireRelevanceRankerService {
       ]) &&
       (this.matchesCatalogCandidate(service, serviceText, 'hiringOffice') ||
         this.includesAny(serviceText, [
-        'скрининг',
-        'стандарт online',
-        'профиль вакансии',
-        'портрет соискателя',
-      ]))
+          'скрининг',
+          'стандарт online',
+          'профиль вакансии',
+          'портрет соискателя',
+        ]))
     ) {
       return 'подбор персонала не выбран в анкете зрелого отдела';
     }
@@ -1638,9 +1673,7 @@ export class QuestionnaireRelevanceRankerService {
     profile: NormalizedQuestionnaireProfile,
     stage: QuestionnaireStage,
   ): boolean {
-    return Boolean(
-      this.getAntiRecommendationReason(service, stage, profile),
-    );
+    return Boolean(this.getAntiRecommendationReason(service, stage, profile));
   }
 
   private applyDiversity(
@@ -1736,13 +1769,7 @@ export class QuestionnaireRelevanceRankerService {
       );
 
       if (!service) continue;
-      if (
-        this.shouldSkipCandidateByAntiFilters(
-          service,
-          profile,
-          stage,
-        )
-      ) {
+      if (this.shouldSkipCandidateByAntiFilters(service, profile, stage)) {
         continue;
       }
 

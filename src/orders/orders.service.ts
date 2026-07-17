@@ -1,9 +1,21 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ExpertsService } from '../experts/experts.service';
 import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
 import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import {
+  Brackets,
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  Repository,
+} from 'typeorm';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { PaymentService } from '../payment/payment.service';
 import { Service } from '../services/entities/service.entity';
@@ -119,9 +131,11 @@ export class OrdersService {
     private readonly cartService: CartService,
     private readonly orderNotificationService: OrderNotificationService,
     private readonly recommendationUserLockService: RecommendationUserLockService,
-  ) { }
+  ) {}
 
-  private mapOrderStatusToRecommendationStatus(status: OrderStatus): RecommendationStatus {
+  private mapOrderStatusToRecommendationStatus(
+    status: OrderStatus,
+  ): RecommendationStatus {
     switch (status) {
       case OrderStatus.InProgress:
         return RecommendationStatus.InProgress;
@@ -154,8 +168,11 @@ export class OrdersService {
       });
       if (!recommendation) return;
 
-      recommendation.status = this.mapOrderStatusToRecommendationStatus(order.status);
-      recommendation.orderId = order.status === OrderStatus.Cancelled ? null : order.id;
+      recommendation.status = this.mapOrderStatusToRecommendationStatus(
+        order.status,
+      );
+      recommendation.orderId =
+        order.status === OrderStatus.Cancelled ? null : order.id;
       await recommendationRepo.save(recommendation);
     };
 
@@ -195,11 +212,17 @@ export class OrdersService {
     }
   }
 
-  private async hydrateDeletedExpertOfferings(subItems: OrderItemSubItem[]): Promise<void> {
+  private async hydrateDeletedExpertOfferings(
+    subItems: OrderItemSubItem[],
+  ): Promise<void> {
     const offeringIds = [
       ...new Set(
         subItems
-          .filter((subItem) => subItem.expertPositionOfferingId && !subItem.expertPositionOffering)
+          .filter(
+            (subItem) =>
+              subItem.expertPositionOfferingId &&
+              !subItem.expertPositionOffering,
+          )
           .map((subItem) => subItem.expertPositionOfferingId!),
       ),
     ];
@@ -211,7 +234,9 @@ export class OrdersService {
       where: { id: In(offeringIds) },
       withDeleted: true,
     });
-    const offeringById = new Map(offerings.map((offering) => [offering.id, offering]));
+    const offeringById = new Map(
+      offerings.map((offering) => [offering.id, offering]),
+    );
 
     for (const subItem of subItems) {
       if (subItem.expertPositionOfferingId && !subItem.expertPositionOffering) {
@@ -223,17 +248,24 @@ export class OrdersService {
     }
   }
 
-  private async hydrateDeletedExpertOfferingsForOrders(orders: Order[]): Promise<void> {
+  private async hydrateDeletedExpertOfferingsForOrders(
+    orders: Order[],
+  ): Promise<void> {
     const subItems = orders.flatMap((order) => order.item?.subItems ?? []);
     await this.hydrateDeletedExpertOfferings(subItems);
   }
 
   private async attachExecutorImagesToOrders(orders: Order[]): Promise<void> {
-    const executorUserIds = [...new Set(
-      orders
-        .map((order) => order.item?.executorUserId ?? order.item?.executor?.id ?? null)
-        .filter((id): id is string => Boolean(id)),
-    )];
+    const executorUserIds = [
+      ...new Set(
+        orders
+          .map(
+            (order) =>
+              order.item?.executorUserId ?? order.item?.executor?.id ?? null,
+          )
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
     if (!executorUserIds.length) return;
 
     const profiles = await this.expertProfileRepository.find({
@@ -250,7 +282,9 @@ export class OrdersService {
       .select('service."userId"', 'userId')
       .addSelect('MAX(service.image)', 'image')
       .where('service."userId" IN (:...executorUserIds)', { executorUserIds })
-      .andWhere('service.type = :contractorType', { contractorType: ServiceType.Contractor })
+      .andWhere('service.type = :contractorType', {
+        contractorType: ServiceType.Contractor,
+      })
       .andWhere('service."deletedAt" IS NULL')
       .andWhere('service.image IS NOT NULL')
       .groupBy('service."userId"')
@@ -263,7 +297,9 @@ export class OrdersService {
     });
 
     orders.forEach((order) => {
-      const executor = order.item?.executor as (OrderItem['executor'] & { image?: string | null }) | undefined;
+      const executor = order.item?.executor as
+        | (OrderItem['executor'] & { image?: string | null })
+        | undefined;
       const executorUserId = order.item?.executorUserId ?? executor?.id;
       if (!executor || !executorUserId) return;
       executor.image = imageByUserId.get(executorUserId) ?? null;
@@ -284,54 +320,63 @@ export class OrdersService {
       user: order.user,
       item: order.item
         ? {
-          id: order.item.id,
-          orderId: order.item.orderId,
-          serviceId: order.item.serviceId,
-          service: order.item.service,
-          packageId: order.item.packageId,
-          package: order.item.package,
-          expertPositionId: order.item.expertPositionId,
-          expertPosition: order.item.expertPosition,
-          executorUserId: order.item.executorUserId,
-          executor: order.item.executor,
-          hours: order.item.hours,
-          amount: order.item.amount,
-          status: order.item.status,
-          subItems: (order.item.subItems ?? []).map((subItem) => ({
-            id: subItem.id,
-            serviceId: subItem.serviceId,
-            service: subItem.service,
-            expertPositionOfferingId: subItem.expertPositionOfferingId,
-            expertPositionOffering: subItem.expertPositionOffering,
-            unitPrice: subItem.unitPrice != null ? Number(subItem.unitPrice) : null,
-            status: subItem.status,
-            files: (subItem.files ?? []).map((file): OrderFileDto => ({
-              id: file.id,
-              name: file.originalName,
-              size: file.size,
-              type: file.mimeType,
-              source: file.source ?? FileSource.CLIENT,
+            id: order.item.id,
+            orderId: order.item.orderId,
+            serviceId: order.item.serviceId,
+            service: order.item.service,
+            packageId: order.item.packageId,
+            package: order.item.package,
+            expertPositionId: order.item.expertPositionId,
+            expertPosition: order.item.expertPosition,
+            executorUserId: order.item.executorUserId,
+            executor: order.item.executor,
+            hours: order.item.hours,
+            amount: order.item.amount,
+            status: order.item.status,
+            subItems: (order.item.subItems ?? []).map((subItem) => ({
+              id: subItem.id,
+              serviceId: subItem.serviceId,
+              service: subItem.service,
+              expertPositionOfferingId: subItem.expertPositionOfferingId,
+              expertPositionOffering: subItem.expertPositionOffering,
+              unitPrice:
+                subItem.unitPrice != null ? Number(subItem.unitPrice) : null,
+              status: subItem.status,
+              files: (subItem.files ?? []).map(
+                (file): OrderFileDto => ({
+                  id: file.id,
+                  name: file.originalName,
+                  size: file.size,
+                  type: file.mimeType,
+                  source: file.source ?? FileSource.CLIENT,
+                }),
+              ),
             })),
-          })),
-          files: (order.item.files ?? [])
-            .filter((file) => file.orderItemSubItemId === null)
-            .map((file): OrderFileDto => ({
-              id: file.id,
-              name: file.originalName,
-              size: file.size,
-              type: file.mimeType,
-              source: file.source ?? FileSource.CLIENT,
-            })),
-        }
+            files: (order.item.files ?? [])
+              .filter((file) => file.orderItemSubItemId === null)
+              .map(
+                (file): OrderFileDto => ({
+                  id: file.id,
+                  name: file.originalName,
+                  size: file.size,
+                  type: file.mimeType,
+                  source: file.source ?? FileSource.CLIENT,
+                }),
+              ),
+          }
         : null,
     };
   }
 
-  private normalizeStatusForPackageAggregation(status: OrderStatus): OrderStatus {
+  private normalizeStatusForPackageAggregation(
+    status: OrderStatus,
+  ): OrderStatus {
     return status === OrderStatus.PendingPayment ? OrderStatus.Planned : status;
   }
 
-  private calculatePackageItemStatusFromSubItems(subItems: OrderItemSubItem[]): OrderStatus {
+  private calculatePackageItemStatusFromSubItems(
+    subItems: OrderItemSubItem[],
+  ): OrderStatus {
     const normalized = subItems.map((subItem) =>
       this.normalizeStatusForPackageAggregation(subItem.status),
     );
@@ -340,7 +385,9 @@ export class OrdersService {
       return OrderStatus.Cancelled;
     }
 
-    const nonCancelled = normalized.filter((status) => status !== OrderStatus.Cancelled);
+    const nonCancelled = normalized.filter(
+      (status) => status !== OrderStatus.Cancelled,
+    );
     if (nonCancelled.length === 0) {
       return OrderStatus.Cancelled;
     }
@@ -351,8 +398,12 @@ export class OrdersService {
       return OrderStatus.InProgress;
     }
 
-    const hasCompleted = nonCancelled.some((status) => status === OrderStatus.Completed);
-    const hasPlanned = nonCancelled.some((status) => status === OrderStatus.Planned);
+    const hasCompleted = nonCancelled.some(
+      (status) => status === OrderStatus.Completed,
+    );
+    const hasPlanned = nonCancelled.some(
+      (status) => status === OrderStatus.Planned,
+    );
     if (hasCompleted && hasPlanned) {
       return OrderStatus.InProgress;
     }
@@ -363,7 +414,10 @@ export class OrdersService {
     return OrderStatus.InProgress;
   }
 
-  async checkout(dto: CheckoutDto, userId: string): Promise<{
+  async checkout(
+    dto: CheckoutDto,
+    userId: string,
+  ): Promise<{
     orderId: string;
     orderIds: string[];
     status: OrderStatus;
@@ -381,7 +435,10 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
-      await this.recommendationUserLockService.lockUser(userId, queryRunner.manager);
+      await this.recommendationUserLockService.lockUser(
+        userId,
+        queryRunner.manager,
+      );
       const createdOrders: Order[] = [];
       let totalAmount = 0;
       let giftEligibleAmount = 0;
@@ -410,7 +467,9 @@ export class OrdersService {
           });
           resolvedAmount = expert.amount * quantity;
           if (Math.abs(resolvedAmount - Number(checkoutItem.amount)) > 0.01) {
-            throw new BadRequestException('Order amount does not match selected offering prices');
+            throw new BadRequestException(
+              'Order amount does not match selected offering prices',
+            );
           }
 
           const order = this.orderRepository.create({
@@ -434,20 +493,27 @@ export class OrdersService {
           });
           await queryRunner.manager.save(OrderItem, item);
 
-          const offeringIds = expert.offeringLines.map((line) => line.offeringId);
+          const offeringIds = expert.offeringLines.map(
+            (line) => line.offeringId,
+          );
           const offerings = await this.expertOfferingRepository.find({
             where: { id: In(offeringIds), positionId: expert.positionId },
           });
           const priceByOfferingId = new Map(
-            expert.offeringLines.map((line) => [line.offeringId, line.unitPrice]),
+            expert.offeringLines.map((line) => [
+              line.offeringId,
+              line.unitPrice,
+            ]),
           );
-          const subItems = offerings.map((offering) => this.orderItemSubItemRepository.create({
-            orderItemId: item.id,
-            expertPositionOfferingId: offering.id,
-            serviceId: null,
-            unitPrice: priceByOfferingId.get(offering.id)! * quantity,
-            status: OrderStatus.PendingPayment,
-          }));
+          const subItems = offerings.map((offering) =>
+            this.orderItemSubItemRepository.create({
+              orderItemId: item.id,
+              expertPositionOfferingId: offering.id,
+              serviceId: null,
+              unitPrice: priceByOfferingId.get(offering.id)! * quantity,
+              status: OrderStatus.PendingPayment,
+            }),
+          );
           if (subItems.length > 0) {
             await queryRunner.manager.save(OrderItemSubItem, subItems);
           }
@@ -468,7 +534,9 @@ export class OrdersService {
             where: { id: checkoutItem.serviceId, deletedAt: IsNull() },
           });
           if (!resolvedService) {
-            throw new NotFoundException(`Service with id ${checkoutItem.serviceId} not found`);
+            throw new NotFoundException(
+              `Service with id ${checkoutItem.serviceId} not found`,
+            );
           }
         }
         if (checkoutItem.packageId) {
@@ -477,7 +545,9 @@ export class OrdersService {
             relations: ['services'],
           });
           if (!resolvedPackage) {
-            throw new NotFoundException(`Package with id ${checkoutItem.packageId} not found`);
+            throw new NotFoundException(
+              `Package with id ${checkoutItem.packageId} not found`,
+            );
           }
           resolvedAmount = Number(resolvedPackage.price);
         }
@@ -507,27 +577,35 @@ export class OrdersService {
         await queryRunner.manager.save(OrderItem, item);
         if (checkoutItem.packageId) {
           const packageServices = resolvedPackage?.services ?? [];
-          const subItems = packageServices.map((service) => this.orderItemSubItemRepository.create({
-            orderItemId: item.id,
-            serviceId: service.id,
-            status: OrderStatus.PendingPayment,
-          }));
+          const subItems = packageServices.map((service) =>
+            this.orderItemSubItemRepository.create({
+              orderItemId: item.id,
+              serviceId: service.id,
+              status: OrderStatus.PendingPayment,
+            }),
+          );
           if (subItems.length > 0) {
             await queryRunner.manager.save(OrderItemSubItem, subItems);
           }
         }
         if (checkoutItem.serviceId || checkoutItem.packageId) {
-          await this.syncRecommendationForOrder(order, {
-            serviceId: checkoutItem.serviceId ?? null,
-            packageId: checkoutItem.packageId ?? null,
-          }, queryRunner.manager);
+          await this.syncRecommendationForOrder(
+            order,
+            {
+              serviceId: checkoutItem.serviceId ?? null,
+              packageId: checkoutItem.packageId ?? null,
+            },
+            queryRunner.manager,
+          );
         }
         totalAmount += resolvedAmount;
         createdOrders.push(order);
       }
 
       if (Math.abs(totalAmount - Number(dto.amount)) > 0.01) {
-        throw new BadRequestException('Order total amount does not match item amounts');
+        throw new BadRequestException(
+          'Order total amount does not match item amounts',
+        );
       }
 
       const orderIds = createdOrders.map((order) => order.id);
@@ -595,18 +673,19 @@ export class OrdersService {
         };
       }
 
-      const { paymentUrl, params } = await this.paymentService.createWithManager(
-        {
-          orderId: primaryOrderId,
-          orderIds,
-          outSum: totalAmount,
-          description:
-            orderIds.length === 1
-              ? `Оплата заказа №${primaryOrderId}`
-              : `Оплата заказов (${orderIds.length} шт.)`,
-        },
-        queryRunner.manager,
-      );
+      const { paymentUrl, params } =
+        await this.paymentService.createWithManager(
+          {
+            orderId: primaryOrderId,
+            orderIds,
+            outSum: totalAmount,
+            description:
+              orderIds.length === 1
+                ? `Оплата заказа №${primaryOrderId}`
+                : `Оплата заказов (${orderIds.length} шт.)`,
+          },
+          queryRunner.manager,
+        );
 
       await queryRunner.commitTransaction();
       return {
@@ -628,7 +707,12 @@ export class OrdersService {
   async findByUserId(
     userId: string,
     query: GetOrdersQueryDto,
-  ): Promise<{ data: OrderDto[]; total: number; offset: number; limit: number }> {
+  ): Promise<{
+    data: OrderDto[];
+    total: number;
+    offset: number;
+    limit: number;
+  }> {
     const { status, offset = 0, limit = 20 } = query;
     const where: { userId: string; status?: OrderStatus } = { userId };
     if (status) where.status = status;
@@ -642,13 +726,23 @@ export class OrdersService {
     });
     await this.hydrateDeletedExpertOfferingsForOrders(data);
     await this.attachExecutorImagesToOrders(data);
-    return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
+    return {
+      data: data.map((order) => this.transformOrderFiles(order)),
+      total,
+      offset,
+      limit,
+    };
   }
 
   async findAssignedToExpert(
     expertUserId: string,
     query: GetOrdersQueryDto,
-  ): Promise<{ data: OrderDto[]; total: number; offset: number; limit: number }> {
+  ): Promise<{
+    data: OrderDto[];
+    total: number;
+    offset: number;
+    limit: number;
+  }> {
     const { status, offset = 0, limit = 20 } = query;
 
     const baseQb = this.orderRepository
@@ -657,12 +751,13 @@ export class OrdersService {
       .leftJoin('item.service', 'service')
       .where(
         new Brackets((qb) => {
-          qb
-            .where('service.type = :contractorType AND service."userId" = :expertUserId', {
+          qb.where(
+            'service.type = :contractorType AND service."userId" = :expertUserId',
+            {
               contractorType: ServiceType.Contractor,
               expertUserId,
-            })
-            .orWhere('item."executorUserId" = :expertUserId', { expertUserId });
+            },
+          ).orWhere('item."executorUserId" = :expertUserId', { expertUserId });
         }),
       );
 
@@ -699,7 +794,12 @@ export class OrdersService {
 
     await this.hydrateDeletedExpertOfferingsForOrders(data);
     await this.attachExecutorImagesToOrders(data);
-    return { data: data.map((order) => this.transformOrderFiles(order)), total, offset, limit };
+    return {
+      data: data.map((order) => this.transformOrderFiles(order)),
+      total,
+      offset,
+      limit,
+    };
   }
 
   async findAllForAdmin(query: GetAdminOrdersQueryDto): Promise<{
@@ -719,8 +819,7 @@ export class OrdersService {
       const searchPattern = `%${search}%`;
       baseQb.andWhere(
         new Brackets((qb) => {
-          qb
-            .where('o.id::text ILIKE :search', { search: searchPattern })
+          qb.where('o.id::text ILIKE :search', { search: searchPattern })
             .orWhere('o.status ILIKE :search', { search: searchPattern })
             .orWhere('u.name ILIKE :search', { search: searchPattern })
             .orWhere('u."lastName" ILIKE :search', { search: searchPattern })
@@ -759,14 +858,22 @@ export class OrdersService {
       .leftJoin('item.service', 'svc')
       .leftJoin(ServicePackage, 'pkg', 'pkg.id = item."packageId"')
       .leftJoin(
-        (subQb) => subQb
-          .from(OrderItemSubItem, 'sub')
-          .leftJoin(ExpertPositionOffering, 'epo', 'epo.id = sub."expertPositionOfferingId"')
-          .select('sub."orderItemId"', 'orderItemId')
-          .addSelect('COUNT(sub.id)', 'offeringsCount')
-          .addSelect(`STRING_AGG(epo.name, ', ' ORDER BY epo.name)`, 'offeringNames')
-          .where('sub."expertPositionOfferingId" IS NOT NULL')
-          .groupBy('sub."orderItemId"'),
+        (subQb) =>
+          subQb
+            .from(OrderItemSubItem, 'sub')
+            .leftJoin(
+              ExpertPositionOffering,
+              'epo',
+              'epo.id = sub."expertPositionOfferingId"',
+            )
+            .select('sub."orderItemId"', 'orderItemId')
+            .addSelect('COUNT(sub.id)', 'offeringsCount')
+            .addSelect(
+              `STRING_AGG(epo.name, ', ' ORDER BY epo.name)`,
+              'offeringNames',
+            )
+            .where('sub."expertPositionOfferingId" IS NOT NULL')
+            .groupBy('sub."orderItemId"'),
         'exp_sub',
         'exp_sub."orderItemId" = item.id',
       )
@@ -873,7 +980,10 @@ export class OrdersService {
     return this.orderRepository.save(order);
   }
 
-  async updateStatusForAdmin(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+  async updateStatusForAdmin(
+    id: string,
+    dto: UpdateOrderStatusDto,
+  ): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id },
       relations: ['item'],
@@ -891,14 +1001,21 @@ export class OrdersService {
     order.status = dto.status;
     const savedOrder = await this.orderRepository.save(order);
     if (order.item?.serviceId) {
-      await this.syncRecommendationForOrder(savedOrder, { serviceId: order.item.serviceId });
+      await this.syncRecommendationForOrder(savedOrder, {
+        serviceId: order.item.serviceId,
+      });
     } else if (order.item?.packageId) {
-      await this.syncRecommendationForOrder(savedOrder, { packageId: order.item.packageId });
+      await this.syncRecommendationForOrder(savedOrder, {
+        packageId: order.item.packageId,
+      });
     }
     return savedOrder;
   }
 
-  async updateItemStatusForAdmin(itemId: string, status: OrderStatus): Promise<OrderItem> {
+  async updateItemStatusForAdmin(
+    itemId: string,
+    status: OrderStatus,
+  ): Promise<OrderItem> {
     const item = await this.orderItemRepository.findOne({
       where: { id: itemId },
       relations: ['order', 'subItems'],
@@ -908,14 +1025,18 @@ export class OrdersService {
     }
     this.assertOrderNotPendingPaymentForManualStatusChange(item.order);
     if (item.packageId || item.expertPositionId) {
-      throw new BadRequestException('Для составного заказа используйте смену статуса по каждой услуге');
+      throw new BadRequestException(
+        'Для составного заказа используйте смену статуса по каждой услуге',
+      );
     }
 
     item.status = status;
     const savedItem = await this.orderItemRepository.save(item);
 
     if (savedItem.serviceId) {
-      await this.syncRecommendationForOrder(savedItem.order, { serviceId: savedItem.serviceId });
+      await this.syncRecommendationForOrder(savedItem.order, {
+        serviceId: savedItem.serviceId,
+      });
     }
 
     return savedItem;
@@ -936,14 +1057,21 @@ export class OrdersService {
 
       const item = await itemRepo.findOne({
         where: { id: itemId },
-        relations: ['order', 'subItems', 'subItems.service', 'subItems.expertPositionOffering'],
+        relations: [
+          'order',
+          'subItems',
+          'subItems.service',
+          'subItems.expertPositionOffering',
+        ],
       });
       if (!item) {
         throw new NotFoundException(`Order item with id ${itemId} not found`);
       }
       this.assertOrderNotPendingPaymentForManualStatusChange(item.order);
       if (!item.packageId && !item.expertPositionId) {
-        throw new BadRequestException('Эта позиция заказа не является пакетом или заказом эксперта');
+        throw new BadRequestException(
+          'Эта позиция заказа не является пакетом или заказом эксперта',
+        );
       }
       if (!item.subItems.length) {
         throw new BadRequestException('В заказе нет вложенных услуг');
@@ -951,36 +1079,51 @@ export class OrdersService {
 
       const subItem = item.subItems.find((entry) => entry.id === subItemId);
       if (!subItem) {
-        throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
+        throw new NotFoundException(
+          `Order sub-item with id ${subItemId} not found`,
+        );
       }
 
-      await this.recommendationUserLockService.lockUser(item.order.userId, queryRunner.manager);
+      await this.recommendationUserLockService.lockUser(
+        item.order.userId,
+        queryRunner.manager,
+      );
 
       await this.hydrateDeletedExpertOfferings(item.subItems);
 
       await subItemRepo.update({ id: subItemId }, { status });
       subItem.status = status;
 
-      const recalculatedStatus = this.calculatePackageItemStatusFromSubItems(item.subItems);
+      const recalculatedStatus = this.calculatePackageItemStatusFromSubItems(
+        item.subItems,
+      );
       const prevStatus = item.status;
       await itemRepo.update({ id: itemId }, { status: recalculatedStatus });
       item.status = recalculatedStatus;
 
       const orderRepo = queryRunner.manager.getRepository(Order);
-      const parentOrder = await orderRepo.findOne({ where: { id: item.orderId } });
+      const parentOrder = await orderRepo.findOne({
+        where: { id: item.orderId },
+      });
       if (parentOrder && parentOrder.status !== recalculatedStatus) {
         parentOrder.status = recalculatedStatus;
         await orderRepo.save(parentOrder);
       }
 
       if (prevStatus !== recalculatedStatus) {
-        const recommendation = await queryRunner.manager.getRepository(Recommendation).findOne({
-          where: { orderId: item.orderId },
-        });
+        const recommendation = await queryRunner.manager
+          .getRepository(Recommendation)
+          .findOne({
+            where: { orderId: item.orderId },
+          });
         if (recommendation) {
-          recommendation.status = this.mapOrderStatusToRecommendationStatus(recalculatedStatus);
-          recommendation.orderId = recalculatedStatus === OrderStatus.Cancelled ? null : item.orderId;
-          await queryRunner.manager.getRepository(Recommendation).save(recommendation);
+          recommendation.status =
+            this.mapOrderStatusToRecommendationStatus(recalculatedStatus);
+          recommendation.orderId =
+            recalculatedStatus === OrderStatus.Cancelled ? null : item.orderId;
+          await queryRunner.manager
+            .getRepository(Recommendation)
+            .save(recommendation);
         }
       }
 

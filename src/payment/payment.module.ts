@@ -26,4 +26,4 @@ import { RecommendationsModule } from '../recommendations/recommendations.module
   providers: [PaymentService, RobokassaService],
   exports: [PaymentService],
 })
-export class PaymentModule { }
+export class PaymentModule {}

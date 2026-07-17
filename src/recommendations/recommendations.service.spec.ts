@@ -640,7 +640,8 @@ describe('RecommendationsService', () => {
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
   it('rechecks recommendation coverage after acquiring the user lock', async () => {
-    const { service, recommendationRepository, relevanceRanker } = createService();
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
     recommendationRepository.find.mockResolvedValue([
       {
         id: 'manual-package-recommendation-id',
@@ -652,7 +653,14 @@ describe('RecommendationsService', () => {
         orderId: null,
         package: {
           id: 'manual-package-id',
-          services: [{ id: 'service-id', name: 'CRM setup', isHidden: false, deletedAt: null }],
+          services: [
+            {
+              id: 'service-id',
+              name: 'CRM setup',
+              isHidden: false,
+              deletedAt: null,
+            },
+          ],
         },
       },
     ]);
@@ -705,7 +713,8 @@ describe('RecommendationsService', () => {
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
   it('updates user status from a fresh locked recommendation row', async () => {
-    const { service, recommendationRepository, recommendationUserLockService } = createService();
+    const { service, recommendationRepository, recommendationUserLockService } =
+      createService();
     const recommendation = {
       id: 'status-recommendation-id',
       userId,
@@ -733,7 +742,8 @@ describe('RecommendationsService', () => {
   });
 
   it('updates dependencies through the same user-locked transaction', async () => {
-    const { service, recommendationRepository, recommendationUserLockService } = createService();
+    const { service, recommendationRepository, recommendationUserLockService } =
+      createService();
     const recommendation = {
       id: 'dependency-update-recommendation-id',
       userId,
@@ -751,7 +761,8 @@ describe('RecommendationsService', () => {
   });
 
   it('re-reads the admin recommendation after locking before applying a patch', async () => {
-    const { service, recommendationRepository, recommendationUserLockService } = createService();
+    const { service, recommendationRepository, recommendationUserLockService } =
+      createService();
     const snapshot = {
       id: 'admin-patch-recommendation-id',
       userId,
@@ -902,10 +913,9 @@ describe('RecommendationsService', () => {
       },
     ];
 
-    const result = (service as any).filterPackageCoveredStandaloneRecommendations(
-      rows,
-      packages,
-    );
+    const result = (
+      service as any
+    ).filterPackageCoveredStandaloneRecommendations(rows, packages);
 
     expect(result.map((row: { id: string }) => row.id)).toEqual([
       'completed-package-recommendation-id',
@@ -1240,9 +1250,7 @@ describe('RecommendationsService', () => {
     const getCoverage = (services: unknown[]) =>
       (service as any).getPackageCoverageIds(services);
 
-    expect(getCoverage(duplicateServices)).toEqual([
-      'catalog_name:дашборд оп',
-    ]);
+    expect(getCoverage(duplicateServices)).toEqual(['catalog_name:дашборд оп']);
     expect(getCoverage([canonicalService])).toEqual([
       'catalog_name:дашборд оп',
     ]);
@@ -1347,7 +1355,9 @@ describe('RecommendationsService', () => {
     ]);
 
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe(RECOMMENDATION_CATALOG.salesDepartmentFromZero.id);
+    expect(result[0].id).toBe(
+      RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+    );
   });
 
   it('adds logical duplicate services to package coverage', async () => {
@@ -2438,9 +2448,9 @@ describe('RecommendationsService', () => {
       completePackage,
     ]);
 
-    const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
-      userId,
-    );
+    const deleted = await (
+      service as any
+    ).compactReplaceableRecommendationSnapshot(userId);
 
     expect(deleted).toEqual(new Set(['stale-office-recommendation-id']));
     expect(recommendationRepository.delete).toHaveBeenCalledWith([
@@ -2509,9 +2519,9 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
-      userId,
-    );
+    const deleted = await (
+      service as any
+    ).compactReplaceableRecommendationSnapshot(userId);
 
     expect(deleted).toEqual(new Set(['stale-office-recommendation-id']));
     expect(recommendationRepository.delete).toHaveBeenCalledWith([
@@ -2580,16 +2590,17 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    const deleted = await (service as any).compactReplaceableRecommendationSnapshot(
-      userId,
-    );
+    const deleted = await (
+      service as any
+    ).compactReplaceableRecommendationSnapshot(userId);
 
     expect(deleted).toEqual(new Set());
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
   });
 
   it('does not treat different interview services as covered by a shared semantic key', async () => {
-    const { service, serviceRepository, recommendationRepository } = createService();
+    const { service, serviceRepository, recommendationRepository } =
+      createService();
     (serviceRepository as any).findOne = jest.fn().mockResolvedValue({
       id: 'phone-interview-service-id',
       name: 'Телефонное интервью',
@@ -2633,7 +2644,8 @@ describe('RecommendationsService', () => {
   });
 
   it('does not prune an AI service for a package with only shared semantic coverage', async () => {
-    const { service, packageRepository, recommendationRepository } = createService();
+    const { service, packageRepository, recommendationRepository } =
+      createService();
     packageRepository.findOne.mockResolvedValue({
       id: 'candidate-interview-package-id',
       deletedAt: null,
