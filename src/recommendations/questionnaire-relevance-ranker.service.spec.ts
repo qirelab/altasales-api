@@ -166,6 +166,28 @@ describe('QuestionnaireRelevanceRankerService', () => {
       false,
     );
   });
+  it('prefers an exact catalog alias over an earlier description match', () => {
+    const unrelatedService = {
+      ...service('unrelated-service-id', 'Несвязанная консультация'),
+      description: 'Пакет ОП с нуля',
+      serviceId: 'unrelated-service-id',
+      packageId: null,
+    } as ServiceCandidate;
+    const legacyPackage = {
+      ...service('legacy-package-id', 'Отдел продаж с нуля'),
+      serviceId: null,
+      packageId: 'legacy-package-id',
+    } as ServiceCandidate;
+
+    const result = (ranker as any).findCandidateByCatalogKey(
+      [unrelatedService, legacyPackage],
+      'salesDepartmentFromZero',
+      new Set<string>(),
+      ['Пакет ОП с нуля'],
+    );
+
+    expect(result).toBe(legacyPackage);
+  });
   it('does not accept a legacy catalog UUID from description or category text', () => {
     const missingEntry = RECOMMENDATION_CATALOG.salesDepartmentFromZero;
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(

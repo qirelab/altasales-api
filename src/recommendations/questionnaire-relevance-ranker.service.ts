@@ -1028,10 +1028,11 @@ export class QuestionnaireRelevanceRankerService {
       }
       if (!candidate) {
         usesOnlyConfiguredIds = false;
-        candidate = this.findCandidateByExactNames(
+        candidate = this.findCandidateByAliases(
           services,
           [entry.displayName, ...entry.legacyAliases],
           usedTargetIds,
+          entry.kind,
         );
       }
       if (!candidate) {
@@ -1060,18 +1061,31 @@ export class QuestionnaireRelevanceRankerService {
     additionalAliases: string[] = [],
   ): ServiceCandidate | null {
     const entry = RECOMMENDATION_CATALOG[catalogKey];
-    const exact = services.find(
-      (service) =>
-        this.getCandidateTargetId(service) === entry.id &&
-        !usedTargetIds.has(entry.id),
-    );
+    const exact = services.find((service) => {
+      const targetId = this.getCandidateTargetId(service);
+      const actualKind = service.packageId
+        ? 'package'
+        : service.serviceId
+          ? 'service'
+          : undefined;
+      return (
+        targetId === entry.id &&
+        !usedTargetIds.has(targetId) &&
+        actualKind === entry.kind
+      );
+    });
     if (exact) return exact;
 
     const aliases = [
       ...additionalAliases,
       ...getRecommendationCatalogAliases(catalogKey),
     ];
-    return this.findCandidateByAliases(services, aliases, usedTargetIds);
+    return this.findCandidateByAliases(
+      services,
+      aliases,
+      usedTargetIds,
+      entry.kind,
+    );
   }
 
   private matchesRelevanceRule(
@@ -1107,50 +1121,30 @@ export class QuestionnaireRelevanceRankerService {
     );
   }
 
-  private findCandidateByExactNames(
-    services: ServiceCandidate[],
-    names: string[],
-    usedTargetIds: Set<string>,
-  ): ServiceCandidate | null {
-    const normalizedNames = new Set(names.map((name) => this.normalize(name)));
-    return (
-      services.find((service) => {
-        const targetId = this.getCandidateTargetId(service);
-        return (
-          !usedTargetIds.has(targetId) &&
-          normalizedNames.has(this.normalize(service.name))
-        );
-      }) ?? null
-    );
-  }
-
   private findCandidateByAliases(
     services: ServiceCandidate[],
     aliases: string[],
     usedTargetIds: Set<string>,
+    expectedKind?: 'service' | 'package',
   ): ServiceCandidate | null {
-    for (const alias of aliases) {
-      const normalizedAlias = this.normalize(alias);
-      const exactMatch = services.find((service) => {
+    const normalizedAliases = new Set(
+      aliases.map((alias) => this.normalize(alias)),
+    );
+    return (
+      services.find((service) => {
         const targetId = this.getCandidateTargetId(service);
+        const actualKind = service.packageId
+          ? 'package'
+          : service.serviceId
+            ? 'service'
+            : undefined;
         return (
           !usedTargetIds.has(targetId) &&
-          this.normalize(service.name) === normalizedAlias
+          (!expectedKind || !actualKind || actualKind === expectedKind) &&
+          normalizedAliases.has(this.normalize(service.name))
         );
-      });
-      if (exactMatch) return exactMatch;
-
-      const textMatch = services.find((service) => {
-        const targetId = this.getCandidateTargetId(service);
-        return (
-          !usedTargetIds.has(targetId) &&
-          this.normalizeCandidateText(service).includes(normalizedAlias)
-        );
-      });
-      if (textMatch) return textMatch;
-    }
-
-    return null;
+      }) ?? null
+    );
   }
 
   private matchesCatalogRecommendation(
@@ -1871,18 +1865,6 @@ export class QuestionnaireRelevanceRankerService {
 
   private getItemTargetId(item: GeneratedRecommendationItem): string {
     return item.packageId ?? item.serviceId ?? '';
-  }
-
-  private normalizeCandidateText(service: ServiceCandidate): string {
-    return this.normalize(
-      [
-        service.name,
-        service.description,
-        service.category?.name,
-        service.type,
-        ...(service.skills ?? []),
-      ].join(' '),
-    );
   }
 
   private buildRationale(serviceName: string, reasons: string[]): string {

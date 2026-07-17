@@ -246,7 +246,9 @@ export class RecommendationScoringService {
         (item.rationale === undefined || typeof item.rationale === 'string') &&
         (item.diagnosticSignals === undefined ||
           (Array.isArray(item.diagnosticSignals) &&
-            item.diagnosticSignals.every((signal) => typeof signal === 'string'))),
+            item.diagnosticSignals.every(
+              (signal) => typeof signal === 'string',
+            ))),
     );
   }
 
@@ -285,7 +287,12 @@ export class RecommendationScoringService {
 
   normalizeSignals(signals: string[]): string[] {
     return Array.from(
-      new Set(signals.filter((s): s is string => typeof s === 'string').map((s) => s.trim()).filter((s) => s.length > 0)),
+      new Set(
+        signals
+          .filter((s): s is string => typeof s === 'string')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      ),
     );
   }
 

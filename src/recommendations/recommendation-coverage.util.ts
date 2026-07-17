@@ -122,9 +122,10 @@ export function getCoverageRecommendationTargetId(
 }
 
 export function getCoverageIds(item: CoverageRecommendationItem): Set<string> {
-  const overlapIds = (item.coverageKeys?.length
-    ? item.coverageKeys
-    : item.coveredServiceIds ?? []
+  const overlapIds = (
+    item.coverageKeys?.length
+      ? item.coverageKeys
+      : (item.coveredServiceIds ?? [])
   ).filter(isOverlapCoverageId);
   const ids = overlapIds;
   if (ids.length === 0 && item.serviceId) ids.push(item.serviceId);
