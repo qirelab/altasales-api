@@ -1002,8 +1002,15 @@ export class RecommendationsService implements OnModuleInit {
         } as unknown as ServiceCandidate;
       })
       .filter((candidate): candidate is ServiceCandidate => Boolean(candidate));
+    const packageServices = packages.flatMap((servicePackage) =>
+      filterActiveServices(servicePackage.services).filter(
+        (service) =>
+          !service.isHidden &&
+          [ServiceType.Service, ServiceType.Document].includes(service.type),
+      ),
+    );
     const serviceCandidates = this.deduplicateServicesByName(
-      services.filter(
+      [...services, ...packageServices].filter(
         (service) =>
           this.hasRecommendableServiceContent(service) &&
           !this.isDuplicateLegacyPackageService(service, packageCandidates),

@@ -186,4 +186,141 @@ describe('recommendation coverage selection', () => {
       'analytics-package',
     ]);
   });
+
+  it('replaces an 80%-covered smaller package and keeps only relevant residual services', () => {
+    const shared = Array.from({ length: 8 }, (_, index) => `shared-${index}`);
+    const result = selectNonOverlappingRecommendations([
+      {
+        serviceId: null,
+        packageId: 'smaller-package',
+        coveredServiceIds: [...shared, 'dashboard', 'motivation'],
+        score: 90,
+      },
+      { serviceId: 'dashboard', coveredServiceIds: ['dashboard'], score: 88 },
+      { serviceId: 'motivation', coveredServiceIds: ['motivation'], score: 87 },
+      {
+        serviceId: null,
+        packageId: 'larger-package',
+        coveredServiceIds: [
+          ...shared,
+          'large-extra-1',
+          'large-extra-2',
+          'large-extra-3',
+          'large-extra-4',
+        ],
+        score: 85,
+      },
+    ]);
+
+    expect(
+      result.map((item) => item.packageId ?? item.serviceId).sort(),
+    ).toEqual(['dashboard', 'larger-package', 'motivation']);
+    expect(
+      result.map((item) => item.packageId ?? item.serviceId),
+    ).not.toContain('smaller-package');
+    expect(
+      result.map((item) => item.packageId ?? item.serviceId),
+    ).not.toContain('irrelevant-child-not-a-candidate');
+  });
+
+  it('applies dominant package coverage independently of candidate order', () => {
+    const shared = Array.from({ length: 8 }, (_, index) => `shared-${index}`);
+    const result = selectNonOverlappingRecommendations([
+      {
+        serviceId: null,
+        packageId: 'larger-package',
+        coveredServiceIds: [
+          ...shared,
+          'large-extra-1',
+          'large-extra-2',
+          'large-extra-3',
+          'large-extra-4',
+        ],
+        score: 85,
+      },
+      { serviceId: 'dashboard', coveredServiceIds: ['dashboard'], score: 88 },
+      { serviceId: 'motivation', coveredServiceIds: ['motivation'], score: 87 },
+      {
+        serviceId: null,
+        packageId: 'smaller-package',
+        coveredServiceIds: [...shared, 'dashboard', 'motivation'],
+        score: 90,
+      },
+    ]);
+
+    expect(
+      result.map((item) => item.packageId ?? item.serviceId).sort(),
+    ).toEqual(['dashboard', 'larger-package', 'motivation']);
+  });
+
+  it('preserves ideal packages and score-protected packages from dominant coverage', () => {
+    const shared = Array.from({ length: 8 }, (_, index) => `shared-${index}`);
+    const packages = [
+      {
+        serviceId: null,
+        packageId: 'larger-package',
+        coveredServiceIds: [
+          ...shared,
+          'large-extra-1',
+          'large-extra-2',
+          'large-extra-3',
+          'large-extra-4',
+        ],
+        score: 84,
+      },
+      {
+        serviceId: null,
+        packageId: 'smaller-package',
+        coveredServiceIds: [...shared, 'dashboard', 'motivation'],
+        score: 100,
+      },
+    ];
+
+    expect(
+      selectNonOverlappingRecommendations(packages, {
+        idealTargetIds: new Set(['smaller-package']),
+      }),
+    ).toHaveLength(2);
+    expect(selectNonOverlappingRecommendations(packages)).toHaveLength(2);
+  });
+
+  it('uses normalized-name coverage keys when package child UUIDs differ', () => {
+    const sharedNames = Array.from(
+      { length: 8 },
+      (_, index) => `catalog_name:service ${index}`,
+    );
+    const result = selectNonOverlappingRecommendations([
+      {
+        serviceId: null,
+        packageId: 'legacy-package',
+        coveredServiceIds: Array.from(
+          { length: 10 },
+          (_, index) => `legacy-${index}`,
+        ),
+        coverageKeys: [
+          ...sharedNames,
+          'catalog_name:dashboard',
+          'catalog_name:motivation',
+        ],
+        score: 80,
+      },
+      {
+        serviceId: null,
+        packageId: 'canonical-package',
+        coveredServiceIds: Array.from(
+          { length: 10 },
+          (_, index) => `canonical-${index}`,
+        ),
+        coverageKeys: [
+          ...sharedNames,
+          'catalog_name:large extra 1',
+          'catalog_name:large extra 2',
+          'catalog_name:large extra 3',
+        ],
+        score: 80,
+      },
+    ]);
+
+    expect(result.map((item) => item.packageId)).toEqual(['canonical-package']);
+  });
 });

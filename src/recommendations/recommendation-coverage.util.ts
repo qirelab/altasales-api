@@ -19,6 +19,8 @@ export type CoverageSelectionOptions = {
 };
 
 const DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
+const DOMINANT_PACKAGE_COVERAGE_RATIO = 0.8;
+const MIN_DOMINANT_PACKAGE_SHARED_SERVICES = 2;
 
 /**
  * Selects a relevance-ranked set without recommending a covered child next to
@@ -28,6 +30,11 @@ const DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 export function selectNonOverlappingRecommendations<
   T extends CoverageRecommendationItem,
 >(items: readonly T[], options: CoverageSelectionOptions = {}): T[] {
+  // Remove a package that is almost entirely included in a larger package
+  // before processing child services. The usual coverage pass can then keep
+  // only relevant services from the smaller package's uncovered remainder.
+  const candidates = excludeNearlyCoveredPackages(items, options);
+
   const selected: T[] = [];
   const blockedTargets = new Set(
     (options.existingCoverage ?? [])
@@ -39,7 +46,7 @@ export function selectNonOverlappingRecommendations<
     options.packageReplacementScoreTolerance ??
     DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE;
 
-  for (const item of items) {
+  for (const item of candidates) {
     const targetId = getCoverageRecommendationTargetId(item);
     if (!targetId || blockedTargets.has(targetId)) continue;
     if (
@@ -115,6 +122,54 @@ export function selectNonOverlappingRecommendations<
   return selected;
 }
 
+function excludeNearlyCoveredPackages<T extends CoverageRecommendationItem>(
+  items: readonly T[],
+  options: CoverageSelectionOptions,
+): T[] {
+  const idealTargetIds = options.idealTargetIds ?? new Set<string>();
+  const tolerance =
+    options.packageReplacementScoreTolerance ??
+    DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE;
+
+  return items.filter((item) => {
+    if (!item.packageId) return true;
+
+    const targetId = getCoverageRecommendationTargetId(item);
+    if (!targetId || idealTargetIds.has(targetId)) return true;
+
+    const itemCoverage = getCoverageIds(item);
+    return !items.some((candidate) => {
+      if (!candidate.packageId || candidate === item) return false;
+      return isDominantPackage(candidate, item, itemCoverage, tolerance);
+    });
+  });
+}
+
+function isDominantPackage<T extends CoverageRecommendationItem>(
+  candidate: T,
+  coveredPackage: T,
+  coveredPackageCoverage: Set<string>,
+  tolerance: number,
+): boolean {
+  const candidateCoverage = getCoverageIds(candidate);
+  if (candidateCoverage.size <= coveredPackageCoverage.size) return false;
+
+  const sharedServices = [...coveredPackageCoverage].filter((serviceId) =>
+    candidateCoverage.has(serviceId),
+  ).length;
+  if (sharedServices < MIN_DOMINANT_PACKAGE_SHARED_SERVICES) return false;
+  if (
+    sharedServices / coveredPackageCoverage.size <
+    DOMINANT_PACKAGE_COVERAGE_RATIO
+  ) {
+    return false;
+  }
+
+  return (
+    Number(candidate.score ?? 0) >=
+    Number(coveredPackage.score ?? 0) - tolerance
+  );
+}
 export function getCoverageRecommendationTargetId(
   item: CoverageRecommendationItem,
 ): string | null {

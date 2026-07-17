@@ -3195,4 +3195,62 @@ describe('RecommendationsService', () => {
 
     expect(result).toEqual([]);
   });
+
+  it('includes active package services even when they fall outside the scanned service limit', async () => {
+    const { service, serviceRepository, packageRepository } = createService();
+    const scanQuery = createQueryBuilder();
+    scanQuery.getMany.mockResolvedValue([
+      {
+        id: 'recent-service-id',
+        name: 'Recent service',
+        description: 'Recent service description',
+        type: ServiceType.Service,
+        isHidden: false,
+        deletedAt: null,
+        skills: [],
+        category: null,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+      },
+    ]);
+    serviceRepository.createQueryBuilder.mockReturnValue(scanQuery);
+    packageRepository.find.mockResolvedValue([
+      {
+        id: 'package-id',
+        name: 'Package',
+        description: 'Package description',
+        packageType: null,
+        tags: [],
+        categories: [],
+        category: null,
+        categoryId: null,
+        price: 0,
+        isHidden: false,
+        deletedAt: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        services: [
+          {
+            id: 'old-package-service-id',
+            name: 'Old package service',
+            description: 'Package child description',
+            type: ServiceType.Service,
+            isHidden: false,
+            deletedAt: null,
+            skills: [],
+            category: null,
+            createdAt: new Date('2020-01-01T00:00:00.000Z'),
+          },
+        ],
+      },
+    ]);
+
+    const candidates = await callPrivate<Promise<any[]>>(
+      service,
+      'findRecommendableServices',
+    );
+
+    expect(scanQuery.take).toHaveBeenCalledWith(500);
+    expect(candidates.map((candidate) => candidate.serviceId)).toContain(
+      'old-package-service-id',
+    );
+  });
 });
