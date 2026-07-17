@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { getChangedFiles } from './changed-files.mjs';
 
-const changedFiles = getChangedFiles(['.ts']);
+const changedFiles = getChangedFiles(['.ts', '.mjs', '.json', '.yml', '.yaml']);
 
 if (changedFiles.length === 0) {
   process.exit(0);
@@ -9,7 +9,7 @@ if (changedFiles.length === 0) {
 
 const result = spawnSync(
   process.execPath,
-  ['node_modules/eslint/bin/eslint.js', ...changedFiles],
+  ['node_modules/prettier/bin/prettier.cjs', '--check', ...changedFiles],
   { stdio: 'inherit' },
 );
 
