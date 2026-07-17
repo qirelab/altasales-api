@@ -4,9 +4,11 @@ import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-r
 import {
   RECOMMENDATION_CATALOG,
   RECOMMENDATION_CATALOG_ENTRIES,
+  RecommendationCatalogKey,
 } from './recommendation-catalog.registry';
 import {
   GeneratedRecommendationItem,
+  RecommendationScoringService,
   ServiceCandidate,
 } from './recommendation-scoring.service';
 import { selectNonOverlappingRecommendations } from './recommendation-coverage.util';
@@ -92,8 +94,24 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
   let ranker: QuestionnaireRelevanceRankerService;
 
+  type RankerTestApi = {
+    validateConfiguredCatalog(services: ServiceCandidate[]): boolean;
+    findCandidateByCatalogKey(
+      services: ServiceCandidate[],
+      catalogKey: RecommendationCatalogKey,
+      usedTargetIds: Set<string>,
+      additionalAliases?: string[],
+    ): ServiceCandidate | null;
+  };
+
+  const getRankerTestApi = (
+    instance: QuestionnaireRelevanceRankerService,
+  ): RankerTestApi => instance as unknown as RankerTestApi;
+
   beforeEach(() => {
-    ranker = new QuestionnaireRelevanceRankerService(scoringService as any);
+    ranker = new QuestionnaireRelevanceRankerService(
+      scoringService as unknown as RecommendationScoringService,
+    );
   });
 
   it('resolves configured catalog items by stable ID after a display name change', () => {
@@ -162,9 +180,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
       } as ServiceCandidate;
     });
 
-    expect((ranker as any).validateConfiguredCatalog(configuredServices)).toBe(
-      false,
-    );
+    expect(
+      getRankerTestApi(ranker).validateConfiguredCatalog(configuredServices),
+    ).toBe(false);
   });
   it('prefers an exact catalog alias over an earlier description match', () => {
     const unrelatedService = {
@@ -179,7 +197,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       packageId: 'legacy-package-id',
     } as ServiceCandidate;
 
-    const result = (ranker as any).findCandidateByCatalogKey(
+    const result = getRankerTestApi(ranker).findCandidateByCatalogKey(
       [unrelatedService, legacyPackage],
       'salesDepartmentFromZero',
       new Set<string>(),
@@ -200,7 +218,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       packageId: null,
     } as ServiceCandidate;
 
-    const result = (ranker as any).findCandidateByCatalogKey(
+    const result = getRankerTestApi(ranker).findCandidateByCatalogKey(
       [outsourcedSalesHead, canonicalSalesHead],
       'salesHead',
       new Set<string>(),
@@ -228,7 +246,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     } as ServiceCandidate);
 
     expect(() =>
-      (ranker as any).validateConfiguredCatalog(configuredServices),
+      getRankerTestApi(ranker).validateConfiguredCatalog(configuredServices),
     ).toThrow(
       `Recommendation catalog item is missing: ${missingEntry.displayName}`,
     );
@@ -995,7 +1013,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         diagnosticSignals: ['analytics_visibility'],
         score: 21,
       }),
-    } as any);
+    } as unknown as RecommendationScoringService);
 
     const result = weakFallbackRanker.rankRecommendations(
       {
@@ -2078,20 +2096,23 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
 
     const compacted = selectNonOverlappingRecommendations(
-      result.map((item) =>
-        (item.packageId ?? item.serviceId) ===
-        RECOMMENDATION_CATALOG.crmStart.id
-          ? {
-              ...item,
-              serviceId: null,
-              packageId: RECOMMENDATION_CATALOG.crmStart.id,
-              coveredServiceIds: [
-                RECOMMENDATION_CATALOG.telephonyIntegration.id,
-                RECOMMENDATION_CATALOG.messengerIntegration.id,
-              ],
-            }
-          : item,
-      ),
+      result.map((item) => {
+        if (
+          (item.packageId ?? item.serviceId) ===
+          RECOMMENDATION_CATALOG.crmStart.id
+        ) {
+          return {
+            ...item,
+            serviceId: null,
+            packageId: RECOMMENDATION_CATALOG.crmStart.id,
+            coveredServiceIds: [
+              RECOMMENDATION_CATALOG.telephonyIntegration.id,
+              RECOMMENDATION_CATALOG.messengerIntegration.id,
+            ],
+          };
+        }
+        return item;
+      }),
     );
     const compactedTargetIds = compacted.map(
       (item) => item.packageId ?? item.serviceId,
