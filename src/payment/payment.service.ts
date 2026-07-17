@@ -11,15 +11,15 @@ import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { OrderNotificationService } from '../orders/order-notification.service';
-import { Payment, PaymentStatus } from './entities/payment.entity';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import { RobokassaService } from './robokassa.service';
 import { CartService } from '../cart/cart.service';
 import { BalanceService } from '../balance-transactions/balance.service';
-import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
+import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
+import { RobokassaService } from './robokassa.service';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import { Payment, PaymentStatus } from './entities/payment.entity';
 
 @Injectable()
 export class PaymentService {
@@ -176,17 +176,20 @@ export class PaymentService {
         return { response: `bad amount` };
       }
 
-      const affectedOrderIds = payment.orderIds?.length
-        ? payment.orderIds
-        : payment.orderId != null
-          ? [payment.orderId]
-          : [];
-      const affectedOrders = affectedOrderIds.length
-        ? await orderRepo.find({
-            where: { id: In(affectedOrderIds) },
-            select: { id: true, userId: true },
-          })
-        : [];
+      let affectedOrderIds: string[] = [];
+      if (payment.orderIds?.length) {
+        affectedOrderIds = [...payment.orderIds];
+      } else if (payment.orderId != null) {
+        affectedOrderIds = [payment.orderId];
+      }
+
+      let affectedOrders: Order[] = [];
+      if (affectedOrderIds.length) {
+        affectedOrders = await orderRepo.find({
+          where: { id: In(affectedOrderIds) },
+          select: { id: true, userId: true },
+        });
+      }
       const affectedUserIds = new Set<string>();
       if (payment.userId) affectedUserIds.add(payment.userId);
       affectedOrders.forEach((order) => affectedUserIds.add(order.userId));

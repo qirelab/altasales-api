@@ -4,9 +4,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ExpertsService } from '../experts/experts.service';
-import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
-import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Brackets,
@@ -16,12 +13,20 @@ import {
   IsNull,
   Repository,
 } from 'typeorm';
+import { ExpertsService } from '../experts/experts.service';
+import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
+import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { ServicePackage } from '../packages/entities/package.entity';
 import { PaymentService } from '../payment/payment.service';
 import { Service } from '../services/entities/service.entity';
 import { User } from '../users/entities/user.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { FileSource } from '../files/entities/file.entity';
+import { BalanceService } from '../balance-transactions/balance.service';
+import { CartService } from '../cart/cart.service';
+import { Recommendation } from '../recommendations/entities/recommendation.entity';
+import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
+import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 import { OrderItemSubItem } from './entities/order-item-sub-item.entity';
@@ -34,11 +39,6 @@ import { GetAdminOrdersQueryDto } from './dto/get-admin-orders-query.dto';
 import { GetOrdersQueryDto } from './dto/get-orders-query.dto';
 import { UpdateContractorChatAccessDto } from './dto/update-contractor-chat-access.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
-import { BalanceService } from '../balance-transactions/balance.service';
-import { CartService } from '../cart/cart.service';
-import { Recommendation } from '../recommendations/entities/recommendation.entity';
-import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
-import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
 
 export interface OrderFileDto {
   id: string;
@@ -307,6 +307,56 @@ export class OrdersService {
   }
 
   private transformOrderFiles(order: Order): OrderDto {
+    let item: OrderDto['item'] = null;
+    if (order.item) {
+      const orderItem = order.item;
+      item = {
+        id: orderItem.id,
+        orderId: orderItem.orderId,
+        serviceId: orderItem.serviceId,
+        service: orderItem.service,
+        packageId: orderItem.packageId,
+        package: orderItem.package,
+        expertPositionId: orderItem.expertPositionId,
+        expertPosition: orderItem.expertPosition,
+        executorUserId: orderItem.executorUserId,
+        executor: orderItem.executor,
+        hours: orderItem.hours,
+        amount: orderItem.amount,
+        status: orderItem.status,
+        subItems: (orderItem.subItems ?? []).map((subItem) => ({
+          id: subItem.id,
+          serviceId: subItem.serviceId,
+          service: subItem.service,
+          expertPositionOfferingId: subItem.expertPositionOfferingId,
+          expertPositionOffering: subItem.expertPositionOffering,
+          unitPrice:
+            subItem.unitPrice != null ? Number(subItem.unitPrice) : null,
+          status: subItem.status,
+          files: (subItem.files ?? []).map(
+            (file): OrderFileDto => ({
+              id: file.id,
+              name: file.originalName,
+              size: file.size,
+              type: file.mimeType,
+              source: file.source ?? FileSource.CLIENT,
+            }),
+          ),
+        })),
+        files: (orderItem.files ?? [])
+          .filter((file) => file.orderItemSubItemId === null)
+          .map(
+            (file): OrderFileDto => ({
+              id: file.id,
+              name: file.originalName,
+              size: file.size,
+              type: file.mimeType,
+              source: file.source ?? FileSource.CLIENT,
+            }),
+          ),
+      };
+    }
+
     return {
       id: order.id,
       userId: order.userId,
@@ -318,53 +368,7 @@ export class OrdersService {
       contractorChatAccess: order.contractorChatAccess,
       name: this.resolveOrderProductName(order),
       user: order.user,
-      item: order.item
-        ? {
-            id: order.item.id,
-            orderId: order.item.orderId,
-            serviceId: order.item.serviceId,
-            service: order.item.service,
-            packageId: order.item.packageId,
-            package: order.item.package,
-            expertPositionId: order.item.expertPositionId,
-            expertPosition: order.item.expertPosition,
-            executorUserId: order.item.executorUserId,
-            executor: order.item.executor,
-            hours: order.item.hours,
-            amount: order.item.amount,
-            status: order.item.status,
-            subItems: (order.item.subItems ?? []).map((subItem) => ({
-              id: subItem.id,
-              serviceId: subItem.serviceId,
-              service: subItem.service,
-              expertPositionOfferingId: subItem.expertPositionOfferingId,
-              expertPositionOffering: subItem.expertPositionOffering,
-              unitPrice:
-                subItem.unitPrice != null ? Number(subItem.unitPrice) : null,
-              status: subItem.status,
-              files: (subItem.files ?? []).map(
-                (file): OrderFileDto => ({
-                  id: file.id,
-                  name: file.originalName,
-                  size: file.size,
-                  type: file.mimeType,
-                  source: file.source ?? FileSource.CLIENT,
-                }),
-              ),
-            })),
-            files: (order.item.files ?? [])
-              .filter((file) => file.orderItemSubItemId === null)
-              .map(
-                (file): OrderFileDto => ({
-                  id: file.id,
-                  name: file.originalName,
-                  size: file.size,
-                  type: file.mimeType,
-                  source: file.source ?? FileSource.CLIENT,
-                }),
-              ),
-          }
-        : null,
+      item,
     };
   }
 

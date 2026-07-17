@@ -1,13 +1,33 @@
+import type { EntityManager } from 'typeorm';
+import { ServiceType } from '../services/entities/service-type.enum';
+import { OrderStatus } from '../orders/entities/order-status.enum';
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { RecommendationSource } from './entities/recommendation-source.enum';
 import { RecommendationStatus } from './entities/recommendation-status.enum';
 import { RECOMMENDATION_CATALOG } from './recommendation-catalog.registry';
+import type { GeneratedRecommendationItem } from './recommendation-scoring.service';
 import { RecommendationsService } from './recommendations.service';
-import { ServiceType } from '../services/entities/service-type.enum';
-import { OrderStatus } from '../orders/entities/order-status.enum';
 
 describe('RecommendationsService', () => {
+  type RecommendationsServiceDependencies = ConstructorParameters<
+    typeof RecommendationsService
+  >;
+  type RecommendationDeletionTestResult = {
+    deletedIds: string[];
+    blockedBy: Map<string, string[]>;
+  };
+
+  const callPrivate = <T>(
+    service: RecommendationsService,
+    method: string,
+    ...args: unknown[]
+  ): T => {
+    const privateMethod = (
+      service as unknown as Record<string, (...args: unknown[]) => T>
+    )[method];
+    return privateMethod.apply(service, args);
+  };
   const userId = 'user-id';
   const questionnaireAnswers = {
     companyName: 'AltaSales',
@@ -42,6 +62,7 @@ describe('RecommendationsService', () => {
     };
     const serviceRepository = {
       createQueryBuilder: jest.fn(createQueryBuilder),
+      findOne: jest.fn(),
     };
     const packageRepository = {
       find: jest.fn().mockResolvedValue([]),
@@ -101,16 +122,17 @@ describe('RecommendationsService', () => {
     };
 
     const dataSource = {
-      transaction: jest.fn(async (callback: (manager: any) => unknown) =>
-        callback({
-          getRepository: jest.fn((entity: { name?: string }) =>
-            entity.name === 'ServicePackage'
-              ? packageRepository
-              : entity.name === 'User'
-                ? userRepository
-                : recommendationRepository,
-          ),
-        }),
+      transaction: jest.fn(
+        async (callback: (manager: EntityManager) => unknown) =>
+          callback({
+            getRepository: jest.fn((entity: { name?: string }) =>
+              entity.name === 'ServicePackage'
+                ? packageRepository
+                : entity.name === 'User'
+                  ? userRepository
+                  : recommendationRepository,
+            ),
+          } as unknown as EntityManager),
       ),
     };
 
@@ -120,19 +142,19 @@ describe('RecommendationsService', () => {
     };
 
     const service = new RecommendationsService(
-      recommendationRepository as any,
-      userRepository as any,
-      serviceRepository as any,
-      packageRepository as any,
-      orderRepository as any,
-      orderItemRepository as any,
-      questionnaireRepository as any,
-      scoringService as any,
-      relevanceRanker as any,
-      generationJobService as any,
-      notificationService as any,
-      dataSource as any,
-      recommendationUserLockService as any,
+      recommendationRepository as unknown as RecommendationsServiceDependencies[0],
+      userRepository as unknown as RecommendationsServiceDependencies[1],
+      serviceRepository as unknown as RecommendationsServiceDependencies[2],
+      packageRepository as unknown as RecommendationsServiceDependencies[3],
+      orderRepository as unknown as RecommendationsServiceDependencies[4],
+      orderItemRepository as unknown as RecommendationsServiceDependencies[5],
+      questionnaireRepository as unknown as RecommendationsServiceDependencies[6],
+      scoringService as unknown as RecommendationsServiceDependencies[7],
+      relevanceRanker as unknown as RecommendationsServiceDependencies[8],
+      generationJobService as unknown as RecommendationsServiceDependencies[9],
+      notificationService as unknown as RecommendationsServiceDependencies[10],
+      dataSource as unknown as RecommendationsServiceDependencies[11],
+      recommendationUserLockService as unknown as RecommendationsServiceDependencies[12],
     );
 
     return {
@@ -327,20 +349,24 @@ describe('RecommendationsService', () => {
 
   it('keeps real UUIDs in public package coverage while hiding internal keys', () => {
     const { service } = createService();
-    const result = (service as any).toPublicGeneratedRecommendationItem({
-      serviceId: null,
-      packageId: 'package-id',
-      serviceName: 'Пакет',
-      priority: RecommendationPriority.Medium,
-      rationale: 'package fit',
-      diagnosticSignals: [],
-      score: 10,
-      coveredServiceIds: ['service-a', 'service-b'],
-      coverageKeys: [
-        'catalog_name:настройка crm',
-        'catalog_semantic:crm_audit',
-      ],
-    });
+    const result = callPrivate<GeneratedRecommendationItem>(
+      service,
+      'toPublicGeneratedRecommendationItem',
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'Пакет',
+        priority: RecommendationPriority.Medium,
+        rationale: 'package fit',
+        diagnosticSignals: [],
+        score: 10,
+        coveredServiceIds: ['service-a', 'service-b'],
+        coverageKeys: [
+          'catalog_name:настройка crm',
+          'catalog_semantic:crm_audit',
+        ],
+      },
+    );
 
     expect(result.coveredServiceIds).toEqual(['service-a', 'service-b']);
     expect(result.coverageKeys).toBeUndefined();
@@ -417,7 +443,11 @@ describe('RecommendationsService', () => {
       dependentRecommendation,
     ]);
 
-    await (service as any).compactReplaceableRecommendationSnapshot(userId);
+    await callPrivate<Promise<Set<string>>>(
+      service,
+      'compactReplaceableRecommendationSnapshot',
+      userId,
+    );
 
     expect(recommendationRepository.delete).toHaveBeenCalledWith([
       smallRecommendation.id,
@@ -441,7 +471,9 @@ describe('RecommendationsService', () => {
     ]);
 
     await expect(
-      (service as any).deleteRecommendationIdsSafely(
+      callPrivate<Promise<RecommendationDeletionTestResult>>(
+        service,
+        'deleteRecommendationIdsSafely',
         userId,
         ['service-s'],
         new Map([['service-s', 'package-p']]),
@@ -463,7 +495,9 @@ describe('RecommendationsService', () => {
       row('recommendation-c', ['recommendation-a']),
     ]);
 
-    const result = await (service as any).deleteRecommendationIdsSafely(
+    const result = await callPrivate<Promise<RecommendationDeletionTestResult>>(
+      service,
+      'deleteRecommendationIdsSafely',
       userId,
       ['recommendation-a', 'recommendation-b'],
       new Map(),
@@ -496,7 +530,9 @@ describe('RecommendationsService', () => {
       row('dependent-recommendation-id', [packageRecommendation.id]),
     ]);
 
-    const result = await (service as any).deleteRecommendationIdsSafely(
+    const result = await callPrivate<Promise<RecommendationDeletionTestResult>>(
+      service,
+      'deleteRecommendationIdsSafely',
       userId,
       ['package-recommendation-id', 'service-recommendation-id'],
       new Map([['service-recommendation-id', 'covering-package-id']]),
@@ -518,11 +554,12 @@ describe('RecommendationsService', () => {
       serviceId: 'service-id',
       packageId: null,
     };
-    const manager: any = {
+    const manager = {
       getRepository: jest.fn(() => recommendationRepository),
     };
-    manager.transaction = jest.fn(async (callback: (manager: any) => unknown) =>
-      callback(manager),
+    manager.transaction = jest.fn(
+      async (callback: (manager: EntityManager) => unknown) =>
+        callback(manager as unknown as EntityManager),
     );
     recommendationRepository.findOne
       .mockResolvedValueOnce(null)
@@ -531,7 +568,9 @@ describe('RecommendationsService', () => {
       .mockRejectedValueOnce({ code: '23505' })
       .mockResolvedValueOnce(existing);
 
-    const result = await (service as any).upsertGeneratedRecommendation(
+    const result = await callPrivate<Promise<unknown>>(
+      service,
+      'upsertGeneratedRecommendation',
       userId,
       {
         serviceId: 'service-id',
@@ -701,7 +740,9 @@ describe('RecommendationsService', () => {
       getRepository: jest.fn(() => recommendationRepository),
     };
 
-    const result = await (service as any).deleteRecommendationIdsSafely(
+    const result = await callPrivate<Promise<RecommendationDeletionTestResult>>(
+      service,
+      'deleteRecommendationIdsSafely',
       userId,
       [purchasedRecommendation.id],
       new Map(),
@@ -838,7 +879,9 @@ describe('RecommendationsService', () => {
     ]);
 
     await expect(
-      (service as any).ensureRecommendationIsUnique(
+      callPrivate<Promise<void>>(
+        service,
+        'ensureRecommendationIsUnique',
         userId,
         null,
         targetPackage.id,
@@ -913,9 +956,12 @@ describe('RecommendationsService', () => {
       },
     ];
 
-    const result = (
-      service as any
-    ).filterPackageCoveredStandaloneRecommendations(rows, packages);
+    const result = callPrivate<Array<{ id: string }>>(
+      service,
+      'filterPackageCoveredStandaloneRecommendations',
+      rows,
+      packages,
+    );
 
     expect(result.map((row: { id: string }) => row.id)).toEqual([
       'completed-package-recommendation-id',
@@ -1248,7 +1294,7 @@ describe('RecommendationsService', () => {
     };
 
     const getCoverage = (services: unknown[]) =>
-      (service as any).getPackageCoverageIds(services);
+      callPrivate<string[]>(service, 'getPackageCoverageIds', services);
 
     expect(getCoverage(duplicateServices)).toEqual(['catalog_name:дашборд оп']);
     expect(getCoverage([canonicalService])).toEqual([
@@ -1349,10 +1395,11 @@ describe('RecommendationsService', () => {
       createdAt: new Date('2026-01-01T00:00:00Z'),
     };
 
-    const result = (service as any).deduplicatePackagesByName([
-      fullerDuplicate,
-      registeredPackage,
-    ]);
+    const result = callPrivate<Array<{ id: string }>>(
+      service,
+      'deduplicatePackagesByName',
+      [fullerDuplicate, registeredPackage],
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe(
@@ -2448,9 +2495,11 @@ describe('RecommendationsService', () => {
       completePackage,
     ]);
 
-    const deleted = await (
-      service as any
-    ).compactReplaceableRecommendationSnapshot(userId);
+    const deleted = await callPrivate<Promise<Set<string>>>(
+      service,
+      'compactReplaceableRecommendationSnapshot',
+      userId,
+    );
 
     expect(deleted).toEqual(new Set(['stale-office-recommendation-id']));
     expect(recommendationRepository.delete).toHaveBeenCalledWith([
@@ -2519,9 +2568,11 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    const deleted = await (
-      service as any
-    ).compactReplaceableRecommendationSnapshot(userId);
+    const deleted = await callPrivate<Promise<Set<string>>>(
+      service,
+      'compactReplaceableRecommendationSnapshot',
+      userId,
+    );
 
     expect(deleted).toEqual(new Set(['stale-office-recommendation-id']));
     expect(recommendationRepository.delete).toHaveBeenCalledWith([
@@ -2590,9 +2641,11 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    const deleted = await (
-      service as any
-    ).compactReplaceableRecommendationSnapshot(userId);
+    const deleted = await callPrivate<Promise<Set<string>>>(
+      service,
+      'compactReplaceableRecommendationSnapshot',
+      userId,
+    );
 
     expect(deleted).toEqual(new Set());
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
@@ -2601,7 +2654,7 @@ describe('RecommendationsService', () => {
   it('does not treat different interview services as covered by a shared semantic key', async () => {
     const { service, serviceRepository, recommendationRepository } =
       createService();
-    (serviceRepository as any).findOne = jest.fn().mockResolvedValue({
+    serviceRepository.findOne = jest.fn().mockResolvedValue({
       id: 'phone-interview-service-id',
       name: 'Телефонное интервью',
       description: null,
@@ -2635,7 +2688,9 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    const covered = await (service as any).isServiceCoveredByRecommendedPackage(
+    const covered = await callPrivate<Promise<boolean>>(
+      service,
+      'isServiceCoveredByRecommendedPackage',
       userId,
       'phone-interview-service-id',
     );
@@ -2683,7 +2738,9 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    await (service as any).pruneReplaceableRecommendationsCoveredByPackage(
+    await callPrivate<Promise<void>>(
+      service,
+      'pruneReplaceableRecommendationsCoveredByPackage',
       userId,
       'candidate-interview-package-id',
     );

@@ -317,13 +317,15 @@ export class RecommendationsService implements OnModuleInit {
         }
       >();
 
-    const rows: UserRecommendationListItem[] = rawRows.map(
-      ({ orderId: _omit, giftEligible, ...rest }) => ({
+    const rows: UserRecommendationListItem[] = rawRows.map((row) => {
+      const { orderId, giftEligible, ...rest } = row;
+      void orderId;
+      return {
         ...rest,
         price: Number(rest.price),
         giftEligible: giftEligible == null ? null : giftEligible === true,
-      }),
-    );
+      };
+    });
 
     const packageRows = rawRows.filter((row) => row.packageId);
     if (packageRows.length === 0) return rows;
@@ -342,16 +344,19 @@ export class RecommendationsService implements OnModuleInit {
 
     const rowsWithPackageServices = rows.map((row) => {
       if (!row.packageId) return row;
+
       const packageServices = servicesByPackageId.get(row.packageId) ?? [];
       const subState = subStateByRecId.get(row.id);
-      const historicalServices = subState
-        ? this.deduplicateServicesByName([
-            ...subState.services,
-            ...packageServices.filter((service) =>
-              subState.serviceIds.has(service.id),
-            ),
-          ])
-        : null;
+      let historicalServices: Service[] | null = null;
+      if (subState) {
+        historicalServices = this.deduplicateServicesByName([
+          ...subState.services,
+          ...packageServices.filter((service) =>
+            subState.serviceIds.has(service.id),
+          ),
+        ]);
+      }
+
       const servicesForRow =
         historicalServices ??
         this.deduplicateServicesByName(
@@ -1580,7 +1585,8 @@ export class RecommendationsService implements OnModuleInit {
   private toPublicGeneratedRecommendationItem(
     item: GeneratedRecommendationItem,
   ): GeneratedRecommendationItem {
-    const { coverageKeys: _coverageKeys, ...publicItem } = item;
+    const { coverageKeys, ...publicItem } = item;
+    void coverageKeys;
     return {
       ...publicItem,
       coveredServiceIds: this.toPublicCoveredServiceIds(
