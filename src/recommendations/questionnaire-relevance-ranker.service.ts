@@ -2,10 +2,13 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import {
+  DISABLED_RECOMMENDATION_CATALOG_IDS,
   RECOMMENDATION_CATALOG,
+  RECOMMENDATION_CATALOG_ENTRIES,
   getRecommendationCatalogAliases,
   getRecommendationCatalogLegacyAliases,
   REQUIRED_RECOMMENDATION_CATALOG_ENTRIES,
+  RecommendationCatalogEntry,
   RecommendationCatalogKey,
 } from './recommendation-catalog.registry';
 import {
@@ -686,6 +689,7 @@ export class QuestionnaireRelevanceRankerService {
 
     for (const service of services) {
       const targetId = this.getCandidateTargetId(service);
+      if (this.isDisabledRecommendationCandidate(service)) continue;
       if (defaultTargetIds.has(targetId)) continue;
 
       const serviceNameText = this.normalize(service.name);
@@ -1060,7 +1064,10 @@ export class QuestionnaireRelevanceRankerService {
     usedTargetIds: Set<string>,
     additionalAliases: string[] = [],
   ): ServiceCandidate | null {
-    const entry = RECOMMENDATION_CATALOG[catalogKey];
+    const entry = RECOMMENDATION_CATALOG[
+      catalogKey
+    ] as RecommendationCatalogEntry;
+    if (entry.availableForRecommendations === false) return null;
     const exact = services.find((service) => {
       const targetId = this.getCandidateTargetId(service);
       const actualKind = service.packageId
@@ -1088,6 +1095,20 @@ export class QuestionnaireRelevanceRankerService {
     );
   }
 
+  private isDisabledRecommendationCandidate(
+    service: ServiceCandidate,
+  ): boolean {
+    const targetId = this.getCandidateTargetId(service);
+    if (DISABLED_RECOMMENDATION_CATALOG_IDS.has(targetId)) return true;
+
+    const normalizedName = this.normalize(service.name);
+    return RECOMMENDATION_CATALOG_ENTRIES.some(
+      (entry) =>
+        entry.availableForRecommendations === false &&
+        this.normalize(entry.displayName) === normalizedName,
+    );
+  }
+
   private matchesRelevanceRule(
     rule: RelevanceRule,
     service: ServiceCandidate,
@@ -1097,13 +1118,22 @@ export class QuestionnaireRelevanceRankerService {
     if (rule.catalogKeys?.length) {
       const targetId = this.getCandidateTargetId(service);
       if (usesConfiguredCatalog) {
-        return rule.catalogKeys.some(
-          (key) => RECOMMENDATION_CATALOG[key].id === targetId,
-        );
+        return rule.catalogKeys.some((key) => {
+          const entry = RECOMMENDATION_CATALOG[
+            key
+          ] as RecommendationCatalogEntry;
+          return (
+            entry.availableForRecommendations !== false && entry.id === targetId
+          );
+        });
       }
       return rule.catalogKeys.some((key) => {
-        return getRecommendationCatalogAliases(key).some((alias) =>
-          serviceNameText.includes(this.normalize(alias)),
+        const entry = RECOMMENDATION_CATALOG[key] as RecommendationCatalogEntry;
+        return (
+          entry.availableForRecommendations !== false &&
+          getRecommendationCatalogAliases(key).some((alias) =>
+            serviceNameText.includes(this.normalize(alias)),
+          )
         );
       });
     }
@@ -1245,11 +1275,6 @@ export class QuestionnaireRelevanceRankerService {
         ['aiCrmAnalysis'],
         AI_ANALYSIS_COMPONENT_POINTS,
         'new sales department always includes AI CRM analysis',
-      );
-      addCatalog(
-        ['aiDashboardAnalysis'],
-        AI_ANALYSIS_COMPONENT_POINTS,
-        'new sales department always includes AI dashboard analysis',
       );
       addCatalog(
         ['aiDocumentAnalysis'],

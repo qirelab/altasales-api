@@ -875,7 +875,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
   it.each([
     ['crm', 'ИИ анализ CRM'],
-    ['analytics', 'ИИ анализ дашборда'],
     ['salesDocuments', 'ИИ анализ документов'],
     ['telephony', 'ИИ анализ звонков и менеджеров'],
   ])(
@@ -906,6 +905,38 @@ describe('QuestionnaireRelevanceRankerService', () => {
       );
     },
   );
+
+  it('does not recommend the disabled dashboard AI analysis service', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'existing',
+          components: components({ analytics: true }),
+          componentsToAdd: components(),
+        },
+        persist: false,
+      },
+      [service('ai-dashboard', 'ИИ анализ дашборда')],
+      [
+        {
+          serviceId: 'ai-dashboard',
+          serviceName: 'ИИ анализ дашборда',
+          priority: RecommendationPriority.Urgent,
+          rationale: 'llm',
+          diagnosticSignals: ['ai_generated'],
+          score: 100,
+        },
+      ],
+      '',
+    );
+
+    expect(result).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ serviceName: 'ИИ анализ дашборда' }),
+      ]),
+    );
+  });
 
   it('keeps call analysis, telephony integration and messenger integration as separate recommendations', () => {
     const result = ranker.rankRecommendations(
@@ -2021,7 +2052,6 @@ describe('QuestionnaireRelevanceRankerService', () => {
         RECOMMENDATION_CATALOG.crmStart.id,
         RECOMMENDATION_CATALOG.trainingOneMonth.id,
         RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
-        RECOMMENDATION_CATALOG.aiDashboardAnalysis.id,
         RECOMMENDATION_CATALOG.aiDocumentAnalysis.id,
         RECOMMENDATION_CATALOG.aiCallManagersAnalysis.id,
         RECOMMENDATION_CATALOG.salesHead.id,

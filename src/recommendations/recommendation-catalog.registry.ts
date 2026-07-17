@@ -6,6 +6,7 @@ export type RecommendationCatalogEntry = {
   displayName: string;
   legacyAliases: string[];
   requiredForValidation?: boolean;
+  availableForRecommendations?: boolean;
 };
 
 export const RECOMMENDATION_CATALOG = {
@@ -78,6 +79,8 @@ export const RECOMMENDATION_CATALOG = {
   aiDashboardAnalysis: {
     id: '93404cd2-5292-40c0-a5a3-f77e8709a904',
     kind: 'service',
+    requiredForValidation: false,
+    availableForRecommendations: false,
     displayName:
       '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u0430\u0448\u0431\u043e\u0440\u0434\u0430',
     legacyAliases: [],
@@ -214,3 +217,9 @@ export const REQUIRED_RECOMMENDATION_CATALOG_ENTRIES =
   RECOMMENDATION_CATALOG_ENTRIES.filter(
     (entry) => entry.requiredForValidation !== false,
   );
+
+export const DISABLED_RECOMMENDATION_CATALOG_IDS = new Set(
+  RECOMMENDATION_CATALOG_ENTRIES.filter(
+    (entry) => entry.availableForRecommendations === false,
+  ).map((entry) => entry.id),
+);
