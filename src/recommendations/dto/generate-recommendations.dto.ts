@@ -20,7 +20,9 @@ export class GenerateRecommendationsDto {
   @IsUUID()
   userId: string;
 
-  @ApiPropertyOptional({ description: 'Idempotency key for retrying the same generation job' })
+  @ApiPropertyOptional({
+    description: 'Idempotency key for retrying the same generation job',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(255)
