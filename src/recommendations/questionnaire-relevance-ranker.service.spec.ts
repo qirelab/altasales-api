@@ -188,6 +188,27 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     expect(result).toBe(legacyPackage);
   });
+  it('preserves alias priority when catalog candidates are reversed', () => {
+    const outsourcedSalesHead = {
+      ...service('outsourced-sales-head-id', 'РОП на аутсорсинге'),
+      serviceId: 'outsourced-sales-head-id',
+      packageId: null,
+    } as ServiceCandidate;
+    const canonicalSalesHead = {
+      ...service('sales-head-id', 'Руководитель отдела продаж'),
+      serviceId: 'sales-head-id',
+      packageId: null,
+    } as ServiceCandidate;
+
+    const result = (ranker as any).findCandidateByCatalogKey(
+      [outsourcedSalesHead, canonicalSalesHead],
+      'salesHead',
+      new Set<string>(),
+      ['Руководитель отдела продаж', 'РОП на аутсорсинге'],
+    );
+
+    expect(result).toBe(canonicalSalesHead);
+  });
   it('does not accept a legacy catalog UUID from description or category text', () => {
     const missingEntry = RECOMMENDATION_CATALOG.salesDepartmentFromZero;
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(

@@ -1127,11 +1127,11 @@ export class QuestionnaireRelevanceRankerService {
     usedTargetIds: Set<string>,
     expectedKind?: 'service' | 'package',
   ): ServiceCandidate | null {
-    const normalizedAliases = new Set(
-      aliases.map((alias) => this.normalize(alias)),
+    const normalizedAliases = Array.from(
+      new Set(aliases.map((alias) => this.normalize(alias))),
     );
-    return (
-      services.find((service) => {
+    for (const normalizedAlias of normalizedAliases) {
+      const candidate = services.find((service) => {
         const targetId = this.getCandidateTargetId(service);
         const actualKind = service.packageId
           ? 'package'
@@ -1141,10 +1141,13 @@ export class QuestionnaireRelevanceRankerService {
         return (
           !usedTargetIds.has(targetId) &&
           (!expectedKind || !actualKind || actualKind === expectedKind) &&
-          normalizedAliases.has(this.normalize(service.name))
+          this.normalize(service.name) === normalizedAlias
         );
-      }) ?? null
-    );
+      });
+      if (candidate) return candidate;
+    }
+
+    return null;
   }
 
   private matchesCatalogRecommendation(
