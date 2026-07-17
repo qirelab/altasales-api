@@ -3243,10 +3243,10 @@ describe('RecommendationsService', () => {
       },
     ]);
 
-    const candidates = await callPrivate<Promise<any[]>>(
+    const candidates = (await callPrivate(
       service,
       'findRecommendableServices',
-    );
+    )) as Array<{ serviceId?: string | null }>;
 
     expect(scanQuery.take).toHaveBeenCalledWith(500);
     expect(candidates.map((candidate) => candidate.serviceId)).toContain(
