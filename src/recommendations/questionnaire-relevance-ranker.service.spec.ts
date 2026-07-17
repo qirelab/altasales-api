@@ -4,9 +4,11 @@ import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-r
 import {
   RECOMMENDATION_CATALOG,
   RECOMMENDATION_CATALOG_ENTRIES,
+  RecommendationCatalogKey,
 } from './recommendation-catalog.registry';
 import {
   GeneratedRecommendationItem,
+  RecommendationScoringService,
   ServiceCandidate,
 } from './recommendation-scoring.service';
 import { selectNonOverlappingRecommendations } from './recommendation-coverage.util';
@@ -92,8 +94,24 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
   let ranker: QuestionnaireRelevanceRankerService;
 
+  type RankerTestApi = {
+    validateConfiguredCatalog(services: ServiceCandidate[]): boolean;
+    findCandidateByCatalogKey(
+      services: ServiceCandidate[],
+      catalogKey: RecommendationCatalogKey,
+      usedTargetIds: Set<string>,
+      additionalAliases?: string[],
+    ): ServiceCandidate | null;
+  };
+
+  const getRankerTestApi = (
+    instance: QuestionnaireRelevanceRankerService,
+  ): RankerTestApi => instance as unknown as RankerTestApi;
+
   beforeEach(() => {
-    ranker = new QuestionnaireRelevanceRankerService(scoringService as any);
+    ranker = new QuestionnaireRelevanceRankerService(
+      scoringService as unknown as RecommendationScoringService,
+    );
   });
 
   it('resolves configured catalog items by stable ID after a display name change', () => {
@@ -127,7 +145,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
   });
 
-  it('fails fast when a configured catalog ID is missing', () => {
+  it('fails fast when a configured catalog item is missing by ID and name', () => {
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(
       (entry) => entry.id !== RECOMMENDATION_CATALOG.crmAudit.id,
     ).map(
@@ -149,6 +167,90 @@ describe('QuestionnaireRelevanceRankerService', () => {
     ).toThrow(`Recommendation catalog item is missing: Аудит CRM`);
   });
 
+  it('accepts a legacy catalog UUID when the configured name and kind match', () => {
+    const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.map((entry) => {
+      const targetId =
+        entry.id === RECOMMENDATION_CATALOG.salesDepartmentFromZero.id
+          ? 'legacy-sales-department-id'
+          : entry.id;
+      return {
+        ...service(targetId, entry.displayName),
+        serviceId: entry.kind === 'service' ? targetId : null,
+        packageId: entry.kind === 'package' ? targetId : null,
+      } as ServiceCandidate;
+    });
+
+    expect(
+      getRankerTestApi(ranker).validateConfiguredCatalog(configuredServices),
+    ).toBe(false);
+  });
+  it('prefers an exact catalog alias over an earlier description match', () => {
+    const unrelatedService = {
+      ...service('unrelated-service-id', 'Несвязанная консультация'),
+      description: 'Пакет ОП с нуля',
+      serviceId: 'unrelated-service-id',
+      packageId: null,
+    } as ServiceCandidate;
+    const legacyPackage = {
+      ...service('legacy-package-id', 'Отдел продаж с нуля'),
+      serviceId: null,
+      packageId: 'legacy-package-id',
+    } as ServiceCandidate;
+
+    const result = getRankerTestApi(ranker).findCandidateByCatalogKey(
+      [unrelatedService, legacyPackage],
+      'salesDepartmentFromZero',
+      new Set<string>(),
+      ['Пакет ОП с нуля'],
+    );
+
+    expect(result).toBe(legacyPackage);
+  });
+  it('preserves alias priority when catalog candidates are reversed', () => {
+    const outsourcedSalesHead = {
+      ...service('outsourced-sales-head-id', 'РОП на аутсорсинге'),
+      serviceId: 'outsourced-sales-head-id',
+      packageId: null,
+    } as ServiceCandidate;
+    const canonicalSalesHead = {
+      ...service('sales-head-id', 'Руководитель отдела продаж'),
+      serviceId: 'sales-head-id',
+      packageId: null,
+    } as ServiceCandidate;
+
+    const result = getRankerTestApi(ranker).findCandidateByCatalogKey(
+      [outsourcedSalesHead, canonicalSalesHead],
+      'salesHead',
+      new Set<string>(),
+      ['Руководитель отдела продаж', 'РОП на аутсорсинге'],
+    );
+
+    expect(result).toBe(canonicalSalesHead);
+  });
+  it('does not accept a legacy catalog UUID from description or category text', () => {
+    const missingEntry = RECOMMENDATION_CATALOG.salesDepartmentFromZero;
+    const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(
+      (entry) => entry.id !== missingEntry.id,
+    ).map((entry) => {
+      const targetId = entry.id;
+      return {
+        ...service(targetId, entry.displayName),
+        serviceId: entry.kind === 'service' ? targetId : null,
+        packageId: entry.kind === 'package' ? targetId : null,
+      } as ServiceCandidate;
+    });
+    configuredServices.push({
+      ...service('unrelated-service-id', 'Несвязанная услуга'),
+      description: missingEntry.displayName,
+      category: { name: missingEntry.displayName },
+    } as ServiceCandidate);
+
+    expect(() =>
+      getRankerTestApi(ranker).validateConfiguredCatalog(configuredServices),
+    ).toThrow(
+      `Recommendation catalog item is missing: ${missingEntry.displayName}`,
+    );
+  });
   it('does not require superseded call-analysis services in the configured catalog', () => {
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(
       (entry) =>
@@ -911,7 +1013,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         diagnosticSignals: ['analytics_visibility'],
         score: 21,
       }),
-    } as any);
+    } as unknown as RecommendationScoringService);
 
     const result = weakFallbackRanker.rankRecommendations(
       {
@@ -1869,14 +1971,16 @@ describe('QuestionnaireRelevanceRankerService', () => {
       '',
     );
     const names = result.map((item) => item.serviceName);
-    expect(names).toEqual(expect.arrayContaining([
-      'Пакет обучения на месяц',
-      'CRM Старт',
-      'ИИ анализ документов',
-      'ИИ анализ CRM',
-      'ИИ анализ звонков и менеджеров',
-      'Эксперт РОП: консультация',
-    ]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'Пакет обучения на месяц',
+        'CRM Старт',
+        'ИИ анализ документов',
+        'ИИ анализ CRM',
+        'ИИ анализ звонков и менеджеров',
+        'Эксперт РОП: консультация',
+      ]),
+    );
     expect(names).not.toContain('Пакет обучения на 3 месяца');
   });
 
@@ -1911,17 +2015,21 @@ describe('QuestionnaireRelevanceRankerService', () => {
       '',
     );
     const targetIds = result.map((item) => item.packageId ?? item.serviceId);
-    expect(targetIds).toEqual(expect.arrayContaining([
-      RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
-      RECOMMENDATION_CATALOG.crmStart.id,
-      RECOMMENDATION_CATALOG.trainingOneMonth.id,
-      RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
-      RECOMMENDATION_CATALOG.aiDashboardAnalysis.id,
-      RECOMMENDATION_CATALOG.aiDocumentAnalysis.id,
-      RECOMMENDATION_CATALOG.aiCallManagersAnalysis.id,
-      RECOMMENDATION_CATALOG.salesHead.id,
-    ]));
-    expect(targetIds).not.toContain(RECOMMENDATION_CATALOG.trainingThreeMonths.id);
+    expect(targetIds).toEqual(
+      expect.arrayContaining([
+        RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+        RECOMMENDATION_CATALOG.crmStart.id,
+        RECOMMENDATION_CATALOG.trainingOneMonth.id,
+        RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
+        RECOMMENDATION_CATALOG.aiDashboardAnalysis.id,
+        RECOMMENDATION_CATALOG.aiDocumentAnalysis.id,
+        RECOMMENDATION_CATALOG.aiCallManagersAnalysis.id,
+        RECOMMENDATION_CATALOG.salesHead.id,
+      ]),
+    );
+    expect(targetIds).not.toContain(
+      RECOMMENDATION_CATALOG.trainingThreeMonths.id,
+    );
   });
 
   it('keeps AI document analysis and one-month training for an existing outbound split flow by catalog ID', () => {
@@ -1988,19 +2096,23 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
 
     const compacted = selectNonOverlappingRecommendations(
-      result.map((item) =>
-        (item.packageId ?? item.serviceId) === RECOMMENDATION_CATALOG.crmStart.id
-          ? {
-              ...item,
-              serviceId: null,
-              packageId: RECOMMENDATION_CATALOG.crmStart.id,
-              coveredServiceIds: [
-                RECOMMENDATION_CATALOG.telephonyIntegration.id,
-                RECOMMENDATION_CATALOG.messengerIntegration.id,
-              ],
-            }
-          : item,
-      ),
+      result.map((item) => {
+        if (
+          (item.packageId ?? item.serviceId) ===
+          RECOMMENDATION_CATALOG.crmStart.id
+        ) {
+          return {
+            ...item,
+            serviceId: null,
+            packageId: RECOMMENDATION_CATALOG.crmStart.id,
+            coveredServiceIds: [
+              RECOMMENDATION_CATALOG.telephonyIntegration.id,
+              RECOMMENDATION_CATALOG.messengerIntegration.id,
+            ],
+          };
+        }
+        return item;
+      }),
     );
     const compactedTargetIds = compacted.map(
       (item) => item.packageId ?? item.serviceId,
@@ -2042,5 +2154,4 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(serviceIds).toContain('training-1m');
     expect(serviceIds).not.toContain('training-3m');
   });
-
 });
