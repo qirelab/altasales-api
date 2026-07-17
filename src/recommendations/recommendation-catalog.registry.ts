@@ -6,11 +6,12 @@ export type RecommendationCatalogEntry = {
   displayName: string;
   legacyAliases: string[];
   requiredForValidation?: boolean;
+  availableForRecommendations?: boolean;
 };
 
 export const RECOMMENDATION_CATALOG = {
   salesDepartmentFromZero: {
-    id: 'ef4b6f8c-78ad-4ac7-a2ae-e8b9f1d525ca',
+    id: '48bb369e-3fce-442c-bdbb-e587c2b1051f',
     kind: 'package',
     displayName: 'Отдел продаж с нуля',
     legacyAliases: ['отдел продаж с нуля'],
@@ -78,19 +79,23 @@ export const RECOMMENDATION_CATALOG = {
   aiDashboardAnalysis: {
     id: '93404cd2-5292-40c0-a5a3-f77e8709a904',
     kind: 'service',
-    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u0430\u0448\u0431\u043e\u0440\u0434\u0430',
+    requiredForValidation: false,
+    availableForRecommendations: false,
+    displayName:
+      '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u0430\u0448\u0431\u043e\u0440\u0434\u0430',
     legacyAliases: [],
   },
   aiDocumentAnalysis: {
     id: '68b641f3-5f6f-4d30-9f56-f77cb9cce9ed',
     kind: 'service',
-    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u043e\u0432',
+    displayName:
+      '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u043e\u0432',
     legacyAliases: [],
   },
   aiCallManagersAnalysis: {
     id: 'd2dc70e0-0774-4401-ae25-d15662fe1877',
     kind: 'service',
-    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0437\u0432\u043e\u043d\u043a\u043e\u0432 \u0438 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u043e\u0432',
+    displayName: 'ИИ анализ звонков и менеджеров',
     legacyAliases: [],
   },
   salesHeadFocus: {
@@ -200,9 +205,7 @@ export function getRecommendationCatalogLegacyAliases(
   ...keys: RecommendationCatalogKey[]
 ): string[] {
   return Array.from(
-    new Set(
-      keys.flatMap((key) => RECOMMENDATION_CATALOG[key].legacyAliases),
-    ),
+    new Set(keys.flatMap((key) => RECOMMENDATION_CATALOG[key].legacyAliases)),
   );
 }
 
@@ -214,3 +217,9 @@ export const REQUIRED_RECOMMENDATION_CATALOG_ENTRIES =
   RECOMMENDATION_CATALOG_ENTRIES.filter(
     (entry) => entry.requiredForValidation !== false,
   );
+
+export const DISABLED_RECOMMENDATION_CATALOG_IDS = new Set(
+  RECOMMENDATION_CATALOG_ENTRIES.filter(
+    (entry) => entry.availableForRecommendations === false,
+  ).map((entry) => entry.id),
+);

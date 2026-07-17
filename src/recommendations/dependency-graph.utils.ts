@@ -45,11 +45,16 @@ export async function ensureDependencyGraphIsValid(
     throw new BadRequestException('One or more dependency IDs do not exist');
   }
 
-  if (userId && dependencies.some((dependency) => dependency.userId !== userId)) {
+  if (
+    userId &&
+    dependencies.some((dependency) => dependency.userId !== userId)
+  ) {
     throw new BadRequestException('Dependencies must belong to the same user');
   }
 
-  const cache = new Map(dependencies.map((dependency) => [dependency.id, dependency]));
+  const cache = new Map(
+    dependencies.map((dependency) => [dependency.id, dependency]),
+  );
   const visiting = new Set<string>();
   const visited = new Set<string>();
 
@@ -60,7 +65,9 @@ export async function ensureDependencyGraphIsValid(
       );
     }
     if (visiting.has(id)) {
-      throw new BadRequestException('Recommendation dependency graph cannot contain cycles');
+      throw new BadRequestException(
+        'Recommendation dependency graph cannot contain cycles',
+      );
     }
     if (visited.has(id)) return;
 
@@ -71,16 +78,22 @@ export async function ensureDependencyGraphIsValid(
         select: { id: true, userId: true, dependencyIds: true },
       });
       if (found.length !== 1) {
-        throw new BadRequestException('One or more dependency IDs do not exist');
+        throw new BadRequestException(
+          'One or more dependency IDs do not exist',
+        );
       }
       dependency = found[0];
       cache.set(id, dependency);
     }
     if (userId && dependency.userId !== userId) {
-      throw new BadRequestException('Dependencies must belong to the same user');
+      throw new BadRequestException(
+        'Dependencies must belong to the same user',
+      );
     }
     if (rootRecommendationId && id === rootRecommendationId) {
-      throw new BadRequestException('Recommendation dependency graph cannot contain cycles');
+      throw new BadRequestException(
+        'Recommendation dependency graph cannot contain cycles',
+      );
     }
 
     visiting.add(id);

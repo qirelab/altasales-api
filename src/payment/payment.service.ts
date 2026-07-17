@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
@@ -6,14 +11,15 @@ import { OrderItem } from '../orders/entities/order-item.entity';
 import { OrderItemSubItem } from '../orders/entities/order-item-sub-item.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { OrderNotificationService } from '../orders/order-notification.service';
-import { Payment, PaymentStatus } from './entities/payment.entity';
-import { CreatePaymentDto } from './dto/create-payment.dto';
-import { RobokassaService } from './robokassa.service';
 import { CartService } from '../cart/cart.service';
 import { BalanceService } from '../balance-transactions/balance.service';
-import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
+import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
+import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
+import { RobokassaService } from './robokassa.service';
+import { CreatePaymentDto } from './dto/create-payment.dto';
+import { Payment, PaymentStatus } from './entities/payment.entity';
 
 @Injectable()
 export class PaymentService {
@@ -29,7 +35,8 @@ export class PaymentService {
     private readonly cartService: CartService,
     private readonly balanceService: BalanceService,
     private readonly orderNotificationService: OrderNotificationService,
-  ) { }
+    private readonly recommendationUserLockService: RecommendationUserLockService,
+  ) {}
 
   async createWithManager(
     dto: CreatePaymentDto,
@@ -47,7 +54,9 @@ export class PaymentService {
     } else {
       const existing = await paymentRepo.findOne({ where: { invId } });
       if (existing) {
-        throw new BadRequestException(`Payment with InvId ${invId} already exists`);
+        throw new BadRequestException(
+          `Payment with InvId ${invId} already exists`,
+        );
       }
     }
 
@@ -83,7 +92,8 @@ export class PaymentService {
     userId: string,
     dto: CreateTopUpPaymentDto,
   ): Promise<{ paymentUrl: string; params: Record<string, string | number> }> {
-    const description = dto.description?.trim() || 'Пополнение внутреннего баланса';
+    const description =
+      dto.description?.trim() || 'Пополнение внутреннего баланса';
     return this.createWithManager(
       {
         userId,
@@ -108,13 +118,17 @@ export class PaymentService {
     await this.paymentRepository.save(payment);
   }
 
-  async handleResultCallback(body: Record<string, string>): Promise<{ response: string }> {
+  async handleResultCallback(
+    body: Record<string, string>,
+  ): Promise<{ response: string }> {
     const outSum = body.OutSum;
     const invId = body.InvId;
     const signatureValue = body.SignatureValue;
 
     if (!outSum || !invId || !signatureValue) {
-      return { response: `bad request: missing OutSum, InvId or SignatureValue` };
+      return {
+        response: `bad request: missing OutSum, InvId or SignatureValue`,
+      };
     }
 
     const shpParams = this.robokassaService.extractShpParams(body);
@@ -144,7 +158,8 @@ export class PaymentService {
       const paymentRepo = queryRunner.manager.getRepository(Payment);
       const orderRepo = queryRunner.manager.getRepository(Order);
       const orderItemRepo = queryRunner.manager.getRepository(OrderItem);
-      const recommendationRepo = queryRunner.manager.getRepository(Recommendation);
+      const recommendationRepo =
+        queryRunner.manager.getRepository(Recommendation);
 
       const payment = await paymentRepo.findOne({ where: { invId: invIdNum } });
       if (!payment) {
@@ -159,6 +174,30 @@ export class PaymentService {
       if (Number(payment.outSum).toFixed(2) !== Number(outSum).toFixed(2)) {
         await queryRunner.rollbackTransaction();
         return { response: `bad amount` };
+      }
+
+      let affectedOrderIds: string[] = [];
+      if (payment.orderIds?.length) {
+        affectedOrderIds = [...payment.orderIds];
+      } else if (payment.orderId != null) {
+        affectedOrderIds = [payment.orderId];
+      }
+
+      let affectedOrders: Order[] = [];
+      if (affectedOrderIds.length) {
+        affectedOrders = await orderRepo.find({
+          where: { id: In(affectedOrderIds) },
+          select: { id: true, userId: true },
+        });
+      }
+      const affectedUserIds = new Set<string>();
+      if (payment.userId) affectedUserIds.add(payment.userId);
+      affectedOrders.forEach((order) => affectedUserIds.add(order.userId));
+      for (const affectedUserId of [...affectedUserIds].sort()) {
+        await this.recommendationUserLockService.lockUser(
+          affectedUserId,
+          queryRunner.manager,
+        );
       }
 
       payment.status = PaymentStatus.Paid;
@@ -177,7 +216,9 @@ export class PaymentService {
         const itemIds = await orderItemRepo
           .createQueryBuilder('item')
           .select('item.id', 'id')
-          .where('item."orderId" IN (:...orderIds)', { orderIds: payment.orderIds })
+          .where('item."orderId" IN (:...orderIds)', {
+            orderIds: payment.orderIds,
+          })
           .getRawMany()
           .then((rows) => rows.map((row: { id: string }) => row.id));
         if (itemIds.length > 0) {
@@ -193,13 +234,17 @@ export class PaymentService {
           .set({ status: RecommendationStatus.Planned })
           .where('"orderId" IN (:...orderIds)', { orderIds: payment.orderIds })
           .execute();
-        const order = await orderRepo.findOne({ where: { id: payment.orderIds[0] } });
+        const order = await orderRepo.findOne({
+          where: { id: payment.orderIds[0] },
+        });
         if (order) {
           await this.cartService.clearAndArchiveActiveCart(order.userId);
         }
       } else if (payment.orderId != null) {
         notifyOrderIds = [payment.orderId];
-        const order = await orderRepo.findOne({ where: { id: payment.orderId } });
+        const order = await orderRepo.findOne({
+          where: { id: payment.orderId },
+        });
         await orderRepo.update(
           { id: payment.orderId },
           { status: OrderStatus.Planned },
@@ -267,7 +312,9 @@ export class PaymentService {
     return { response: `OK${invId}` };
   }
 
-  async handleFailCallback(body: Record<string, string>): Promise<{ response: string }> {
+  async handleFailCallback(
+    body: Record<string, string>,
+  ): Promise<{ response: string }> {
     const outSum = body.OutSum;
     const invId = body.InvId;
     const signatureValue = body.SignatureValue;
@@ -295,7 +342,9 @@ export class PaymentService {
       }
     }
 
-    const payment = await this.paymentRepository.findOne({ where: { invId: invIdNum } });
+    const payment = await this.paymentRepository.findOne({
+      where: { invId: invIdNum },
+    });
     if (!payment) {
       return { response: 'error: payment not found' };
     }
