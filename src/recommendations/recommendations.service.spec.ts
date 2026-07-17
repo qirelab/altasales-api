@@ -133,6 +133,7 @@ describe('RecommendationsService', () => {
       service,
       questionnaireRepository,
       recommendationRepository,
+      userRepository,
       serviceRepository,
       packageRepository,
       orderItemRepository,
@@ -630,6 +631,127 @@ describe('RecommendationsService', () => {
       'dependent-id',
     );
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+  it('rechecks recommendation coverage after acquiring the user lock', async () => {
+    const { service, recommendationRepository, relevanceRanker } = createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'manual-package-recommendation-id',
+        userId,
+        serviceId: null,
+        packageId: 'manual-package-id',
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+        orderId: null,
+        package: {
+          id: 'manual-package-id',
+          services: [{ id: 'service-id', name: 'CRM setup', isHidden: false, deletedAt: null }],
+        },
+      },
+    ]);
+    recommendationRepository.findOne.mockResolvedValue(null);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: 'service-id',
+        packageId: null,
+        serviceName: 'CRM setup',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'fit',
+        diagnosticSignals: [],
+        score: 90,
+        coveredServiceIds: ['service-id'],
+        coverageKeys: ['catalog_name:crm setup'],
+      },
+    ]);
+
+    const result = await service.generateForUser({ userId, persist: true });
+
+    expect(result).toEqual([]);
+    expect(recommendationRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('updates user status from a fresh locked recommendation row', async () => {
+    const { service, recommendationRepository, userRepository } = createService();
+    const recommendation = {
+      id: 'status-recommendation-id',
+      userId,
+      status: RecommendationStatus.Recommended,
+    };
+    recommendationRepository.findOne.mockResolvedValue(recommendation);
+
+    await service.updateForUser(userId, recommendation.id, {
+      status: RecommendationStatus.Completed,
+    });
+
+    expect(userRepository.findOne).toHaveBeenCalledWith({
+      where: { id: userId },
+      select: { id: true },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(recommendationRepository.findOne).toHaveBeenCalledWith({
+      where: { id: recommendation.id, userId },
+    });
+    expect(recommendationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: recommendation.id,
+        status: RecommendationStatus.Completed,
+      }),
+    );
+  });
+
+  it('updates dependencies through the same user-locked transaction', async () => {
+    const { service, recommendationRepository, userRepository } = createService();
+    const recommendation = {
+      id: 'dependency-update-recommendation-id',
+      userId,
+      dependencyIds: [],
+    };
+    recommendationRepository.findOne.mockResolvedValue(recommendation);
+
+    await service.updateDependenciesForAdmin(recommendation.id, []);
+
+    expect(userRepository.findOne).toHaveBeenCalledWith({
+      where: { id: userId },
+      select: { id: true },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(recommendationRepository.save).toHaveBeenCalledWith(recommendation);
+  });
+
+  it('re-reads the admin recommendation after locking before applying a patch', async () => {
+    const { service, recommendationRepository, userRepository } = createService();
+    const snapshot = {
+      id: 'admin-patch-recommendation-id',
+      userId,
+      status: RecommendationStatus.Recommended,
+      rationale: 'stale snapshot',
+    };
+    const fresh = {
+      ...snapshot,
+      rationale: 'fresh row',
+      priority: RecommendationPriority.Low,
+    };
+    recommendationRepository.findOne
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(fresh)
+      .mockResolvedValue(fresh);
+
+    await service.updateForAdmin(fresh.id, {
+      rationale: 'new rationale',
+    });
+
+    expect(userRepository.findOne).toHaveBeenCalledWith({
+      where: { id: userId },
+      select: { id: true },
+      lock: { mode: 'pessimistic_write' },
+    });
+    expect(recommendationRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: fresh.id,
+        rationale: 'new rationale',
+        priority: RecommendationPriority.Low,
+      }),
+    );
   });
   it('rejects logically duplicate packages with equal coverage', async () => {
     const { service, recommendationRepository, packageRepository } =

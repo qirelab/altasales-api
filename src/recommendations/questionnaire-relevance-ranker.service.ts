@@ -1012,18 +1012,30 @@ export class QuestionnaireRelevanceRankerService {
     const candidateById = new Map(
       services.map((service) => [this.getCandidateTargetId(service), service]),
     );
-    const usesConfiguredCatalog = REQUIRED_RECOMMENDATION_CATALOG_ENTRIES.some(
+    const hasAnyConfiguredId = REQUIRED_RECOMMENDATION_CATALOG_ENTRIES.some(
       (entry) => candidateById.has(entry.id),
     );
-    if (!usesConfiguredCatalog) return false;
+    if (!hasAnyConfiguredId) return false;
 
+    let usesOnlyConfiguredIds = true;
     for (const entry of REQUIRED_RECOMMENDATION_CATALOG_ENTRIES) {
-      const candidate = candidateById.get(entry.id);
+      let candidate: ServiceCandidate | null | undefined = candidateById.get(
+        entry.id,
+      );
+      if (!candidate) {
+        usesOnlyConfiguredIds = false;
+        candidate = this.findCandidateByAliases(
+          services,
+          [entry.displayName, ...entry.legacyAliases],
+          new Set(),
+        );
+      }
       if (!candidate) {
         throw new InternalServerErrorException(
           `Recommendation catalog item is missing: ${entry.displayName} (${entry.id})`,
         );
       }
+
       const actualKind = candidate.packageId ? 'package' : 'service';
       if (actualKind !== entry.kind) {
         throw new InternalServerErrorException(

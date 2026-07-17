@@ -149,6 +149,23 @@ describe('QuestionnaireRelevanceRankerService', () => {
     ).toThrow(`Recommendation catalog item is missing: Аудит CRM`);
   });
 
+  it('accepts a legacy catalog UUID when the configured name and kind match', () => {
+    const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.map((entry) => {
+      const targetId =
+        entry.id === RECOMMENDATION_CATALOG.salesDepartmentFromZero.id
+          ? 'legacy-sales-department-id'
+          : entry.id;
+      return {
+        ...service(targetId, entry.displayName),
+        serviceId: entry.kind === 'service' ? targetId : null,
+        packageId: entry.kind === 'package' ? targetId : null,
+      } as ServiceCandidate;
+    });
+
+    expect((ranker as any).validateConfiguredCatalog(configuredServices)).toBe(
+      false,
+    );
+  });
   it('does not require superseded call-analysis services in the configured catalog', () => {
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(
       (entry) =>

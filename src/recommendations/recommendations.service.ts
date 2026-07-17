@@ -575,69 +575,69 @@ export class RecommendationsService implements OnModuleInit {
     id: string,
     dto: UpdateAdminRecommendationDto,
   ): Promise<Recommendation> {
-    const recommendation = await this.getRecommendationOrThrow(id);
     const shouldUpdateTarget =
       dto.serviceId !== undefined || dto.packageId !== undefined;
     const target = shouldUpdateTarget
       ? await this.resolveUpdateRecommendationTarget(dto)
       : null;
-    const changedTarget = Boolean(
-      target &&
-        (target.serviceId !== recommendation.serviceId ||
-          target.packageId !== recommendation.packageId),
-    );
 
     if (dto.orderId !== undefined) {
       await this.ensureOrderExists(dto.orderId);
     }
 
-    const saved = await this.dataSource.transaction(async (manager) => {
-      await this.lockUserForRecommendationMutation(recommendation.userId, manager);
-      const recommendationRepository = manager.getRepository(Recommendation);
-
-      if (changedTarget && target) {
-        await this.ensureRecommendationIsUnique(
-          recommendation.userId,
-          target.serviceId,
-          target.packageId,
-          recommendation.id,
-          manager,
+    const saved = await this.withRecommendationMutation(
+      id,
+      async (manager, recommendation) => {
+        const recommendationRepository = manager.getRepository(Recommendation);
+        const changedTarget = Boolean(
+          target &&
+            (target.serviceId !== recommendation.serviceId ||
+              target.packageId !== recommendation.packageId),
         );
-        recommendation.serviceId = target.serviceId;
-        recommendation.packageId = target.packageId;
-      }
 
-      if (dto.orderId !== undefined) recommendation.orderId = dto.orderId;
-      if (dto.status !== undefined) recommendation.status = dto.status;
-      if (dto.priority !== undefined) recommendation.priority = dto.priority;
-      if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
+        if (changedTarget && target) {
+          await this.ensureRecommendationIsUnique(
+            recommendation.userId,
+            target.serviceId,
+            target.packageId,
+            recommendation.id,
+            manager,
+          );
+          recommendation.serviceId = target.serviceId;
+          recommendation.packageId = target.packageId;
+        }
 
-      if (dto.dependencyIds) {
-        recommendation.dependencyIds = await validateDependencyIds(
-          recommendationRepository,
-          recommendation.id,
-          dto.dependencyIds,
-          recommendation.userId,
-        );
-      }
+        if (dto.orderId !== undefined) recommendation.orderId = dto.orderId;
+        if (dto.status !== undefined) recommendation.status = dto.status;
+        if (dto.priority !== undefined) recommendation.priority = dto.priority;
+        if (dto.rationale !== undefined) recommendation.rationale = dto.rationale;
 
-      if (dto.diagnosticSignals) {
-        recommendation.diagnosticSignals = this.scoringService.normalizeSignals(
-          dto.diagnosticSignals,
-        );
-      }
+        if (dto.dependencyIds) {
+          recommendation.dependencyIds = await validateDependencyIds(
+            recommendationRepository,
+            recommendation.id,
+            dto.dependencyIds,
+            recommendation.userId,
+          );
+        }
 
-      const saved = await recommendationRepository.save(recommendation);
-      if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
-        await this.pruneReplaceableRecommendationsCoveredByPackage(
-          saved.userId,
-          saved.packageId,
-          saved.id,
-          manager,
-        );
-      }
-      return saved;
-    });
+        if (dto.diagnosticSignals) {
+          recommendation.diagnosticSignals =
+            this.scoringService.normalizeSignals(dto.diagnosticSignals);
+        }
+
+        const saved = await recommendationRepository.save(recommendation);
+        if (saved.packageId && saved.status === RecommendationStatus.Recommended) {
+          await this.pruneReplaceableRecommendationsCoveredByPackage(
+            saved.userId,
+            saved.packageId,
+            saved.id,
+            manager,
+          );
+        }
+        return saved;
+      },
+    );
     return this.findRecommendationWithRelationsOrThrow(saved.id);
   }
   // ── User self-service ─────────────────────────────────────────────
@@ -647,11 +647,15 @@ export class RecommendationsService implements OnModuleInit {
     id: string,
     dto: UpdateUserRecommendationDto,
   ): Promise<Recommendation> {
-    const recommendation = await this.getUserRecommendationOrThrow(userId, id);
-    recommendation.status = dto.status;
-    return this.recommendationRepository.save(recommendation);
+    return this.withRecommendationMutation(
+      id,
+      async (manager, recommendation) => {
+        recommendation.status = dto.status;
+        return manager.getRepository(Recommendation).save(recommendation);
+      },
+      userId,
+    );
   }
-
   async completeForUser(userId: string, id: string): Promise<Recommendation> {
     return this.updateForUser(userId, id, {
       status: RecommendationStatus.Completed,
@@ -664,16 +668,17 @@ export class RecommendationsService implements OnModuleInit {
     id: string,
     dependencyIds: string[],
   ): Promise<Recommendation> {
-    const recommendation = await this.getRecommendationOrThrow(id);
-    recommendation.dependencyIds = await validateDependencyIds(
-      this.recommendationRepository,
-      recommendation.id,
-      dependencyIds,
-      recommendation.userId,
-    );
-    return this.recommendationRepository.save(recommendation);
+    return this.withRecommendationMutation(id, async (manager, recommendation) => {
+      const recommendationRepository = manager.getRepository(Recommendation);
+      recommendation.dependencyIds = await validateDependencyIds(
+        recommendationRepository,
+        recommendation.id,
+        dependencyIds,
+        recommendation.userId,
+      );
+      return recommendationRepository.save(recommendation);
+    });
   }
-
   // ── Async generation jobs ─────────────────────────────────────────
 
   async startGenerationForUser(
@@ -734,17 +739,17 @@ export class RecommendationsService implements OnModuleInit {
       (item) => Number(item.score || 0) >= MIN_RECOMMENDATION_RANKING_SCORE,
     );
     ranked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
-    ranked = this.filterOverlappingRecommendations(
-      ranked,
-      await this.findExistingRecommendationCoverage(dto.userId),
-    );
-    ranked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
-    if (limit !== undefined) {
-      ranked = ranked.slice(0, limit);
-    }
 
     if (dto.persist === false) {
-      return ranked.map((item) =>
+      let visibleRanked = this.filterOverlappingRecommendations(
+        ranked,
+        await this.findExistingRecommendationCoverage(dto.userId),
+      );
+      visibleRanked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
+      if (limit !== undefined) {
+        visibleRanked = visibleRanked.slice(0, limit);
+      }
+      return visibleRanked.map((item) =>
         this.toPublicGeneratedRecommendationItem(item),
       );
     }
@@ -752,9 +757,17 @@ export class RecommendationsService implements OnModuleInit {
     const { persisted, compactedRecommendationIds } =
       await this.dataSource.transaction(async (manager) => {
         await this.lockUserForRecommendationMutation(dto.userId, manager);
-        const persisted: GeneratedRecommendationItem[] = [];
+        let currentRanked = this.filterOverlappingRecommendations(
+          ranked,
+          await this.findExistingRecommendationCoverage(dto.userId, manager),
+        );
+        currentRanked.sort((a, b) => this.compareGeneratedRecommendations(a, b));
+        if (limit !== undefined) {
+          currentRanked = currentRanked.slice(0, limit);
+        }
 
-        for (const item of ranked) {
+        const persisted: GeneratedRecommendationItem[] = [];
+        for (const item of currentRanked) {
           const recommendation = await this.upsertGeneratedRecommendation(
             dto.userId,
             item,
@@ -770,7 +783,7 @@ export class RecommendationsService implements OnModuleInit {
 
         await this.pruneStaleGeneratedRecommendations(
           dto.userId,
-          ranked,
+          currentRanked,
           manager,
         );
         const compactedRecommendationIds =
@@ -781,7 +794,6 @@ export class RecommendationsService implements OnModuleInit {
 
         return { persisted, compactedRecommendationIds };
       });
-
     return persisted.filter(
       (item) =>
         !item.recommendation?.id ||
@@ -792,34 +804,59 @@ export class RecommendationsService implements OnModuleInit {
   // ── Admin delete ──────────────────────────────────────────────────
 
   async removeForAdmin(id: string): Promise<void> {
-    const deleted = await this.dataSource.transaction(async (manager) => {
-      const recommendationRepository = manager.getRepository(Recommendation);
-      const recommendation = await recommendationRepository.findOne({
-        where: { id },
-      });
-      if (!recommendation) return null;
-
-      return this.deleteRecommendationIdsSafely(
+    await this.withRecommendationMutation(id, async (manager, recommendation) => {
+      const deleted = await this.deleteRecommendationIdsSafely(
         recommendation.userId,
         [id],
         new Map(),
         manager,
       );
+      if (deleted.deletedIds.length === 0) {
+        const dependentIds = deleted.blockedBy.get(id) ?? [];
+        throw new ConflictException(
+          dependentIds.length > 0
+            ? 'Recommendation ' + id + ' is required by: ' + dependentIds.join(', ')
+            : 'Recommendation ' + id + ' cannot be deleted while preserving the dependency graph',
+        );
+      }
     });
-    if (!deleted) {
-      throw new NotFoundException('Recommendation not found');
-    }
-    if (deleted.deletedIds.length === 0) {
-      const dependentIds = deleted.blockedBy.get(id) ?? [];
-      throw new ConflictException(
-        dependentIds.length > 0
-          ? 'Recommendation ' + id + ' is required by: ' + dependentIds.join(', ')
-          : 'Recommendation ' + id + ' cannot be deleted while preserving the dependency graph',
-      );
-    }
   }
   // ── Private helpers ───────────────────────────────────────────────
 
+  private async withRecommendationMutation<T>(
+    id: string,
+    operation: (
+      manager: EntityManager,
+      recommendation: Recommendation,
+    ) => Promise<T>,
+    expectedUserId?: string,
+  ): Promise<T> {
+    return this.dataSource.transaction(async (manager) => {
+      const recommendationRepository = manager.getRepository(Recommendation);
+      const where: { id: string; userId?: string } = expectedUserId
+        ? { id, userId: expectedUserId }
+        : { id };
+
+      if (expectedUserId) {
+        await this.lockUserForRecommendationMutation(expectedUserId, manager);
+      } else {
+        const snapshot = await recommendationRepository.findOne({
+          where,
+          select: { id: true, userId: true },
+        });
+        if (!snapshot) {
+          throw new NotFoundException(`Recommendation with id ${id} not found`);
+        }
+        await this.lockUserForRecommendationMutation(snapshot.userId, manager);
+      }
+
+      const recommendation = await recommendationRepository.findOne({ where });
+      if (!recommendation) {
+        throw new NotFoundException(`Recommendation with id ${id} not found`);
+      }
+      return operation(manager, recommendation);
+    });
+  }
   private async lockUserForRecommendationMutation(
     userId: string,
     manager: EntityManager,
@@ -830,6 +867,7 @@ export class RecommendationsService implements OnModuleInit {
       lock: { mode: 'pessimistic_write' },
     });
   }
+
   private async getRecommendationOrThrow(id: string): Promise<Recommendation> {
     const recommendation = await this.recommendationRepository.findOne({
       where: { id },
@@ -1269,8 +1307,11 @@ export class RecommendationsService implements OnModuleInit {
 
   private async findExistingRecommendationCoverage(
     userId: string,
+    manager?: EntityManager,
   ): Promise<ExistingRecommendationCoverage[]> {
-    const recommendations = await this.recommendationRepository.find({
+    const recommendationRepository =
+      manager?.getRepository(Recommendation) ?? this.recommendationRepository;
+    const recommendations = await recommendationRepository.find({
       where: { userId },
       relations: [
         'service',
