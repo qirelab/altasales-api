@@ -14,6 +14,7 @@ import { BalanceService } from '../balance-transactions/balance.service';
 import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
+import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
 
 @Injectable()
 export class PaymentService {
@@ -29,6 +30,7 @@ export class PaymentService {
     private readonly cartService: CartService,
     private readonly balanceService: BalanceService,
     private readonly orderNotificationService: OrderNotificationService,
+    private readonly recommendationUserLockService: RecommendationUserLockService,
   ) { }
 
   async createWithManager(
@@ -159,6 +161,27 @@ export class PaymentService {
       if (Number(payment.outSum).toFixed(2) !== Number(outSum).toFixed(2)) {
         await queryRunner.rollbackTransaction();
         return { response: `bad amount` };
+      }
+
+      const affectedOrderIds = payment.orderIds?.length
+        ? payment.orderIds
+        : payment.orderId != null
+          ? [payment.orderId]
+          : [];
+      const affectedOrders = affectedOrderIds.length
+        ? await orderRepo.find({
+            where: { id: In(affectedOrderIds) },
+            select: { id: true, userId: true },
+          })
+        : [];
+      const affectedUserIds = new Set<string>();
+      if (payment.userId) affectedUserIds.add(payment.userId);
+      affectedOrders.forEach((order) => affectedUserIds.add(order.userId));
+      for (const affectedUserId of [...affectedUserIds].sort()) {
+        await this.recommendationUserLockService.lockUser(
+          affectedUserId,
+          queryRunner.manager,
+        );
       }
 
       payment.status = PaymentStatus.Paid;

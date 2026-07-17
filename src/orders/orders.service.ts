@@ -26,6 +26,7 @@ import { BalanceService } from '../balance-transactions/balance.service';
 import { CartService } from '../cart/cart.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
+import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
 
 export interface OrderFileDto {
   id: string;
@@ -117,6 +118,7 @@ export class OrdersService {
     private readonly balanceService: BalanceService,
     private readonly cartService: CartService,
     private readonly orderNotificationService: OrderNotificationService,
+    private readonly recommendationUserLockService: RecommendationUserLockService,
   ) { }
 
   private mapOrderStatusToRecommendationStatus(status: OrderStatus): RecommendationStatus {
@@ -139,28 +141,31 @@ export class OrdersService {
     target: { serviceId?: string | null; packageId?: string | null },
     manager?: EntityManager,
   ): Promise<void> {
-    const recommendationRepo = manager
-      ? manager.getRepository(Recommendation)
-      : this.recommendationRepository;
-    const hasService = Boolean(target.serviceId);
-    const hasPackage = Boolean(target.packageId);
-    if (hasService === hasPackage) {
+    const sync = async (lockedManager: EntityManager): Promise<void> => {
+      const recommendationRepo = lockedManager.getRepository(Recommendation);
+      const hasService = Boolean(target.serviceId);
+      const hasPackage = Boolean(target.packageId);
+      if (hasService === hasPackage) return;
+
+      const recommendation = await recommendationRepo.findOne({
+        where: hasService
+          ? { userId: order.userId, serviceId: target.serviceId! }
+          : { userId: order.userId, packageId: target.packageId! },
+      });
+      if (!recommendation) return;
+
+      recommendation.status = this.mapOrderStatusToRecommendationStatus(order.status);
+      recommendation.orderId = order.status === OrderStatus.Cancelled ? null : order.id;
+      await recommendationRepo.save(recommendation);
+    };
+
+    if (manager) {
+      await this.recommendationUserLockService.lockUser(order.userId, manager);
+      await sync(manager);
       return;
     }
 
-    const recommendation = await recommendationRepo.findOne({
-      where: hasService
-        ? { userId: order.userId, serviceId: target.serviceId! }
-        : { userId: order.userId, packageId: target.packageId! },
-    });
-
-    if (!recommendation) {
-      return;
-    }
-
-    recommendation.status = this.mapOrderStatusToRecommendationStatus(order.status);
-    recommendation.orderId = order.status === OrderStatus.Cancelled ? null : order.id;
-    await recommendationRepo.save(recommendation);
+    await this.recommendationUserLockService.withUserLock(order.userId, sync);
   }
 
   private resolveOrderProductName(order: Order): string {
@@ -376,6 +381,7 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
+      await this.recommendationUserLockService.lockUser(userId, queryRunner.manager);
       const createdOrders: Order[] = [];
       let totalAmount = 0;
       let giftEligibleAmount = 0;
@@ -947,6 +953,8 @@ export class OrdersService {
       if (!subItem) {
         throw new NotFoundException(`Order sub-item with id ${subItemId} not found`);
       }
+
+      await this.recommendationUserLockService.lockUser(item.order.userId, queryRunner.manager);
 
       await this.hydrateDeletedExpertOfferings(item.subItems);
 

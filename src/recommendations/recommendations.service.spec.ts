@@ -114,6 +114,11 @@ describe('RecommendationsService', () => {
       ),
     };
 
+    const recommendationUserLockService = {
+      lockUser: jest.fn().mockResolvedValue(undefined),
+      withUserLock: jest.fn(),
+    };
+
     const service = new RecommendationsService(
       recommendationRepository as any,
       userRepository as any,
@@ -127,6 +132,7 @@ describe('RecommendationsService', () => {
       generationJobService as any,
       notificationService as any,
       dataSource as any,
+      recommendationUserLockService as any,
     );
 
     return {
@@ -141,6 +147,7 @@ describe('RecommendationsService', () => {
       relevanceRanker,
       generationJobService,
       dataSource,
+      recommendationUserLockService,
     };
   };
 
@@ -670,8 +677,35 @@ describe('RecommendationsService', () => {
     expect(recommendationRepository.create).not.toHaveBeenCalled();
   });
 
+  it('does not prune a recommendation that checkout attached an order to', async () => {
+    const { service, recommendationRepository } = createService();
+    const purchasedRecommendation = {
+      id: 'checked-out-recommendation-id',
+      userId,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.AI,
+      orderId: 'checkout-order-id',
+      dependencyIds: [],
+      diagnosticSignals: [],
+    };
+    recommendationRepository.find.mockResolvedValue([purchasedRecommendation]);
+    const manager = {
+      getRepository: jest.fn(() => recommendationRepository),
+    };
+
+    const result = await (service as any).deleteRecommendationIdsSafely(
+      userId,
+      [purchasedRecommendation.id],
+      new Map(),
+      manager,
+      true,
+    );
+
+    expect(result.deletedIds).toEqual([]);
+    expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
   it('updates user status from a fresh locked recommendation row', async () => {
-    const { service, recommendationRepository, userRepository } = createService();
+    const { service, recommendationRepository, recommendationUserLockService } = createService();
     const recommendation = {
       id: 'status-recommendation-id',
       userId,
@@ -683,11 +717,10 @@ describe('RecommendationsService', () => {
       status: RecommendationStatus.Completed,
     });
 
-    expect(userRepository.findOne).toHaveBeenCalledWith({
-      where: { id: userId },
-      select: { id: true },
-      lock: { mode: 'pessimistic_write' },
-    });
+    expect(recommendationUserLockService.lockUser).toHaveBeenCalledWith(
+      userId,
+      expect.anything(),
+    );
     expect(recommendationRepository.findOne).toHaveBeenCalledWith({
       where: { id: recommendation.id, userId },
     });
@@ -700,7 +733,7 @@ describe('RecommendationsService', () => {
   });
 
   it('updates dependencies through the same user-locked transaction', async () => {
-    const { service, recommendationRepository, userRepository } = createService();
+    const { service, recommendationRepository, recommendationUserLockService } = createService();
     const recommendation = {
       id: 'dependency-update-recommendation-id',
       userId,
@@ -710,16 +743,15 @@ describe('RecommendationsService', () => {
 
     await service.updateDependenciesForAdmin(recommendation.id, []);
 
-    expect(userRepository.findOne).toHaveBeenCalledWith({
-      where: { id: userId },
-      select: { id: true },
-      lock: { mode: 'pessimistic_write' },
-    });
+    expect(recommendationUserLockService.lockUser).toHaveBeenCalledWith(
+      userId,
+      expect.anything(),
+    );
     expect(recommendationRepository.save).toHaveBeenCalledWith(recommendation);
   });
 
   it('re-reads the admin recommendation after locking before applying a patch', async () => {
-    const { service, recommendationRepository, userRepository } = createService();
+    const { service, recommendationRepository, recommendationUserLockService } = createService();
     const snapshot = {
       id: 'admin-patch-recommendation-id',
       userId,
@@ -740,11 +772,10 @@ describe('RecommendationsService', () => {
       rationale: 'new rationale',
     });
 
-    expect(userRepository.findOne).toHaveBeenCalledWith({
-      where: { id: userId },
-      select: { id: true },
-      lock: { mode: 'pessimistic_write' },
-    });
+    expect(recommendationUserLockService.lockUser).toHaveBeenCalledWith(
+      userId,
+      expect.anything(),
+    );
     expect(recommendationRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({
         id: fresh.id,

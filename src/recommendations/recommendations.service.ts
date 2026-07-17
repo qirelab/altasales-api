@@ -42,6 +42,7 @@ import {
   type ServiceCandidate,
 } from './recommendation-scoring.service';
 import { RECOMMENDATION_CATALOG_ENTRIES } from './recommendation-catalog.registry';
+import { RecommendationUserLockService } from './recommendation-user-lock.service';
 import {
   ensureDependencyGraphIsValid,
   validateDependencyIds,
@@ -230,6 +231,7 @@ export class RecommendationsService implements OnModuleInit {
     private readonly generationJobService: RecommendationGenerationJobService,
     private readonly notificationService: RecommendationNotificationService,
     private readonly dataSource: DataSource,
+    private readonly userLockService: RecommendationUserLockService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -511,7 +513,7 @@ export class RecommendationsService implements OnModuleInit {
       await this.notificationService.shouldNotifyAboutNewRecommendation(user);
 
     const saved = await this.dataSource.transaction(async (manager) => {
-      await this.lockUserForRecommendationMutation(dto.userId, manager);
+      await this.userLockService.lockUser(dto.userId, manager);
       const recommendationRepository = manager.getRepository(Recommendation);
       await this.ensureRecommendationIsUnique(
         dto.userId,
@@ -756,7 +758,7 @@ export class RecommendationsService implements OnModuleInit {
 
     const { persisted, compactedRecommendationIds } =
       await this.dataSource.transaction(async (manager) => {
-        await this.lockUserForRecommendationMutation(dto.userId, manager);
+        await this.userLockService.lockUser(dto.userId, manager);
         let currentRanked = this.filterOverlappingRecommendations(
           ranked,
           await this.findExistingRecommendationCoverage(dto.userId, manager),
@@ -838,7 +840,7 @@ export class RecommendationsService implements OnModuleInit {
         : { id };
 
       if (expectedUserId) {
-        await this.lockUserForRecommendationMutation(expectedUserId, manager);
+        await this.userLockService.lockUser(expectedUserId, manager);
       } else {
         const snapshot = await recommendationRepository.findOne({
           where,
@@ -847,7 +849,7 @@ export class RecommendationsService implements OnModuleInit {
         if (!snapshot) {
           throw new NotFoundException(`Recommendation with id ${id} not found`);
         }
-        await this.lockUserForRecommendationMutation(snapshot.userId, manager);
+        await this.userLockService.lockUser(snapshot.userId, manager);
       }
 
       const recommendation = await recommendationRepository.findOne({ where });
@@ -857,17 +859,6 @@ export class RecommendationsService implements OnModuleInit {
       return operation(manager, recommendation);
     });
   }
-  private async lockUserForRecommendationMutation(
-    userId: string,
-    manager: EntityManager,
-  ): Promise<void> {
-    await manager.getRepository(User).findOne({
-      where: { id: userId },
-      select: { id: true },
-      lock: { mode: 'pessimistic_write' },
-    });
-  }
-
   private async getRecommendationOrThrow(id: string): Promise<Recommendation> {
     const recommendation = await this.recommendationRepository.findOne({
       where: { id },
@@ -1439,6 +1430,7 @@ export class RecommendationsService implements OnModuleInit {
       staleGeneratedIds,
       new Map(),
       manager,
+      true,
     );
   }
   /**
@@ -1531,6 +1523,7 @@ export class RecommendationsService implements OnModuleInit {
       idsToDelete,
       replacementByDeletedId,
       manager,
+      true,
     );
     return new Set(deletionResult.deletedIds);
   }
@@ -2075,6 +2068,7 @@ export class RecommendationsService implements OnModuleInit {
       idsToDelete,
       replacementByDeletedId,
       manager,
+      true,
     );
   }
 
@@ -2083,6 +2077,7 @@ export class RecommendationsService implements OnModuleInit {
     idsToDelete: string[],
     replacementByDeletedId: ReadonlyMap<string, string>,
     manager?: EntityManager,
+    requireReplaceable = false,
   ): Promise<RecommendationDeletionResult> {
     const recommendationRepository =
       manager?.getRepository(Recommendation) ?? this.recommendationRepository;
@@ -2093,7 +2088,15 @@ export class RecommendationsService implements OnModuleInit {
 
     const recommendations = await recommendationRepository.find({
       where: { userId },
-      select: { id: true, userId: true, dependencyIds: true },
+      select: {
+        id: true,
+        userId: true,
+        dependencyIds: true,
+        status: true,
+        orderId: true,
+        source: true,
+        diagnosticSignals: true,
+      },
       ...(manager
         ? { lock: { mode: 'pessimistic_write' as const } }
         : {}),
@@ -2102,7 +2105,14 @@ export class RecommendationsService implements OnModuleInit {
       recommendations.map((recommendation) => [recommendation.id, recommendation]),
     );
     const requestedDeleteIds = new Set(
-      uniqueIdsToDelete.filter((id) => recommendationsById.has(id)),
+      uniqueIdsToDelete.filter((id) => {
+        const recommendation = recommendationsById.get(id);
+        return Boolean(
+          recommendation &&
+            (!requireReplaceable ||
+              this.isReplaceableRecommendation(recommendation)),
+        );
+      }),
     );
     if (requestedDeleteIds.size === 0) {
       return { deletedIds: [], blockedBy: new Map() };

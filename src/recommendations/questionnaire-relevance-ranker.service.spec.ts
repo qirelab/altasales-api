@@ -166,6 +166,28 @@ describe('QuestionnaireRelevanceRankerService', () => {
       false,
     );
   });
+  it('does not accept a legacy catalog UUID from description or category text', () => {
+    const missingEntry = RECOMMENDATION_CATALOG.salesDepartmentFromZero;
+    const configuredServices = RECOMMENDATION_CATALOG_ENTRIES
+      .filter((entry) => entry.id !== missingEntry.id)
+      .map((entry) => {
+        const targetId = entry.id;
+        return {
+          ...service(targetId, entry.displayName),
+          serviceId: entry.kind === 'service' ? targetId : null,
+          packageId: entry.kind === 'package' ? targetId : null,
+        } as ServiceCandidate;
+      });
+    configuredServices.push({
+      ...service('unrelated-service-id', 'Несвязанная услуга'),
+      description: missingEntry.displayName,
+      category: { name: missingEntry.displayName },
+    } as ServiceCandidate);
+
+    expect(() =>
+      (ranker as any).validateConfiguredCatalog(configuredServices),
+    ).toThrow(`Recommendation catalog item is missing: ${missingEntry.displayName}`);
+  });
   it('does not require superseded call-analysis services in the configured catalog', () => {
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.filter(
       (entry) =>

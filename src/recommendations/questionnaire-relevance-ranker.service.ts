@@ -1017,17 +1017,21 @@ export class QuestionnaireRelevanceRankerService {
     );
     if (!hasAnyConfiguredId) return false;
 
+    const usedTargetIds = new Set<string>();
     let usesOnlyConfiguredIds = true;
     for (const entry of REQUIRED_RECOMMENDATION_CATALOG_ENTRIES) {
       let candidate: ServiceCandidate | null | undefined = candidateById.get(
         entry.id,
       );
+      if (candidate && usedTargetIds.has(this.getCandidateTargetId(candidate))) {
+        candidate = undefined;
+      }
       if (!candidate) {
         usesOnlyConfiguredIds = false;
-        candidate = this.findCandidateByAliases(
+        candidate = this.findCandidateByExactNames(
           services,
           [entry.displayName, ...entry.legacyAliases],
-          new Set(),
+          usedTargetIds,
         );
       }
       if (!candidate) {
@@ -1036,6 +1040,8 @@ export class QuestionnaireRelevanceRankerService {
         );
       }
 
+      const candidateId = this.getCandidateTargetId(candidate);
+      usedTargetIds.add(candidateId);
       const actualKind = candidate.packageId ? 'package' : 'service';
       if (actualKind !== entry.kind) {
         throw new InternalServerErrorException(
@@ -1044,7 +1050,7 @@ export class QuestionnaireRelevanceRankerService {
       }
     }
 
-    return true;
+    return usesOnlyConfiguredIds;
   }
 
   private findCandidateByCatalogKey(
@@ -1098,6 +1104,25 @@ export class QuestionnaireRelevanceRankerService {
   private uniqueStrings(values: string[]): string[] {
     return Array.from(
       new Set(values.map((value) => value.trim()).filter(Boolean)),
+    );
+  }
+
+  private findCandidateByExactNames(
+    services: ServiceCandidate[],
+    names: string[],
+    usedTargetIds: Set<string>,
+  ): ServiceCandidate | null {
+    const normalizedNames = new Set(
+      names.map((name) => this.normalize(name)),
+    );
+    return (
+      services.find((service) => {
+        const targetId = this.getCandidateTargetId(service);
+        return (
+          !usedTargetIds.has(targetId) &&
+          normalizedNames.has(this.normalize(service.name))
+        );
+      }) ?? null
     );
   }
 
