@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
 import { extname } from 'path';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';

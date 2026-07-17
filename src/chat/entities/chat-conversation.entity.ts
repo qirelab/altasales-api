@@ -11,8 +11,8 @@ import {
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
-import { ChatMessage } from './chat-message.entity';
 import { Order } from '../../orders/entities/order.entity';
+import { ChatMessage } from './chat-message.entity';
 
 @Entity()
 @Unique(['participantOneId', 'participantTwoId', 'orderId'])

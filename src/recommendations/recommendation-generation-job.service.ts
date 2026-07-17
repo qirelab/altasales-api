@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   Injectable,
   Logger,
@@ -5,7 +6,6 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'node:crypto';
 import { DataSource, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { RecommendationGenerationJob } from './entities/recommendation-generation-job.entity';

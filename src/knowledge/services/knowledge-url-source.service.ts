@@ -1,4 +1,3 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
 import { lookup } from 'dns/promises';
 import {
   request as httpRequest,
@@ -11,6 +10,7 @@ import {
 } from 'https';
 import { isIP } from 'net';
 import { Readable } from 'stream';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { KnowledgeExtractedTextBlock } from './knowledge-extraction.service';
 import { KnowledgeHtmlExtractionService } from './knowledge-html-extraction.service';
 

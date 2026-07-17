@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-
 import { User } from '../users/entities/user.entity';
 import { RopStatusResponseDto } from './dto/rop-status-response.dto';
 import { RopService } from './rop.service';

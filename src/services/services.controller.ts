@@ -18,6 +18,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { ServicesService } from './services.service';
 import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -28,7 +29,6 @@ import { UpdateAdminContractorDto } from './dto/update-admin-contractor.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
-import { ServicePackage } from '../packages/entities/package.entity';
 
 @ApiTags('services')
 @Controller('services')

@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { RopService } from '../rop/rop.service';
 import { User } from '../users/entities/user.entity';

@@ -354,8 +354,8 @@ export class LlmProxyService {
       Object.keys(anonymizationResult.semanticPlaceholderDescriptions).length >
       0
         ? ` Semantic placeholder descriptions: ${JSON.stringify(
-            anonymizationResult.semanticPlaceholderDescriptions,
-          )}.`
+          anonymizationResult.semanticPlaceholderDescriptions,
+        )}.`
         : '';
 
     return [

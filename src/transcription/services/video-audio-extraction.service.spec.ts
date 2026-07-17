@@ -169,7 +169,7 @@ describe('VideoAudioExtractionService', () => {
       callback(
         new Error('ffmpeg failed'),
         'raw stdout',
-        "Stream map '0:a:0' matches no streams. temp/input.mp4",
+        'Stream map \'0:a:0\' matches no streams. temp/input.mp4',
       );
     });
     const service = new VideoAudioExtractionService();
