@@ -1398,7 +1398,7 @@ export class RecommendationsService implements OnModuleInit {
       existingCoverage,
       idealTargetIds: new Set(
         items
-          .filter((item) => this.isIdealReferenceRecommendation(item))
+          .filter((item) => this.isPrioritizedRecommendation(item))
           .map((item) => this.getGeneratedRecommendationTargetId(item))
           .filter((targetId): targetId is string => Boolean(targetId)),
       ),
@@ -1409,9 +1409,9 @@ export class RecommendationsService implements OnModuleInit {
     a: GeneratedRecommendationItem,
     b: GeneratedRecommendationItem,
   ): number {
-    const aIsIdeal = this.isIdealReferenceRecommendation(a);
-    const bIsIdeal = this.isIdealReferenceRecommendation(b);
-    if (aIsIdeal !== bIsIdeal) return aIsIdeal ? -1 : 1;
+    const aIsPrioritized = this.isPrioritizedRecommendation(a);
+    const bIsPrioritized = this.isPrioritizedRecommendation(b);
+    if (aIsPrioritized !== bIsPrioritized) return aIsPrioritized ? -1 : 1;
 
     return (
       Number(b.score || 0) - Number(a.score || 0) ||
@@ -1419,10 +1419,13 @@ export class RecommendationsService implements OnModuleInit {
     );
   }
 
-  private isIdealReferenceRecommendation(
+  private isPrioritizedRecommendation(
     item: GeneratedRecommendationItem,
   ): boolean {
-    return this.hasIdealReferenceSignal(item.diagnosticSignals);
+    return (
+      this.hasIdealReferenceSignal(item.diagnosticSignals) ||
+      Boolean(item.diagnosticSignals?.includes('new_department_foundation'))
+    );
   }
 
   private hasIdealReferenceSignal(

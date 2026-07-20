@@ -2916,6 +2916,53 @@ describe('RecommendationsService', () => {
     ]);
   });
 
+  it('keeps the selected new department foundation above later AI analysis', async () => {
+    const { service, relevanceRanker } = createService();
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
+        packageId: null,
+        serviceName: 'ИИ анализ CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'после настройки',
+        diagnosticSignals: [],
+        score: 160,
+        coveredServiceIds: [RECOMMENDATION_CATALOG.aiCrmAnalysis.id],
+      },
+      {
+        serviceId: RECOMMENDATION_CATALOG.salesHead.id,
+        packageId: null,
+        serviceName: 'Руководитель отдела продаж',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'сопровождение запуска',
+        diagnosticSignals: ['new_department_foundation'],
+        score: 99,
+        coveredServiceIds: [RECOMMENDATION_CATALOG.salesHead.id],
+      },
+      {
+        serviceId: null,
+        packageId: RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+        serviceName: 'Отдел Продаж с нуля',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'основа нового отдела',
+        diagnosticSignals: ['new_department_foundation'],
+        score: 100,
+        coveredServiceIds: [],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+      RECOMMENDATION_CATALOG.salesHead.id,
+      RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
+    ]);
+  });
+
   it('keeps golden reference recommendations above expanded generated matches', async () => {
     const { service, relevanceRanker } = createService();
     relevanceRanker.rankRecommendations.mockReturnValue([

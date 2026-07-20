@@ -19,7 +19,6 @@ import { AnonymizationMode } from './enums/anonymization-mode.enum';
 import { DataClass } from './enums/data-class.enum';
 import { LlmProvider } from './enums/llm-provider.enum';
 import { LlmTask } from './enums/llm-task.enum';
-import { AnonymizerProvider } from './interfaces/anonymizer-provider.interface';
 import { LlmChatRequest } from './interfaces/llm-chat-request.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
 import { LlmProviderAdapter } from './interfaces/llm-provider-adapter.interface';
@@ -36,7 +35,6 @@ describe('LlmProxyService', () => {
   let openAICompatibleProvider: LlmProviderAdapter;
   let fallbackOpenAICompatibleProvider: LlmProviderAdapter;
   let anonymizerProvider: { anonymize: jest.Mock };
-  let piiAnonymizer: PiiAnonymizerService;
   let aiCache: AiCacheService;
   let loggerLogSpy: jest.SpyInstance;
   let loggerWarnSpy: jest.SpyInstance;
@@ -136,7 +134,6 @@ describe('LlmProxyService', () => {
 
     service = module.get(LlmProxyService);
     provider = module.get(MockLlmProvider);
-    piiAnonymizer = module.get(PiiAnonymizerService);
     aiCache = module.get(AiCacheService);
   });
 

@@ -258,7 +258,7 @@ describe('AnonymizerLlmProvider', () => {
   });
 
   it('does not leak raw provider errors in thrown errors', async () => {
-    fetchSpy.mockRejectedValueOnce(
+    fetchSpy.mockRejectedValue(
       new Error(
         'https://provider.test Authorization Bearer secret body user@example.com',
       ),
@@ -271,7 +271,7 @@ describe('AnonymizerLlmProvider', () => {
 
   it('does not leak anonymizer URL, headers, body, mode, or raw text in logs', async () => {
     process.env.LLM_ANONYMIZATION_MODE = 'required';
-    fetchSpy.mockRejectedValueOnce(
+    fetchSpy.mockRejectedValue(
       new Error(
         'https://anonymizer.test Authorization Bearer secret body user@example.com',
       ),
