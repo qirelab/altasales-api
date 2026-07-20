@@ -12,7 +12,7 @@ import {
   HttpStatus,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody, ApiOkResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiOkResponse } from '@nestjs/swagger';
 import { PaginatedAdminOrdersResponseDto } from './dto/paginated-admin-orders-response.dto';
 import { PaginatedOrdersResponseDto } from './dto/paginated-orders-response.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';

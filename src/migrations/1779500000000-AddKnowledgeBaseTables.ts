@@ -16,13 +16,19 @@ export class AddKnowledgeBaseTables1779500000000 implements MigrationInterface {
           CREATE TYPE "knowledge_document_sourcetype_enum" AS ENUM ('upload');
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'knowledge_document_status_enum') THEN
-          CREATE TYPE "knowledge_document_status_enum" AS ENUM ('pending', 'extracting', 'chunking', 'embedding', 'indexing', 'indexed', 'failed');
+          CREATE TYPE "knowledge_document_status_enum" AS ENUM (
+            'pending', 'extracting', 'chunking',
+            'embedding', 'indexing', 'indexed', 'failed'
+          );
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'knowledge_index_job_status_enum') THEN
           CREATE TYPE "knowledge_index_job_status_enum" AS ENUM ('pending', 'running', 'succeeded', 'failed');
         END IF;
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'knowledge_index_job_stage_enum') THEN
-          CREATE TYPE "knowledge_index_job_stage_enum" AS ENUM ('pending', 'extracting', 'chunking', 'embedding', 'indexing', 'indexed', 'failed');
+          CREATE TYPE "knowledge_index_job_stage_enum" AS ENUM (
+            'pending', 'extracting', 'chunking',
+            'embedding', 'indexing', 'indexed', 'failed'
+          );
         END IF;
       END $$;
     `);
