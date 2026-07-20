@@ -27,6 +27,16 @@ export default [
     },
     rules: {
       "no-trailing-spaces": "error",
+      // ESLint core no-unused-vars misclassifies TS type imports and
+      // interface parameters as unused. Rely on the TS-aware variant
+      // below instead, which understands TS type positions.
+      "no-unused-vars": "off",
+      // Allow unused vars starting with _ (matches frontend convention:
+      // callback params in types, destructuring drops, catch-block errs).
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
       "max-len": [
         "error",
         {

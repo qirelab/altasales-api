@@ -15,7 +15,6 @@ import {
 import {
   ApiOperation,
   ApiParam,
-  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';

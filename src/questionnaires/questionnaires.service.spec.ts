@@ -50,13 +50,13 @@ describe('QuestionnairesService', () => {
       scheduleProjectCreation: jest.fn(),
     };
     const service = new QuestionnairesService(
-      repo as any,
-      recommendationsService as any,
-      usersService as any,
-      mailService as any,
-      balanceService as any,
-      websocketGateway as any,
-      ropProvisioningService as any,
+      repo as never,
+      recommendationsService as never,
+      usersService as never,
+      mailService as never,
+      balanceService as never,
+      websocketGateway as never,
+      ropProvisioningService as never,
     );
 
     return {
@@ -70,7 +70,7 @@ describe('QuestionnairesService', () => {
   it('starts recommendation generation after a new questionnaire is saved', async () => {
     const { service, recommendationsService } = createService();
 
-    await service.create(answers as any, userId);
+    await service.create(answers as never, userId);
 
     expect(recommendationsService.startGenerationForUser).toHaveBeenCalledWith(
       userId,
@@ -90,7 +90,7 @@ describe('QuestionnairesService', () => {
     const { service, recommendationsService, balanceService } =
       createService(existing);
 
-    await service.create(answers as any, userId);
+    await service.create(answers as never, userId);
 
     expect(recommendationsService.startGenerationForUser).toHaveBeenCalledWith(
       userId,
@@ -115,7 +115,7 @@ describe('QuestionnairesService', () => {
 
     await service.updateAnswersForAdmin('existing-questionnaire-id', {
       components: { crm: true },
-    } as any);
+    } as never);
 
     expect(recommendationsService.startGenerationForUser).toHaveBeenCalledWith(
       userId,
