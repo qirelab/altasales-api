@@ -1576,14 +1576,34 @@ export class RecommendationsService implements OnModuleInit {
     recommendation: Pick<
       Recommendation,
       'status' | 'orderId' | 'source' | 'diagnosticSignals'
-    >,
+    > &
+      Partial<Pick<Recommendation, 'rationale'>>,
   ): boolean {
     return (
-      recommendation.source !== RecommendationSource.Manual &&
+      (recommendation.source !== RecommendationSource.Manual ||
+        this.isLegacyQuestionnaireRecommendation(recommendation)) &&
       recommendation.status === RecommendationStatus.Recommended &&
       recommendation.orderId == null &&
       !this.hasIdealReferenceSignal(recommendation.diagnosticSignals)
     );
+  }
+
+  private isLegacyQuestionnaireRecommendation(
+    recommendation: Pick<Recommendation, 'source' | 'orderId'> &
+      Partial<Pick<Recommendation, 'rationale'>>,
+  ): boolean {
+    if (
+      recommendation.source !== RecommendationSource.Manual ||
+      recommendation.orderId != null
+    ) {
+      return false;
+    }
+
+    const rationale = (recommendation.rationale ?? '').toLocaleLowerCase();
+    return [
+      'рекомендация выбрана по анкете',
+      'рекомендация соответствует явно указанным ответам анкеты',
+    ].some((marker) => rationale.includes(marker));
   }
 
   private getGeneratedRecommendationTargetId(
@@ -1693,7 +1713,10 @@ export class RecommendationsService implements OnModuleInit {
 
     const existing = await recommendationRepository.findOne({ where });
     if (existing) {
-      if (existing.source === RecommendationSource.Manual) {
+      if (
+        existing.source === RecommendationSource.Manual &&
+        !this.isLegacyQuestionnaireRecommendation(existing)
+      ) {
         return existing;
       }
       existing.priority = item.priority;
