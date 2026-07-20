@@ -10,6 +10,7 @@ import { ServicePackage } from '../packages/entities/package.entity';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { ExpertProfile } from '../experts/entities/expert-profile.entity';
+import { applyPublicPackageFilter } from '../packages/package-visibility';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { CreateAdminContractorDto } from './dto/create-admin-contractor.dto';
 import { GetAdminContractorsQueryDto } from './dto/get-admin-contractors-query.dto';
@@ -19,7 +20,6 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 import { GetServicesQueryDto } from './dto/get-services-query.dto';
 import { Service } from './entities/service.entity';
 import { ServiceType } from './entities/service-type.enum';
-import { applyPublicPackageFilter } from '../packages/package-visibility';
 import {
   activeServiceWhere,
   applyActiveServiceFilter,

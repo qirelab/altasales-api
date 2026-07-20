@@ -113,14 +113,14 @@ export class Recommendation {
     description: 'Prerequisite recommendation IDs',
     type: [String],
   })
-  @Column({ type: 'jsonb', default: () => "'[]'" })
+  @Column({ type: 'jsonb', default: () => '\'[]\'' })
   dependencyIds: string[];
 
   @ApiProperty({
     description: 'Diagnostic signals that led to this recommendation',
     type: [String],
   })
-  @Column({ type: 'jsonb', default: () => "'[]'" })
+  @Column({ type: 'jsonb', default: () => '\'[]\'' })
   diagnosticSignals: string[];
 
   @ApiPropertyOptional({ description: 'When recommendation was AI-generated' })

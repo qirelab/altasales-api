@@ -22,7 +22,7 @@ type OpenAICompatibleEmbeddingResponse = {
 
 @Injectable()
 export class OpenAICompatibleEmbeddingProviderAdapter
-  implements EmbeddingProviderAdapter
+implements EmbeddingProviderAdapter
 {
   readonly providerId = LlmProvider.OpenAICompatible;
 
@@ -81,7 +81,7 @@ export class OpenAICompatibleEmbeddingProviderAdapter
     apiKey: string;
     model: string;
     dimensions?: number;
-  } {
+    } {
     const baseUrl = this.normalizeBaseUrl(
       process.env.LLM_OPENAI_COMPATIBLE_BASE_URL,
     );

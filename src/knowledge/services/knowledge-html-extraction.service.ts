@@ -70,7 +70,7 @@ export class KnowledgeHtmlExtractionService {
       .replace(/&lt;/gi, '<')
       .replace(/&gt;/gi, '>')
       .replace(/&quot;/gi, '"')
-      .replace(/&#39;/g, "'")
+      .replace(/&#39;/g, '\'')
       .replace(/&#(\d+);/g, (_match, code: string) =>
         String.fromCodePoint(Number(code)),
       )

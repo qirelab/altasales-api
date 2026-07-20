@@ -1,6 +1,6 @@
+import { createHash } from 'node:crypto';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash } from 'node:crypto';
 
 type CacheEntry<T> = {
   value: T;

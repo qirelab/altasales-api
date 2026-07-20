@@ -1,11 +1,11 @@
 import { DataClass } from '../enums/data-class.enum';
 import { LlmTask } from '../enums/llm-task.enum';
 import { AiErrorCode } from '../errors/ai-error';
-import { SafeLlmErrorCode } from './safe-llm-log.interface';
 import { AiMonitoringEventName } from '../enums/ai-monitoring-event-name.enum';
 import { AiMonitoringOperation } from '../enums/ai-monitoring-operation.enum';
 import { AiMonitoringStage } from '../enums/ai-monitoring-stage.enum';
 import { AiMonitoringStatus } from '../enums/ai-monitoring-status.enum';
+import { SafeLlmErrorCode } from './safe-llm-log.interface';
 
 export interface AiMonitoringEvent {
   eventName: AiMonitoringEventName;
