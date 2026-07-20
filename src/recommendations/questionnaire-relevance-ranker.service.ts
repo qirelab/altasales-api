@@ -95,6 +95,7 @@ type NormalizedQuestionnaireProfile = {
   desiredPeriod: string;
   selectedComponents: SelectedComponent[];
   existingComponents: SelectedComponent[];
+  hasExplicitComponentSplit: boolean;
   managersCount: number;
   targetRevenue: number;
 };
@@ -137,7 +138,7 @@ const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
   },
   {
     catalogKey: 'salesDocumentsPackage',
-    score: 70,
+    score: 92,
     reason: 'нужны базовые документы отдела',
     requiredComponents: ['salesDocuments', 'scripts'],
   },
@@ -308,7 +309,16 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
       points: EXPLICIT_COMPONENT_POINTS,
       reason: 'аналитика выбрана в анкете',
     },
-    { terms: ['отказ'], points: 8, reason: 'нужно разбирать потери сделок' },
+    {
+      catalogKeys: ['rejectedDealsAnalysis'],
+      points: 76,
+      reason: 'аналитика выбрана для разбора потерянных сделок',
+    },
+    {
+      terms: ['отказ'],
+      points: 76,
+      reason: 'нужно разбирать потери сделок',
+    },
   ],
   scripts: [
     {
@@ -337,7 +347,7 @@ const COMPONENT_RELEVANCE_RULES: Record<SelectedComponent, RelevanceRule[]> = {
   salesDocuments: [
     {
       catalogKeys: ['salesDocumentsPackage'],
-      points: EXPLICIT_COMPONENT_POINTS,
+      points: 90,
       reason: 'документы ОП выбраны в анкете',
     },
   ],
@@ -524,21 +534,10 @@ const IDEAL_RECOMMENDATION_REFERENCES: IdealRecommendationReference[] = [
         'crm',
         'telephony',
         'messenger',
-        'trainingSystem',
         'analytics',
         'salesHead',
       ],
       componentsAny: ['salesManager', 'contactDatabase'],
-      componentsAllowed: [
-        'crm',
-        'telephony',
-        'messenger',
-        'contactDatabase',
-        'salesManager',
-        'trainingSystem',
-        'analytics',
-        'salesHead',
-      ],
     },
     recommendations: [
       {
@@ -716,6 +715,14 @@ export class QuestionnaireRelevanceRankerService {
       const llmBonus = fromRanked ? Math.max(8 - fromRanked.index, 1) : 0;
 
       if (
+        normalizedProfile.hasExplicitComponentSplit &&
+        rulePoints < MIN_RECOMMENDATION_RANKING_SCORE
+      ) {
+        continue;
+      }
+
+      if (
+        !normalizedProfile.hasExplicitComponentSplit &&
         !fromRanked &&
         rulePoints <= 0 &&
         fallback.score < MIN_UNSELECTED_FALLBACK_SCORE
@@ -821,17 +828,22 @@ export class QuestionnaireRelevanceRankerService {
   private detectStage(
     profile: NormalizedQuestionnaireProfile,
   ): QuestionnaireStage {
+    const hasExistingProduct = this.includesAny(profile.productStageText, [
+      'existing',
+      'уже продаю',
+    ]);
     if (
       profile.productStageText === 'new' ||
-      this.includesAny(profile.rawText, [
-        'построить отдел продаж',
-        'с нуля',
-        'отсутствует отдел продаж',
-        'нет отдела продаж',
-        'продукт новый',
-        'новый продукт',
-        'нет оп',
-      ])
+      (!hasExistingProduct &&
+        this.includesAny(profile.rawText, [
+          'построить отдел продаж',
+          'с нуля',
+          'отсутствует отдел продаж',
+          'нет отдела продаж',
+          'продукт новый',
+          'новый продукт',
+          'нет оп',
+        ]))
     ) {
       return 'new_department';
     }
@@ -1258,6 +1270,34 @@ export class QuestionnaireRelevanceRankerService {
       );
     });
 
+    if (
+      profile.selectedComponents.includes('analytics') &&
+      (profile.selectedComponents.includes('crm') ||
+        profile.existingComponents.includes('crm'))
+    ) {
+      addCatalog(
+        ['crmDealsAnalysis'],
+        72,
+        'аналитика и CRM выбраны для анализа сделок',
+      );
+    }
+
+    if (
+      stage !== 'new_department' &&
+      profile.selectedComponents.includes('salesHead')
+    ) {
+      addCatalog(
+        ['salesHeadExpertConsultation'],
+        86,
+        'существующему ОП нужна консультация эксперта РОП',
+      );
+      add(
+        ['эксперт роп', 'консультация роп'],
+        86,
+        'существующему ОП нужна консультация эксперта РОП',
+      );
+    }
+
     if (profile.selectedComponents.includes('trainingSystem')) {
       addCatalog(
         [
@@ -1410,6 +1450,7 @@ export class QuestionnaireRelevanceRankerService {
       desiredPeriod: this.getDesiredPeriod(profile),
       selectedComponents,
       existingComponents,
+      hasExplicitComponentSplit: usesExistingAndDesiredComponents,
       managersCount: Math.max(
         this.toNumber(profile.calculatedManagersCount),
         this.inferManagersCount(profile),
@@ -1542,7 +1583,12 @@ export class QuestionnaireRelevanceRankerService {
       selectedComponents.includes('crm') &&
       !existingComponents.includes('crm') &&
       (this.matchesCatalogCandidate(service, serviceText, 'crmAudit') ||
-        this.matchesCatalogCandidate(service, serviceText, 'crmDealsAnalysis'))
+        (this.matchesCatalogCandidate(
+          service,
+          serviceText,
+          'crmDealsAnalysis',
+        ) &&
+          !selectedComponents.includes('analytics')))
     ) {
       return 'CRM выбрана для внедрения, а не для аудита';
     }
@@ -1578,12 +1624,12 @@ export class QuestionnaireRelevanceRankerService {
       stage === 'new_department' &&
       (this.matchesCatalogCandidate(service, serviceText, 'aiSalesHead') ||
         this.matchesCatalogCandidate(service, serviceText, 'salesHeadFocus') ||
-        this.matchesCatalogCandidate(service, serviceText, 'crmAudit') ||
         this.matchesCatalogCandidate(
           service,
           serviceText,
-          'crmDealsAnalysis',
+          'salesHeadExpertConsultation',
         ) ||
+        this.matchesCatalogCandidate(service, serviceText, 'crmAudit') ||
         this.matchesCatalogCandidate(service, serviceText, 'crmBronze') ||
         this.includesAny(serviceText, [
           'ии роп',
@@ -1595,12 +1641,8 @@ export class QuestionnaireRelevanceRankerService {
           'аудит crm',
           'настройка воронок сделок',
           'подготовка технического задания',
-          'отчет по ведению сделок',
-          'отчёт по ведению сделок',
           'отчет с оценкой проанализированных переписок',
           'отчёт с оценкой проанализированных переписок',
-          'аналитический отчет по отказным сделкам',
-          'аналитический отчёт по отказным сделкам',
           'настройка отчета',
           'настройка отчёта',
           'на контроле',
@@ -1747,6 +1789,7 @@ export class QuestionnaireRelevanceRankerService {
 
   private isSalesHeadVariant(item: GeneratedRecommendationItem): boolean {
     return this.includesAny(this.normalize(item.serviceName), [
+      'эксперт роп',
       'ии роп',
       'роп-фокус',
       'роп на аутсорсинге',
