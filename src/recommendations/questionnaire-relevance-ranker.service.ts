@@ -19,7 +19,9 @@ import {
 import { selectNonOverlappingRecommendations } from './recommendation-coverage.util';
 
 type QuestionnaireStage =
-  'new_department' | 'basic_department' | 'advanced_department';
+  | 'new_department'
+  | 'basic_department'
+  | 'advanced_department';
 
 type ServiceGroup =
   | 'crm'

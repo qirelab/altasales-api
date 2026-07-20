@@ -87,9 +87,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
           coveredServiceIds:
             entry.id === RECOMMENDATION_CATALOG.crmStart.id
               ? [
-                RECOMMENDATION_CATALOG.telephonyIntegration.id,
-                RECOMMENDATION_CATALOG.messengerIntegration.id,
-              ]
+                  RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                  RECOMMENDATION_CATALOG.messengerIntegration.id,
+                ]
               : undefined,
         }) as ServiceCandidate,
     );
