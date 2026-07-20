@@ -78,7 +78,8 @@ export class AddOrderItemStatusesAndSubItems1779500000000 implements MigrationIn
         "status" "order_item_sub_item_status_enum" NOT NULL DEFAULT 'planned',
         CONSTRAINT "PK_order_item_sub_item_id" PRIMARY KEY ("id"),
         CONSTRAINT "UQ_order_item_sub_item_orderItemId_serviceId" UNIQUE ("orderItemId", "serviceId"),
-        CONSTRAINT "FK_order_item_sub_item_orderItemId" FOREIGN KEY ("orderItemId") REFERENCES "order_item"("id") ON DELETE CASCADE,
+        CONSTRAINT "FK_order_item_sub_item_orderItemId"
+          FOREIGN KEY ("orderItemId") REFERENCES "order_item"("id") ON DELETE CASCADE,
         CONSTRAINT "FK_order_item_sub_item_serviceId" FOREIGN KEY ("serviceId") REFERENCES "service"("id") ON DELETE RESTRICT
       )
     `);

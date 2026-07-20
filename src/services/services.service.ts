@@ -24,7 +24,6 @@ import {
   activeServiceWhere,
   applyActiveServiceFilter,
   applyPublicServiceFilter,
-  filterActiveServices,
   publicServiceWhere,
 } from './service-visibility';
 

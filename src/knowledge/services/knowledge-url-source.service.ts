@@ -14,8 +14,6 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { KnowledgeExtractedTextBlock } from './knowledge-extraction.service';
 import { KnowledgeHtmlExtractionService } from './knowledge-html-extraction.service';
 
-type ResolveHost = (hostname: string) => Promise<string[]>;
-
 export type KnowledgeUrlSourcePayload = {
   sourceUrl: string;
   title?: string;

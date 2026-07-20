@@ -66,11 +66,15 @@ export class BalanceService {
     const raw = await txRepo
       .createQueryBuilder('t')
       .select(
-        `COALESCE(SUM(CASE WHEN t."amount" > 0 AND (t."pocket" = :gift OR t."type" = :registrationBonus) THEN t."amount" ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN t."amount" > 0 `
+        + `AND (t."pocket" = :gift OR t."type" = :registrationBonus) `
+        + `THEN t."amount" ELSE 0 END), 0)`,
         'giftCredits',
       )
       .addSelect(
-        `COALESCE(SUM(CASE WHEN t."amount" > 0 AND NOT (t."pocket" = :gift OR t."type" = :registrationBonus) THEN t."amount" ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN t."amount" > 0 `
+        + `AND NOT (t."pocket" = :gift OR t."type" = :registrationBonus) `
+        + `THEN t."amount" ELSE 0 END), 0)`,
         'mainCredits',
       )
       .addSelect(
