@@ -6,7 +6,14 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
+import {
+  DataSource,
+  IsNull,
+  LessThan,
+  MoreThan,
+  QueryDeepPartialEntity,
+  Repository,
+} from 'typeorm';
 import { GenerateRecommendationsDto } from './dto/generate-recommendations.dto';
 import { RecommendationGenerationJob } from './entities/recommendation-generation-job.entity';
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
@@ -30,6 +37,7 @@ type GenerationJobProcessor = (
 type GenerationJobStartRequest = Omit<GenerateRecommendationsDto, 'userId'> & {
   idempotencyKey?: string;
 };
+type GenerationJobUpdate = QueryDeepPartialEntity<RecommendationGenerationJob>;
 
 const GENERATION_JOB_STALE_MS = 10 * 60 * 1000;
 const GENERATION_JOB_LEASE_MS = GENERATION_JOB_STALE_MS;
@@ -80,7 +88,7 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
             status: RecommendationGenerationStatus.Pending,
           },
           {
-            request: this.buildRequest(dto) as any,
+            request: this.buildRequest(dto) as GenerationJobUpdate['request'],
             result: null,
             error: null,
             startedAt: null,
@@ -101,7 +109,7 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
       userId,
       idempotencyKey: normalizedIdempotencyKey,
       status: RecommendationGenerationStatus.Pending,
-      request: this.buildRequest(dto) as any,
+      request: this.buildRequest(dto),
       result: null,
       error: null,
       startedAt: null,
@@ -290,7 +298,7 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
           leaseExpiresAt: MoreThan(new Date()),
         },
         {
-          result: result as any,
+          result: result as GenerationJobUpdate['result'],
           status: RecommendationGenerationStatus.Completed,
           completedAt: new Date(),
           leaseToken: null,
@@ -361,10 +369,9 @@ export class RecommendationGenerationJobService implements OnModuleDestroy {
       await queryRunner.connect();
       await queryRunner.startTransaction();
       transactionStarted = true;
-      await queryRunner.query(
-        'SELECT pg_advisory_xact_lock(hashtext($1))',
-        [userId],
-      );
+      await queryRunner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        userId,
+      ]);
 
       const result = await processor();
       await queryRunner.commitTransaction();

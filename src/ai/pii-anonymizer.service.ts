@@ -47,6 +47,7 @@ const PII_PATTERNS: Record<Exclude<PiiKind, 'bank_card'>, RegExp> = {
   snils: /\b\d{3}-\d{3}-\d{3}\s?\d{2}\b/g,
   passport: /(?:passport|паспорт)\D{0,20}\b\d{2}\s?\d{2}\s?\d{6}\b/giu,
   birth_date:
+    // eslint-disable-next-line max-len -- keep the audited PII expression intact.
     /(?:birth(?:\s+date)?|date\s+of\s+birth|дата\s+рождения|родил[асься]*|рождени[ея]).{0,40}\b(?:\d{2}[./-]\d{2}[./-]\d{4}|\d{4}[./-]\d{2}[./-]\d{2})\b/giu,
 };
 
@@ -82,9 +83,10 @@ export class PiiAnonymizerService {
       PiiKind,
       'bank_card'
     >[]) {
-      stats[kind] = kind === 'inn'
-        ? this.countValidInn(text)
-        : this.countMatches(text, PII_PATTERNS[kind]);
+      stats[kind] =
+        kind === 'inn'
+          ? this.countValidInn(text)
+          : this.countMatches(text, PII_PATTERNS[kind]);
     }
     stats.bank_card = this.countBankCards(text);
 
@@ -94,7 +96,9 @@ export class PiiAnonymizerService {
     };
   }
 
-  async anonymizeMessages(messages: LlmMessage[]): Promise<AnonymizationResult> {
+  async anonymizeMessages(
+    messages: LlmMessage[],
+  ): Promise<AnonymizationResult> {
     if (!this.anonymizerProvider) {
       throw new Error('anonymizer_unavailable');
     }
@@ -348,12 +352,18 @@ export class PiiAnonymizerService {
     }
 
     if (digits.length === 10) {
-      return this.innChecksum(digits, [2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[9];
+      return (
+        this.innChecksum(digits, [2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[9]
+      );
     }
 
     if (digits.length === 12) {
-      return this.innChecksum(digits, [7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[10]
-        && this.innChecksum(digits, [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === digits[11];
+      return (
+        this.innChecksum(digits, [7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) ===
+          digits[10] &&
+        this.innChecksum(digits, [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) ===
+          digits[11]
+      );
     }
 
     return false;

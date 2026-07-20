@@ -7,7 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AiMonitoringService } from './ai-monitoring.service';
-import { AiError, isAiError } from './errors/ai-error';
+import { isAiError } from './errors/ai-error';
 import { AiMonitoringEventName } from './enums/ai-monitoring-event-name.enum';
 import { AiMonitoringOperation } from './enums/ai-monitoring-operation.enum';
 import { AiMonitoringStage } from './enums/ai-monitoring-stage.enum';
@@ -18,9 +18,7 @@ import { EmbeddingProviderAdapter } from './interfaces/embedding-provider-adapte
 import { EmbeddingRequest } from './interfaces/embedding-request.interface';
 import { EmbeddingResponse } from './interfaces/embedding-response.interface';
 import { SafeLlmErrorCode } from './interfaces/safe-llm-log.interface';
-import {
-  EMBEDDING_PROVIDER_ADAPTERS,
-} from './providers/embedding-provider-registry';
+import { EMBEDDING_PROVIDER_ADAPTERS } from './providers/embedding-provider-registry';
 import type { EmbeddingProviderRegistry } from './providers/embedding-provider-registry';
 import { OpenAICompatibleEmbeddingProviderAdapter } from './providers/openai-compatible-embedding.provider';
 import { executeWithResilience } from './resilience/llm-resilience';
@@ -225,32 +223,38 @@ export class EmbeddingProxyService {
       DEFAULT_EMBEDDING_BACKOFF_MAX_MS,
     );
 
-    return executeWithResilience((signal) => provider.embed(inputs, { signal }), {
-      timeoutMs,
-      maxAttempts,
-      backoffBaseMs,
-      backoffMaxMs,
-      onAttemptFailure: ({ attempt, maxAttempts, error, latencyMs }) =>
-        this.monitoring.log({
-          eventName: AiMonitoringEventName.AiRetryAttemptFailed,
-          operation: AiMonitoringOperation.Embedding,
-          stage: AiMonitoringStage.Retry,
-          status: AiMonitoringStatus.Failure,
-          providerAlias: 'primary',
-          modelAlias: 'default',
-          providerConfigured: true,
-          dataClass,
-          errorCode: error.code,
-          attempt,
-          maxAttempts,
-          latencyMs,
-          inputCount: inputs.length,
-        }),
-    });
+    return executeWithResilience(
+      (signal) => provider.embed(inputs, { signal }),
+      {
+        timeoutMs,
+        maxAttempts,
+        backoffBaseMs,
+        backoffMaxMs,
+        onAttemptFailure: ({ attempt, maxAttempts, error, latencyMs }) =>
+          this.monitoring.log({
+            eventName: AiMonitoringEventName.AiRetryAttemptFailed,
+            operation: AiMonitoringOperation.Embedding,
+            stage: AiMonitoringStage.Retry,
+            status: AiMonitoringStatus.Failure,
+            providerAlias: 'primary',
+            modelAlias: 'default',
+            providerConfigured: true,
+            dataClass,
+            errorCode: error.code,
+            attempt,
+            maxAttempts,
+            latencyMs,
+            inputCount: inputs.length,
+          }),
+      },
+    );
   }
 
   private toSafeException(error: unknown): Error {
-    if (error instanceof BadRequestException || error instanceof ForbiddenException) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ForbiddenException
+    ) {
       return error;
     }
 
@@ -332,7 +336,10 @@ export class EmbeddingProxyService {
       .filter(Boolean);
   }
 
-  private getPositiveInteger(value: string | undefined, fallback: number): number {
+  private getPositiveInteger(
+    value: string | undefined,
+    fallback: number,
+  ): number {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       return fallback;

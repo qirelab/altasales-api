@@ -1649,6 +1649,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     expect(result.map((item) => item.serviceId)).toContain('dashboard');
     expect(result.map((item) => item.serviceId)).toContain('from-zero');
+    expect(result.map((item) => item.serviceId)).not.toContain('sales-head');
   });
 
   it('prioritizes requested tools and hiring for a new product with inbound leads', () => {
@@ -2239,6 +2240,39 @@ describe('QuestionnaireRelevanceRankerService', () => {
   });
 
   it('matches the new inbound questionnaire requested by the client', () => {
+    const salesDocumentsCoverageIds = [
+      'sales-document-service-1',
+      'sales-document-service-2',
+    ];
+    const newDepartmentCoverageIds = [
+      ...crmStartCoveredServiceIds,
+      ...salesDocumentsCoverageIds,
+    ];
+    const configuredCatalog = configuredCatalogWithCrmStartCoverage().map(
+      (candidate) => {
+        if (
+          candidate.packageId ===
+          RECOMMENDATION_CATALOG.salesDocumentsPackage.id
+        ) {
+          return {
+            ...candidate,
+            coveredServiceIds: salesDocumentsCoverageIds,
+            coverageKeys: salesDocumentsCoverageIds,
+          };
+        }
+        if (
+          candidate.packageId !==
+          RECOMMENDATION_CATALOG.salesDepartmentFromZero.id
+        ) {
+          return candidate;
+        }
+        return {
+          ...candidate,
+          coveredServiceIds: newDepartmentCoverageIds,
+          coverageKeys: newDepartmentCoverageIds,
+        };
+      },
+    );
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
@@ -2261,19 +2295,21 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         persist: false,
       },
-      configuredCatalogWithCrmStartCoverage(),
+      configuredCatalog,
       [],
       '',
     );
 
     const targetIds = result.map((item) => item.packageId ?? item.serviceId);
+    expect(targetIds.slice(0, 2)).toEqual([
+      RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
+      RECOMMENDATION_CATALOG.salesHead.id,
+    ]);
     expect(targetIds).toEqual(
       expect.arrayContaining([
         RECOMMENDATION_CATALOG.salesDepartmentFromZero.id,
-        RECOMMENDATION_CATALOG.crmStart.id,
         RECOMMENDATION_CATALOG.hiringOffice.id,
         RECOMMENDATION_CATALOG.trainingThreeMonths.id,
-        RECOMMENDATION_CATALOG.salesDocumentsPackage.id,
         RECOMMENDATION_CATALOG.salesHead.id,
         RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
         RECOMMENDATION_CATALOG.aiDocumentAnalysis.id,
@@ -2285,6 +2321,18 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(targetIds).not.toContain(
       RECOMMENDATION_CATALOG.salesHeadExpertConsultation.id,
     );
+    expect(targetIds).not.toContain(RECOMMENDATION_CATALOG.crmAudit.id);
+    expect(targetIds).not.toContain(RECOMMENDATION_CATALOG.crmStart.id);
+    expect(targetIds).not.toContain(
+      RECOMMENDATION_CATALOG.salesDocumentsPackage.id,
+    );
+    expect(
+      result.find(
+        (item) =>
+          (item.packageId ?? item.serviceId) ===
+          RECOMMENDATION_CATALOG.aiCrmAnalysis.id,
+      )?.rationale,
+    ).toContain('после запуска «Отдела Продаж с нуля»');
     expect(targetIds).not.toEqual(
       expect.arrayContaining([
         RECOMMENDATION_CATALOG.telephonyIntegration.id,

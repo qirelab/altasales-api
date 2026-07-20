@@ -19,8 +19,7 @@ type RecommendationTargetPayload = {
 };
 
 @ValidatorConstraint({ name: 'exactlyOneRecommendationTarget', async: false })
-class ExactlyOneRecommendationTargetConstraint
-implements ValidatorConstraintInterface {
+class ExactlyOneRecommendationTargetConstraint implements ValidatorConstraintInterface {
   validate(_: unknown, args: ValidationArguments): boolean {
     const object = args.object as RecommendationTargetPayload;
     const hasService = Boolean(object.serviceId);

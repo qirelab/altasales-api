@@ -104,7 +104,13 @@ const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
   {
     catalogKey: 'salesDepartmentFromZero',
     score: 100,
-    reason: 'нет отдела продаж',
+    reason: 'для нового продукта обязателен «Отдел Продаж с нуля»',
+  },
+  {
+    catalogKey: 'salesHead',
+    score: 99,
+    reason: 'нужно сопровождение РОПа при запуске «Отдела Продаж с нуля»',
+    requiredComponents: ['salesHead'],
   },
   {
     catalogKey: 'crmStart',
@@ -147,12 +153,6 @@ const NEW_DEPARTMENT_DEFAULT_RULES: DefaultServiceRule[] = [
     score: 78,
     reason: 'нужна системная подготовка новой команды',
     requiredComponents: ['trainingSystem'],
-  },
-  {
-    catalogKey: 'salesHead',
-    score: 76,
-    reason: 'нужно управление запуском нового отдела',
-    requiredComponents: ['salesHead'],
   },
 ];
 
@@ -662,14 +662,22 @@ export class QuestionnaireRelevanceRankerService {
       );
 
       if (defaultItems.length >= maxItems) {
-        return this.finalizeRankedCandidates(defaultItems, new Set(), maxItems);
+        return this.finalizeRankedCandidates(
+          defaultItems,
+          this.getNewDepartmentFoundationTargetIds(defaultItems),
+          maxItems,
+        );
       }
 
       if (
         normalizedProfile.selectedComponents.length === 0 &&
         ranked.length === 0
       ) {
-        return this.finalizeRankedCandidates(defaultItems, new Set(), maxItems);
+        return this.finalizeRankedCandidates(
+          defaultItems,
+          this.getNewDepartmentFoundationTargetIds(defaultItems),
+          maxItems,
+        );
       }
     }
 
@@ -678,9 +686,10 @@ export class QuestionnaireRelevanceRankerService {
         this.getItemTargetId(item),
       ),
     );
-    const idealTargetIds = new Set(
-      idealItems.map((item) => this.getItemTargetId(item)),
-    );
+    const idealTargetIds = new Set([
+      ...idealItems.map((item) => this.getItemTargetId(item)),
+      ...this.getNewDepartmentFoundationTargetIds(defaultItems),
+    ]);
     const rankedCandidates: GeneratedRecommendationItem[] = [
       ...idealItems,
       ...defaultItems,
@@ -1314,30 +1323,30 @@ export class QuestionnaireRelevanceRankerService {
       addCatalog(
         ['aiCrmAnalysis'],
         AI_ANALYSIS_COMPONENT_POINTS,
-        'new sales department always includes AI CRM analysis',
+        'после запуска «Отдела Продаж с нуля» нужен ИИ-анализ CRM',
       );
       addCatalog(
         ['aiDocumentAnalysis'],
         AI_ANALYSIS_COMPONENT_POINTS,
-        'new sales department always includes AI document analysis',
+        'после настройки документов нужен их ИИ-анализ',
       );
       addCatalog(
         ['aiCallManagersAnalysis'],
         AI_ANALYSIS_COMPONENT_POINTS,
-        'new sales department always includes AI call analysis',
+        'после подключения коммуникаций нужен ИИ-анализ звонков и менеджеров',
       );
       if (profile.selectedComponents.includes('crm')) {
         add(
           ['ии анализ crm', 'анализ crm'],
           AI_ANALYSIS_COMPONENT_POINTS,
-          'для нового ОП нужен ИИ-анализ CRM',
+          'для «Отдела Продаж с нуля» нужен ИИ-анализ CRM',
         );
       }
       if (profile.selectedComponents.includes('salesDocuments')) {
         add(
           ['ии анализ документов', 'анализ документов'],
           AI_ANALYSIS_COMPONENT_POINTS,
-          'для нового ОП нужен ИИ-анализ документов',
+          'для «Отдела Продаж с нуля» нужен ИИ-анализ документов',
         );
       }
       if (
@@ -1347,7 +1356,7 @@ export class QuestionnaireRelevanceRankerService {
         add(
           ['ии анализ звонков и менеджеров', 'анализ звонков и менеджеров'],
           AI_ANALYSIS_COMPONENT_POINTS,
-          'для нового ОП нужен ИИ-анализ звонков и менеджеров',
+          'для «Отдела Продаж с нуля» нужен ИИ-анализ звонков и менеджеров',
         );
       }
     }
@@ -1857,6 +1866,9 @@ export class QuestionnaireRelevanceRankerService {
         diagnosticSignals: this.scoringService.normalizeSignals([
           ...(base.diagnosticSignals ?? []),
           'default_new_department',
+          ...(['salesDepartmentFromZero', 'salesHead'].includes(catalogKey)
+            ? ['new_department_foundation']
+            : []),
           rule.reason,
         ]),
         score: Math.max(Number(base.score || 0), rule.score),
@@ -1868,6 +1880,22 @@ export class QuestionnaireRelevanceRankerService {
     }
 
     return selected;
+  }
+
+  private getNewDepartmentFoundationTargetIds(
+    items: GeneratedRecommendationItem[],
+  ): Set<string> {
+    return new Set(
+      items
+        .filter(
+          (item) =>
+            this.matchesCatalogRecommendation(
+              item,
+              'salesDepartmentFromZero',
+            ) || this.matchesCatalogRecommendation(item, 'salesHead'),
+        )
+        .map((item) => this.getItemTargetId(item)),
+    );
   }
 
   private resolveBoostedPriority(
