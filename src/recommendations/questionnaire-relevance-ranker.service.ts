@@ -16,7 +16,11 @@ import {
   RecommendationScoringService,
   ServiceCandidate,
 } from './recommendation-scoring.service';
-import { selectNonOverlappingRecommendations } from './recommendation-coverage.util';
+import {
+  findDominatedPackageResiduals,
+  getCoverageIds,
+  selectNonOverlappingRecommendations,
+} from './recommendation-coverage.util';
 
 type QuestionnaireStage =
   | 'new_department'
@@ -666,6 +670,8 @@ export class QuestionnaireRelevanceRankerService {
           defaultItems,
           this.getNewDepartmentFoundationTargetIds(defaultItems),
           maxItems,
+          services,
+          context,
         );
       }
 
@@ -677,6 +683,8 @@ export class QuestionnaireRelevanceRankerService {
           defaultItems,
           this.getNewDepartmentFoundationTargetIds(defaultItems),
           maxItems,
+          services,
+          context,
         );
       }
     }
@@ -761,6 +769,8 @@ export class QuestionnaireRelevanceRankerService {
       rankedCandidates,
       idealTargetIds,
       maxItems,
+      services,
+      context,
     );
   }
 
@@ -768,14 +778,23 @@ export class QuestionnaireRelevanceRankerService {
     candidates: GeneratedRecommendationItem[],
     idealTargetIds: Set<string>,
     maxItems: number,
+    services: ServiceCandidate[],
+    context: string,
   ): GeneratedRecommendationItem[] {
     const relevantCandidates = candidates
       .filter(
         (item) => Number(item.score || 0) >= MIN_RECOMMENDATION_RANKING_SCORE,
       )
       .sort((a, b) => this.compareRankedCandidates(a, b, idealTargetIds));
+    const candidatesWithPackageResiduals =
+      this.addDominatedPackageResidualServices(
+        relevantCandidates,
+        services,
+        context,
+        idealTargetIds,
+      );
     const compactedCandidates = this.collapseSupersededAnalysisRecommendations(
-      this.collapseAlternativeHiringFormats(relevantCandidates),
+      this.collapseAlternativeHiringFormats(candidatesWithPackageResiduals),
     );
     const packageCompactedCandidates = selectNonOverlappingRecommendations(
       compactedCandidates,
@@ -783,6 +802,71 @@ export class QuestionnaireRelevanceRankerService {
     );
 
     return this.applyDiversity(packageCompactedCandidates, maxItems);
+  }
+
+  private addDominatedPackageResidualServices(
+    items: GeneratedRecommendationItem[],
+    services: ServiceCandidate[],
+    context: string,
+    idealTargetIds: ReadonlySet<string>,
+  ): GeneratedRecommendationItem[] {
+    const result = [...items];
+    const selectedTargetIds = new Set(
+      result.map((item) => this.getItemTargetId(item)),
+    );
+    const residuals = findDominatedPackageResiduals(items, {
+      idealTargetIds,
+    });
+
+    residuals.forEach(
+      ({ packageItem, dominantPackageItem, uncoveredCoverageIds }) => {
+        services.forEach((service) => {
+          if (service.packageId || !service.serviceId) return;
+          const targetId = this.getCandidateTargetId(service);
+          if (selectedTargetIds.has(targetId)) return;
+          if (
+            ![
+              ...getCoverageIds({
+                serviceId: service.serviceId,
+                packageId: null,
+                coveredServiceIds: service.coveredServiceIds,
+                coverageKeys: service.coverageKeys,
+              }),
+            ].some((coverageId) => uncoveredCoverageIds.has(coverageId))
+          ) {
+            return;
+          }
+
+          const base = this.scoringService.scoreService(service, context);
+          const reason =
+            `услуга осталась вне «${dominantPackageItem.serviceName}» ` +
+            `после схлопывания «${packageItem.serviceName}»`;
+          result.push({
+            ...base,
+            serviceId: service.serviceId,
+            packageId: null,
+            serviceName: service.name,
+            priority: packageItem.priority,
+            rationale: this.buildRationale(service.name, [reason]),
+            diagnosticSignals: this.scoringService.normalizeSignals([
+              ...(packageItem.diagnosticSignals ?? []),
+              'uncovered_package_service',
+            ]),
+            score: Math.max(
+              Number(packageItem.score ?? 0) - 1,
+              MIN_RECOMMENDATION_RANKING_SCORE,
+            ),
+            coveredServiceIds: service.coveredServiceIds,
+            coverageKeys: service.coverageKeys,
+          });
+          selectedTargetIds.add(targetId);
+        });
+      },
+    );
+
+    return result.sort((a, b) =>
+      this.compareRankedCandidates(a, b, new Set(idealTargetIds)),
+    );
   }
 
   private collapseAlternativeHiringFormats(
@@ -1762,8 +1846,14 @@ export class QuestionnaireRelevanceRankerService {
       const group = this.getServiceGroup(item);
       const currentCount = groupCounts.get(group) ?? 0;
       const max = DIVERSITY_LIMITS[group];
+      const isUncoveredPackageService = item.diagnosticSignals.includes(
+        'uncovered_package_service',
+      );
 
-      if (selected.length < limit && currentCount < max) {
+      if (
+        selected.length < limit &&
+        (isUncoveredPackageService || currentCount < max)
+      ) {
         selected.push(item);
         groupCounts.set(group, currentCount + 1);
       } else {

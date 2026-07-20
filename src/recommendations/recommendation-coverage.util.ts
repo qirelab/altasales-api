@@ -18,6 +18,12 @@ export type CoverageSelectionOptions = {
   packageReplacementScoreTolerance?: number;
 };
 
+export type DominatedPackageResidual<T extends CoverageRecommendationItem> = {
+  packageItem: T;
+  dominantPackageItem: T;
+  uncoveredCoverageIds: ReadonlySet<string>;
+};
+
 const DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE = 15;
 const DOMINANT_PACKAGE_COVERAGE_RATIO = 0.8;
 const MIN_DOMINANT_PACKAGE_SHARED_SERVICES = 2;
@@ -126,23 +132,75 @@ function excludeNearlyCoveredPackages<T extends CoverageRecommendationItem>(
   items: readonly T[],
   options: CoverageSelectionOptions,
 ): T[] {
-  const idealTargetIds = options.idealTargetIds ?? new Set<string>();
-  const tolerance =
-    options.packageReplacementScoreTolerance ??
-    DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE;
+  const excludedTargetIds = new Set(
+    findDominatedPackageResiduals(items, options)
+      .map(({ packageItem }) => getCoverageRecommendationTargetId(packageItem))
+      .filter((targetId): targetId is string => Boolean(targetId)),
+  );
 
   return items.filter((item) => {
     if (!item.packageId) return true;
 
     const targetId = getCoverageRecommendationTargetId(item);
-    if (!targetId || idealTargetIds.has(targetId)) return true;
-
-    const itemCoverage = getCoverageIds(item);
-    return !items.some((candidate) => {
-      if (!candidate.packageId || candidate === item) return false;
-      return isDominantPackage(candidate, item, itemCoverage, tolerance);
-    });
+    return !targetId || !excludedTargetIds.has(targetId);
   });
+}
+
+export function findDominatedPackageResiduals<
+  T extends CoverageRecommendationItem,
+>(
+  items: readonly T[],
+  options: CoverageSelectionOptions = {},
+): DominatedPackageResidual<T>[] {
+  const idealTargetIds = options.idealTargetIds ?? new Set<string>();
+  const tolerance =
+    options.packageReplacementScoreTolerance ??
+    DEFAULT_PACKAGE_REPLACEMENT_SCORE_TOLERANCE;
+
+  return items.flatMap((packageItem) => {
+    if (!packageItem.packageId) return [];
+    const targetId = getCoverageRecommendationTargetId(packageItem);
+    if (!targetId || idealTargetIds.has(targetId)) return [];
+
+    const packageCoverage = getCoverageIds(packageItem);
+    const dominantPackageItem = items
+      .filter(
+        (candidate) =>
+          Boolean(candidate.packageId) &&
+          candidate !== packageItem &&
+          isDominantPackage(candidate, packageItem, packageCoverage, tolerance),
+      )
+      .sort(
+        (left, right) =>
+          countSharedCoverage(right, packageCoverage) -
+          countSharedCoverage(left, packageCoverage),
+      )[0];
+    if (!dominantPackageItem) return [];
+
+    const dominantCoverage = getCoverageIds(dominantPackageItem);
+    const uncoveredCoverageIds = new Set(
+      [...packageCoverage].filter(
+        (coverageId) => !dominantCoverage.has(coverageId),
+      ),
+    );
+
+    return [
+      {
+        packageItem,
+        dominantPackageItem,
+        uncoveredCoverageIds,
+      },
+    ];
+  });
+}
+
+function countSharedCoverage(
+  item: CoverageRecommendationItem,
+  coverage: ReadonlySet<string>,
+): number {
+  return [...getCoverageIds(item)].filter((coverageId) =>
+    coverage.has(coverageId),
+  ).length;
 }
 
 function isDominantPackage<T extends CoverageRecommendationItem>(

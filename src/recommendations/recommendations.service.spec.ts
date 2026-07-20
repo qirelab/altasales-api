@@ -589,6 +589,54 @@ describe('RecommendationsService', () => {
     expect(manager.transaction).toHaveBeenCalledTimes(2);
   });
 
+  it('replaces a legacy questionnaire row that was misclassified as manual', async () => {
+    const { service, recommendationRepository } = createService();
+    const existing = {
+      id: 'legacy-questionnaire-recommendation-id',
+      userId,
+      serviceId: 'service-id',
+      packageId: null,
+      orderId: null,
+      status: RecommendationStatus.Recommended,
+      source: RecommendationSource.Manual,
+      priority: RecommendationPriority.Low,
+      rationale:
+        'CRM Старт: рекомендация выбрана по анкете (CRM выбрана в анкете).',
+      diagnosticSignals: [],
+      generatedAt: null,
+    };
+    recommendationRepository.findOne.mockResolvedValue(existing);
+    recommendationRepository.save.mockImplementation(
+      async (recommendation) => recommendation,
+    );
+
+    const result = await callPrivate<Promise<Recommendation>>(
+      service,
+      'upsertGeneratedRecommendation',
+      userId,
+      {
+        serviceId: 'service-id',
+        packageId: null,
+        serviceName: 'CRM',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'new questionnaire result',
+        diagnosticSignals: ['new_result'],
+        score: 100,
+        coveredServiceIds: ['service-id'],
+      },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        source: RecommendationSource.AI,
+        rationale: 'new questionnaire result',
+        diagnosticSignals: ['new_result'],
+      }),
+    );
+    expect(result.generatedAt).toBeInstanceOf(Date);
+    expect(recommendationRepository.save).toHaveBeenCalledWith(existing);
+  });
+
   it('uses order sub-item services when the live package composition changed', async () => {
     const {
       service,
@@ -2104,6 +2152,46 @@ describe('RecommendationsService', () => {
     expect(result).toEqual([]);
   });
 
+  it('does not let a legacy questionnaire row block current package coverage', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'legacy-questionnaire-recommendation-id',
+        serviceId: 'service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+        rationale:
+          'CRM Старт: рекомендация выбрана по анкете (CRM выбрана в анкете).',
+        diagnosticSignals: [],
+        generatedAt: null,
+        orderId: null,
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'package-id',
+        serviceName: 'Current package',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'current questionnaire result',
+        diagnosticSignals: [],
+        score: 100,
+        coveredServiceIds: ['service-id', 'service-b'],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'package-id',
+    ]);
+  });
+
   it('keeps manual coverage from being replaced by a generated package', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
@@ -3072,7 +3160,7 @@ describe('RecommendationsService', () => {
     );
   });
 
-  it('prunes stale generated recommendations after persisting the current set', async () => {
+  it('prunes stale legacy questionnaire rows after persisting the current set', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
     recommendationRepository.find
@@ -3083,7 +3171,12 @@ describe('RecommendationsService', () => {
           serviceId: 'stale-service-id',
           packageId: null,
           status: RecommendationStatus.Recommended,
-          generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+          source: RecommendationSource.Manual,
+          rationale:
+            'Аудит CRM: рекомендация выбрана по анкете (старая анкета).',
+          diagnosticSignals: [],
+          generatedAt: null,
+          orderId: null,
         },
         {
           id: 'current-package-recommendation-id',
@@ -3099,7 +3192,11 @@ describe('RecommendationsService', () => {
         serviceId: 'stale-service-id',
         packageId: null,
         status: RecommendationStatus.Recommended,
-        generatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        source: RecommendationSource.Manual,
+        rationale: 'Аудит CRM: рекомендация выбрана по анкете (старая анкета).',
+        diagnosticSignals: [],
+        generatedAt: null,
+        orderId: null,
       },
       {
         id: 'current-package-recommendation-id',
