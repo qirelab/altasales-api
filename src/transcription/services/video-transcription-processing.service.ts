@@ -1,6 +1,6 @@
+import * as fsPromises from 'fs/promises';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import * as fsPromises from 'fs/promises';
 import { Repository } from 'typeorm';
 import { TranscriptionJob } from '../entities/transcription-job.entity';
 import { TranscriptionJobStatus } from '../enums/transcription-job-status.enum';

@@ -7,6 +7,10 @@ import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { RESEND_CLIENT } from './mail.constants';
 
+const BUTTON_STYLE = 'display: inline-block; padding: 12px 24px; '
+  + 'background-color: #E75E32; color: white; '
+  + 'text-decoration: none; border-radius: 6px;';
+
 interface NewQuestionnaireNotificationData {
   userName: string;
   userEmail: string;
@@ -105,7 +109,7 @@ export class MailService {
 
         <p>
           <a href="${questionnaireLink}"
-             style="display: inline-block; padding: 12px 24px; background-color: #E75E32; color: white; text-decoration: none; border-radius: 6px;">
+             style="${BUTTON_STYLE}">
             Открыть анкету
           </a>
         </p>
@@ -316,7 +320,7 @@ export class MailService {
         <p>Для вас сформированы новые рекомендации. Перейдите по ссылке, чтобы посмотреть их.</p>
         <p>
           <a href="${recommendationsUrl}"
-             style="display: inline-block; padding: 12px 24px; background-color: #E75E32; color: white; text-decoration: none; border-radius: 6px;">
+             style="${BUTTON_STYLE}">
             Открыть рекомендации
           </a>
         </p>
@@ -402,7 +406,7 @@ export class MailService {
         </table>
         <p>
           <a href="${adminLink}"
-             style="display: inline-block; padding: 12px 24px; background-color: #E75E32; color: white; text-decoration: none; border-radius: 6px;">
+             style="${BUTTON_STYLE}">
             Открыть раздел обратной связи
           </a>
         </p>

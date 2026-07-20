@@ -38,10 +38,10 @@ export class AddRecommendationGenerationJobs1779796800000 implements MigrationIn
     `);
 
     const recommendationColumns = [
-      { name: 'priority',          type: 'varchar(20)',  default: "'medium'" },
+      { name: 'priority',          type: 'varchar(20)',  default: '\'medium\'' },
       { name: 'rationale',         type: 'text',         default: 'NULL' },
-      { name: 'dependencyIds',     type: 'jsonb',        default: "'[]'" },
-      { name: 'diagnosticSignals', type: 'jsonb',        default: "'[]'" },
+      { name: 'dependencyIds',     type: 'jsonb',        default: '\'[]\'' },
+      { name: 'diagnosticSignals', type: 'jsonb',        default: '\'[]\'' },
       { name: 'generatedAt',       type: 'timestamptz',  default: 'NULL' },
       { name: 'packageId',         type: 'uuid',         default: 'NULL' },
     ];

@@ -1,3 +1,4 @@
+import * as fsPromises from 'fs/promises';
 import {
   BadRequestException,
   ForbiddenException,
@@ -6,7 +7,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import * as fsPromises from 'fs/promises';
 import { Repository } from 'typeorm';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../users/entities/user-role.enum';

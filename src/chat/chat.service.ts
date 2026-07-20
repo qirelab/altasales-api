@@ -6,17 +6,17 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
-import { ChatConversation } from './entities/chat-conversation.entity';
-import { ChatMessage } from './entities/chat-message.entity';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { FilesService } from '../files/files.service';
-import { SendMessageDto } from './dto/send-message.dto';
-import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
-import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { Order } from '../orders/entities/order.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
+import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
+import { SendMessageDto } from './dto/send-message.dto';
+import { ChatMessage } from './entities/chat-message.entity';
+import { ChatConversation } from './entities/chat-conversation.entity';
 import { StartConversationDto } from './dto/start-conversation.dto';
 
 @Injectable()
@@ -82,11 +82,11 @@ export class ChatService {
           },
           lastMessage: lastMessage
             ? {
-                id: lastMessage.id,
-                text: lastMessage.text,
-                senderId: lastMessage.senderId,
-                createdAt: lastMessage.createdAt,
-              }
+              id: lastMessage.id,
+              text: lastMessage.text,
+              senderId: lastMessage.senderId,
+              createdAt: lastMessage.createdAt,
+            }
             : null,
           unreadCount,
           updatedAt: conv.updatedAt,

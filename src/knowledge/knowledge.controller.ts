@@ -1,3 +1,4 @@
+import { extname } from 'path';
 import {
   BadRequestException,
   Body,
@@ -23,7 +24,6 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { extname } from 'path';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';

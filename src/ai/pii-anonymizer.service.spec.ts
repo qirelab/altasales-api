@@ -1,8 +1,8 @@
+import { Test } from '@nestjs/testing';
 import { DataClass } from './enums/data-class.enum';
 import { AnonymizerProvider } from './interfaces/anonymizer-provider.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
-import { Test } from '@nestjs/testing';
 
 describe('PiiAnonymizerService', () => {
   let provider: { anonymize: jest.Mock };
