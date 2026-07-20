@@ -64,6 +64,13 @@ export const RECOMMENDATION_CATALOG = {
     displayName: 'Руководитель отдела продаж',
     legacyAliases: ['руководитель отдела продаж'],
   },
+  salesHeadExpertConsultation: {
+    id: 'cfc96602-9c0b-45af-809b-725b0d198993',
+    kind: 'service',
+    requiredForValidation: false,
+    displayName: 'Эксперт РОП: консультация',
+    legacyAliases: ['эксперт роп', 'консультация роп'],
+  },
   aiSalesHead: {
     id: 'e1cbfa1b-8643-42a1-944d-9f1f93522814',
     kind: 'service',
@@ -165,6 +172,16 @@ export const RECOMMENDATION_CATALOG = {
     kind: 'service',
     displayName: 'Отчёт по ведению сделок в CRM',
     legacyAliases: ['отчет по ведению сделок в crm'],
+  },
+  rejectedDealsAnalysis: {
+    id: '8b8508c1-9e8b-44c7-a7b7-639bf0afe8a6',
+    kind: 'service',
+    requiredForValidation: false,
+    displayName: 'Аналитический отчёт по отказным сделкам',
+    legacyAliases: [
+      'аналитический отчет по отказным сделкам',
+      'отчет по отказным сделкам',
+    ],
   },
   documentAnalysis: {
     id: '9ca7871e-3301-4ff8-981c-30f10e3c2880',
