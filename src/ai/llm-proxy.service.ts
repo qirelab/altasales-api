@@ -40,7 +40,10 @@ const PROVIDER_TIMEOUT_ERROR = 'LLM provider timed out';
 const PROVIDER_UNAVAILABLE_ERROR = 'LLM provider is unavailable';
 const RESTORE_ERROR = 'LLM response restore failed';
 const PLACEHOLDER_GUIDANCE =
-  'PII placeholders are intentional anonymization tokens. Do not modify, decline, delete, replace, or inflect placeholders. Use neutral constructions where possible, for example "contact person: {{PII_PERSON_0001}}" or "email: {{PII_EMAIL_0001}}".';
+  'PII placeholders are intentional anonymization tokens. ' +
+  'Do not modify, decline, delete, replace, or inflect placeholders. ' +
+  'Use neutral constructions where possible, for example ' +
+  '"contact person: {{PII_PERSON_0001}}" or "email: {{PII_EMAIL_0001}}".';
 const DEFAULT_PROVIDER_TIMEOUT_MS = 10_000;
 const DEFAULT_PROVIDER_MAX_ATTEMPTS = 2;
 const DEFAULT_PROVIDER_BACKOFF_BASE_MS = 200;
@@ -350,12 +353,12 @@ export class LlmProxyService {
       return messages;
     }
 
+    const semanticDescriptions =
+      anonymizationResult.semanticPlaceholderDescriptions;
+    const serializedDescriptions = JSON.stringify(semanticDescriptions);
     const descriptions =
-      Object.keys(anonymizationResult.semanticPlaceholderDescriptions).length >
-      0
-        ? ` Semantic placeholder descriptions: ${JSON.stringify(
-          anonymizationResult.semanticPlaceholderDescriptions,
-        )}.`
+      Object.keys(semanticDescriptions).length > 0
+        ? ` Semantic placeholder descriptions: ${serializedDescriptions}.`
         : '';
 
     return [
@@ -952,7 +955,9 @@ export class LlmProxyService {
       return;
     }
 
-    const { cacheKey: _cacheKey, cacheHit: _cacheHit, ...cacheable } = response;
+    const cacheable = { ...response };
+    delete cacheable.cacheKey;
+    delete cacheable.cacheHit;
     this.aiCache.write(cacheKey, cacheable, ttlMs);
   }
 

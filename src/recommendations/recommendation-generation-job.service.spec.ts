@@ -4,6 +4,20 @@ import { RecommendationGenerationJob } from './entities/recommendation-generatio
 import { RecommendationGenerationStatus } from './entities/recommendation-generation-status.enum';
 
 describe('RecommendationGenerationJobService', () => {
+  type GenerationJobServiceTestApi = {
+    claimNextPendingJob(): Promise<RecommendationGenerationJob | null>;
+    processGenerationJob(
+      job: RecommendationGenerationJob,
+      processor: (
+        job: RecommendationGenerationJob,
+      ) => Promise<Record<string, unknown>[]>,
+    ): Promise<void>;
+  };
+  const getTestApi = (
+    instance: RecommendationGenerationJobService,
+  ): GenerationJobServiceTestApi =>
+    instance as unknown as GenerationJobServiceTestApi;
+
   let service: RecommendationGenerationJobService;
   let repository: {
     create: jest.Mock;
@@ -170,7 +184,7 @@ describe('RecommendationGenerationJobService', () => {
       dataSource,
     );
 
-    await (service as any).claimNextPendingJob();
+    await getTestApi(service).claimNextPendingJob();
 
     expect(job.status).toBe(RecommendationGenerationStatus.Processing);
     expect(job.leaseToken).toEqual(expect.any(String));
@@ -193,7 +207,7 @@ describe('RecommendationGenerationJobService', () => {
       status: RecommendationGenerationStatus.Processing,
     } as RecommendationGenerationJob;
 
-    const processing = (service as any).processGenerationJob(
+    const processing = getTestApi(service).processGenerationJob(
       job,
       longRunningProcessor,
     );
@@ -233,7 +247,7 @@ describe('RecommendationGenerationJobService', () => {
       status: RecommendationGenerationStatus.Processing,
     } as RecommendationGenerationJob;
 
-    await (service as any).processGenerationJob(job, processor);
+    await getTestApi(service).processGenerationJob(job, processor);
 
     expect(repository.save).not.toHaveBeenCalled();
     expect(repository.update).toHaveBeenCalledWith(

@@ -25,7 +25,8 @@ export class AiCacheService {
     @Optional()
     private readonly configService?: ConfigService,
   ) {
-    this.defaultTtlMs = this.getPositiveNumber('AI_CACHE_TTL_SECONDS', 60 * 60) * 1000;
+    this.defaultTtlMs =
+      this.getPositiveNumber('AI_CACHE_TTL_SECONDS', 60 * 60) * 1000;
     this.maxEntries = this.getPositiveNumber('AI_CACHE_MAX_ENTRIES', 1000);
   }
 

@@ -1,9 +1,10 @@
+import { ConfigService } from '@nestjs/config';
 import { AiCacheService } from './ai-cache.service';
 
 describe('AiCacheService', () => {
-  const config = (values: Record<string, string | number> = {}) => ({
-    get: jest.fn((key: string) => values[key]),
-  }) as any;
+  const config = (
+    values: Record<string, string | number> = {},
+  ): ConfigService => new ConfigService(values);
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -13,12 +14,7 @@ describe('AiCacheService', () => {
     const service = new AiCacheService();
     const factory = jest.fn().mockResolvedValue({ ok: true });
 
-    const first = await service.remember(
-      'test',
-      { b: 2, a: 1 },
-      factory,
-      1000,
-    );
+    const first = await service.remember('test', { b: 2, a: 1 }, factory, 1000);
     const second = await service.remember(
       'test',
       { a: 1, b: 2 },
