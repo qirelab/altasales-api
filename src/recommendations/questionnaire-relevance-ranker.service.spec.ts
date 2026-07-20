@@ -1,4 +1,4 @@
-import { ServiceType } from '../services/entities/service-type.enum';
+﻿import { ServiceType } from '../services/entities/service-type.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
 import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
 import {
@@ -26,39 +26,39 @@ describe('QuestionnaireRelevanceRankerService', () => {
     }) as unknown as ServiceCandidate;
 
   const services = [
-    service('from-zero', 'Отдел продаж с нуля'),
-    service('base-setup', 'Базовая настройка работы отдела продаж'),
-    service('docs-package', 'Пакет документов отдела продаж'),
-    service('training-3m', 'Пакет обучения на 3 месяца'),
-    service('training-1m', 'Пакет обучения на месяц'),
-    service('crm-start', 'CRM Старт'),
-    service('crm-bronze', 'CRM Бронза'),
-    service('crm-silver', 'CRM Серебро'),
-    service('crm-gold', 'CRM Золото'),
-    service('crm-audit', 'Аудит CRM'),
-    service('crm-funnels', 'Настройка воронок сделок (до 3 шт)'),
-    service('crm-tech-spec', 'Подготовка технического задания'),
-    service('crm-report-setup', 'Настройка отчёта'),
-    service('crm-deals-report', 'Отчет по ведению сделок в CRM'),
-    service('sales-script', 'Скрипт продаж'),
-    service('turnkey-hiring', 'Подбор под ключ'),
-    service('telephony', 'Интеграция телефонии'),
-    service('messenger', 'Интеграция мессенджера'),
-    service('automation', 'Настройка роботов для автоматизации'),
+    service('from-zero', 'РћС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ'),
+    service('base-setup', 'Р‘Р°Р·РѕРІР°СЏ РЅР°СЃС‚СЂРѕР№РєР° СЂР°Р±РѕС‚С‹ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶'),
+    service('docs-package', 'РџР°РєРµС‚ РґРѕРєСѓРјРµРЅС‚РѕРІ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶'),
+    service('training-3m', 'РџР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ РЅР° 3 РјРµСЃСЏС†Р°'),
+    service('training-1m', 'РџР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ РЅР° РјРµСЃСЏС†'),
+    service('crm-start', 'CRM РЎС‚Р°СЂС‚'),
+    service('crm-bronze', 'CRM Р‘СЂРѕРЅР·Р°'),
+    service('crm-silver', 'CRM РЎРµСЂРµР±СЂРѕ'),
+    service('crm-gold', 'CRM Р—РѕР»РѕС‚Рѕ'),
+    service('crm-audit', 'РђСѓРґРёС‚ CRM'),
+    service('crm-funnels', 'РќР°СЃС‚СЂРѕР№РєР° РІРѕСЂРѕРЅРѕРє СЃРґРµР»РѕРє (РґРѕ 3 С€С‚)'),
+    service('crm-tech-spec', 'РџРѕРґРіРѕС‚РѕРІРєР° С‚РµС…РЅРёС‡РµСЃРєРѕРіРѕ Р·Р°РґР°РЅРёСЏ'),
+    service('crm-report-setup', 'РќР°СЃС‚СЂРѕР№РєР° РѕС‚С‡С‘С‚Р°'),
+    service('crm-deals-report', 'РћС‚С‡РµС‚ РїРѕ РІРµРґРµРЅРёСЋ СЃРґРµР»РѕРє РІ CRM'),
+    service('sales-script', 'РЎРєСЂРёРїС‚ РїСЂРѕРґР°Р¶'),
+    service('turnkey-hiring', 'РџРѕРґР±РѕСЂ РїРѕРґ РєР»СЋС‡'),
+    service('telephony', 'РРЅС‚РµРіСЂР°С†РёСЏ С‚РµР»РµС„РѕРЅРёРё'),
+    service('messenger', 'РРЅС‚РµРіСЂР°С†РёСЏ РјРµСЃСЃРµРЅРґР¶РµСЂР°'),
+    service('automation', 'РќР°СЃС‚СЂРѕР№РєР° СЂРѕР±РѕС‚РѕРІ РґР»СЏ Р°РІС‚РѕРјР°С‚РёР·Р°С†РёРё'),
     service(
       'calls-report',
-      'Отчёт с оценкой прослушанных разговоров с клиентами',
+      'РћС‚С‡С‘С‚ СЃ РѕС†РµРЅРєРѕР№ РїСЂРѕСЃР»СѓС€Р°РЅРЅС‹С… СЂР°Р·РіРѕРІРѕСЂРѕРІ СЃ РєР»РёРµРЅС‚Р°РјРё',
     ),
     service(
       'messenger-report',
-      'Отчёт с оценкой проанализированных переписок с клиентами',
+      'РћС‚С‡С‘С‚ СЃ РѕС†РµРЅРєРѕР№ РїСЂРѕР°РЅР°Р»РёР·РёСЂРѕРІР°РЅРЅС‹С… РїРµСЂРµРїРёСЃРѕРє СЃ РєР»РёРµРЅС‚Р°РјРё',
     ),
-    service('dashboard', 'Дашборд ОП'),
-    service('ai-rop', 'ИИ РОП'),
-    service('quality', 'На Контроле + Рубичат'),
-    service('sales-head', 'Руководитель отдела продаж'),
-    service('document-request', 'Документ под запрос'),
-    service('financial-director', 'Финансовый директор'),
+    service('dashboard', 'Р”Р°С€Р±РѕСЂРґ РћРџ'),
+    service('ai-rop', 'РР Р РћРџ'),
+    service('quality', 'РќР° РљРѕРЅС‚СЂРѕР»Рµ + Р СѓР±РёС‡Р°С‚'),
+    service('sales-head', 'Р СѓРєРѕРІРѕРґРёС‚РµР»СЊ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶'),
+    service('document-request', 'Р”РѕРєСѓРјРµРЅС‚ РїРѕРґ Р·Р°РїСЂРѕСЃ'),
+    service('financial-director', 'Р¤РёРЅР°РЅСЃРѕРІС‹Р№ РґРёСЂРµРєС‚РѕСЂ'),
   ];
 
   const components = (overrides: Partial<Record<string, boolean>> = {}) => ({
@@ -87,9 +87,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
           coveredServiceIds:
             entry.id === RECOMMENDATION_CATALOG.crmStart.id
               ? [
-                  RECOMMENDATION_CATALOG.telephonyIntegration.id,
-                  RECOMMENDATION_CATALOG.messengerIntegration.id,
-                ]
+                RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                RECOMMENDATION_CATALOG.messengerIntegration.id,
+              ]
               : undefined,
         }) as ServiceCandidate,
     );
@@ -140,7 +140,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
     const configuredServices = RECOMMENDATION_CATALOG_ENTRIES.map(
       (entry) =>
         ({
-          ...service(entry.id, `Переименованная позиция ${entry.id}`),
+          ...service(entry.id, `РџРµСЂРµРёРјРµРЅРѕРІР°РЅРЅР°СЏ РїРѕР·РёС†РёСЏ ${entry.id}`),
           serviceId: entry.kind === 'service' ? entry.id : null,
           packageId: entry.kind === 'package' ? entry.id : null,
         }) as ServiceCandidate,
@@ -151,7 +151,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           productStage: 'new',
-          desiredResult: { description: 'Отдела продаж нет, запускаем с нуля' },
+          desiredResult: { description: 'РћС‚РґРµР»Р° РїСЂРѕРґР°Р¶ РЅРµС‚, Р·Р°РїСѓСЃРєР°РµРј СЃ РЅСѓР»СЏ' },
           components: components(),
           componentsToAdd: components(),
         },
@@ -186,7 +186,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         [],
         '',
       ),
-    ).toThrow(`Recommendation catalog item is missing: Аудит CRM`);
+    ).toThrow(`Recommendation catalog item is missing: РђСѓРґРёС‚ CRM`);
   });
 
   it('accepts a legacy catalog UUID when the configured name and kind match', () => {
@@ -208,13 +208,13 @@ describe('QuestionnaireRelevanceRankerService', () => {
   });
   it('prefers an exact catalog alias over an earlier description match', () => {
     const unrelatedService = {
-      ...service('unrelated-service-id', 'Несвязанная консультация'),
-      description: 'Пакет ОП с нуля',
+      ...service('unrelated-service-id', 'РќРµСЃРІСЏР·Р°РЅРЅР°СЏ РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ'),
+      description: 'РџР°РєРµС‚ РћРџ СЃ РЅСѓР»СЏ',
       serviceId: 'unrelated-service-id',
       packageId: null,
     } as ServiceCandidate;
     const legacyPackage = {
-      ...service('legacy-package-id', 'Отдел продаж с нуля'),
+      ...service('legacy-package-id', 'РћС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ'),
       serviceId: null,
       packageId: 'legacy-package-id',
     } as ServiceCandidate;
@@ -223,19 +223,19 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [unrelatedService, legacyPackage],
       'salesDepartmentFromZero',
       new Set<string>(),
-      ['Пакет ОП с нуля'],
+      ['РџР°РєРµС‚ РћРџ СЃ РЅСѓР»СЏ'],
     );
 
     expect(result).toBe(legacyPackage);
   });
   it('preserves alias priority when catalog candidates are reversed', () => {
     const outsourcedSalesHead = {
-      ...service('outsourced-sales-head-id', 'РОП на аутсорсинге'),
+      ...service('outsourced-sales-head-id', 'Р РћРџ РЅР° Р°СѓС‚СЃРѕСЂСЃРёРЅРіРµ'),
       serviceId: 'outsourced-sales-head-id',
       packageId: null,
     } as ServiceCandidate;
     const canonicalSalesHead = {
-      ...service('sales-head-id', 'Руководитель отдела продаж'),
+      ...service('sales-head-id', 'Р СѓРєРѕРІРѕРґРёС‚РµР»СЊ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶'),
       serviceId: 'sales-head-id',
       packageId: null,
     } as ServiceCandidate;
@@ -244,7 +244,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [outsourcedSalesHead, canonicalSalesHead],
       'salesHead',
       new Set<string>(),
-      ['Руководитель отдела продаж', 'РОП на аутсорсинге'],
+      ['Р СѓРєРѕРІРѕРґРёС‚РµР»СЊ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶', 'Р РћРџ РЅР° Р°СѓС‚СЃРѕСЂСЃРёРЅРіРµ'],
     );
 
     expect(result).toBe(canonicalSalesHead);
@@ -262,7 +262,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       } as ServiceCandidate;
     });
     configuredServices.push({
-      ...service('unrelated-service-id', 'Несвязанная услуга'),
+      ...service('unrelated-service-id', 'РќРµСЃРІСЏР·Р°РЅРЅР°СЏ СѓСЃР»СѓРіР°'),
       description: missingEntry.displayName,
       category: { name: missingEntry.displayName },
     } as ServiceCandidate);
@@ -304,11 +304,11 @@ describe('QuestionnaireRelevanceRankerService', () => {
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Уже продаю',
-          targetResult: 'Масштабировать отдел продаж с 8 менеджерами',
+          productStage: 'РЈР¶Рµ РїСЂРѕРґР°СЋ',
+          targetResult: 'РњР°СЃС€С‚Р°Р±РёСЂРѕРІР°С‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ 8 РјРµРЅРµРґР¶РµСЂР°РјРё',
           desiredRevenue: 15000000,
           calculatedManagersCount: 8,
-          desiredSalesDepartment: ['CRM', 'Аналитика', 'РОП'],
+          desiredSalesDepartment: ['CRM', 'РђРЅР°Р»РёС‚РёРєР°', 'Р РћРџ'],
         },
         persist: false,
       },
@@ -328,12 +328,12 @@ describe('QuestionnaireRelevanceRankerService', () => {
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Уже продаю',
-          targetResult: 'Навести порядок в работе 2 менеджеров',
+          productStage: 'РЈР¶Рµ РїСЂРѕРґР°СЋ',
+          targetResult: 'РќР°РІРµСЃС‚Рё РїРѕСЂСЏРґРѕРє РІ СЂР°Р±РѕС‚Рµ 2 РјРµРЅРµРґР¶РµСЂРѕРІ',
           desiredRevenue: 4000000,
           calculatedManagersCount: 2,
-          leadGenerationType: 'Входящая',
-          desiredSalesDepartment: ['CRM', 'Телефония', 'Мессенджер', 'Скрипты'],
+          leadGenerationType: 'Р’С…РѕРґСЏС‰Р°СЏ',
+          desiredSalesDepartment: ['CRM', 'РўРµР»РµС„РѕРЅРёСЏ', 'РњРµСЃСЃРµРЅРґР¶РµСЂ', 'РЎРєСЂРёРїС‚С‹'],
         },
         persist: false,
       },
@@ -357,7 +357,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '3m',
-            description: 'Навести порядок в работе 2 менеджеров',
+            description: 'РќР°РІРµСЃС‚Рё РїРѕСЂСЏРґРѕРє РІ СЂР°Р±РѕС‚Рµ 2 РјРµРЅРµРґР¶РµСЂРѕРІ',
           },
           targetRevenue: 4000000,
           leadGenerationTypes: ['inbound'],
@@ -390,7 +390,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '3m',
-            description: 'Усилить действующий отдел продаж',
+            description: 'РЈСЃРёР»РёС‚СЊ РґРµР№СЃС‚РІСѓСЋС‰РёР№ РѕС‚РґРµР» РїСЂРѕРґР°Р¶',
           },
           targetRevenue: 4000000,
           components: components({
@@ -433,7 +433,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'crm-start',
-          serviceName: 'CRM Старт',
+          serviceName: 'CRM РЎС‚Р°СЂС‚',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -456,7 +456,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           components: components({ crm: true }),
           componentsToAdd: components(),
           desiredResult: {
-            description: 'Проверить качество ведения сделок в CRM',
+            description: 'РџСЂРѕРІРµСЂРёС‚СЊ РєР°С‡РµСЃС‚РІРѕ РІРµРґРµРЅРёСЏ СЃРґРµР»РѕРє РІ CRM',
           },
         },
         persist: false,
@@ -488,7 +488,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           componentsToAdd: components({ analytics: true, salesHead: true }),
           desiredResult: {
             description:
-              'Хочу усилить РОПа и видеть аналитику по текущему отделу продаж',
+              'РҐРѕС‡Сѓ СѓСЃРёР»РёС‚СЊ Р РћРџР° Рё РІРёРґРµС‚СЊ Р°РЅР°Р»РёС‚РёРєСѓ РїРѕ С‚РµРєСѓС‰РµРјСѓ РѕС‚РґРµР»Сѓ РїСЂРѕРґР°Р¶',
           },
           calculatedManagersCount: 8,
         },
@@ -525,7 +525,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           }),
           componentsToAdd: components(),
           desiredResult: {
-            description: 'Хочу понять, что можно улучшить в отделе продаж',
+            description: 'РҐРѕС‡Сѓ РїРѕРЅСЏС‚СЊ, С‡С‚Рѕ РјРѕР¶РЅРѕ СѓР»СѓС‡С€РёС‚СЊ РІ РѕС‚РґРµР»Рµ РїСЂРѕРґР°Р¶',
           },
         },
         persist: false,
@@ -615,7 +615,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'crm-start',
-          serviceName: 'CRM Старт',
+          serviceName: 'CRM РЎС‚Р°СЂС‚',
           priority: RecommendationPriority.Urgent,
           rationale: 'package covers the desired integrations',
           diagnosticSignals: ['ai_generated'],
@@ -658,7 +658,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         clientProfile: {
           productStage: 'new',
           desiredResult: {
-            description: 'Отдела продаж нет, нужно построить его с нуля',
+            description: 'РћС‚РґРµР»Р° РїСЂРѕРґР°Р¶ РЅРµС‚, РЅСѓР¶РЅРѕ РїРѕСЃС‚СЂРѕРёС‚СЊ РµРіРѕ СЃ РЅСѓР»СЏ',
           },
           components: components({
             crm: true,
@@ -693,7 +693,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Строительные материалы',
+          product: 'РЎС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РјР°С‚РµСЂРёР°Р»С‹',
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
           components: components({
@@ -734,7 +734,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Строительные материалы',
+          product: 'РЎС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РјР°С‚РµСЂРёР°Р»С‹',
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
           components: components({
@@ -775,7 +775,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Строительные материалы',
+          product: 'РЎС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РјР°С‚РµСЂРёР°Р»С‹',
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
           components: components({
@@ -806,9 +806,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
     expect(result.flatMap((item) => item.diagnosticSignals)).not.toEqual(
       expect.arrayContaining([
-        'ИИ анализ CRM',
-        'ИИ анализ дашборда',
-        'ИИ анализ документов',
+        'РР Р°РЅР°Р»РёР· CRM',
+        'РР Р°РЅР°Р»РёР· РґР°С€Р±РѕСЂРґР°',
+        'РР Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ',
       ]),
     );
   });
@@ -818,19 +818,19 @@ describe('QuestionnaireRelevanceRankerService', () => {
       (entry) => entry.legacyAliases,
     ).join(' ');
 
-    expect(aliases).not.toContain('ии анализ crm');
-    expect(aliases).not.toContain('ии анализ дашборда');
-    expect(aliases).not.toContain('ии анализ документов');
+    expect(aliases).not.toContain('РёРё Р°РЅР°Р»РёР· crm');
+    expect(aliases).not.toContain('РёРё Р°РЅР°Р»РёР· РґР°С€Р±РѕСЂРґР°');
+    expect(aliases).not.toContain('РёРё Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ');
   });
 
   it('replaces the legacy quality-control recommendation with AI call analysis', () => {
     const aiAnalysisServices = [
-      service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+      service('ai-calls', 'РР Р°РЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ Рё РјРµРЅРµРґР¶РµСЂРѕРІ'),
       service(
         'calls-report',
-        'Отчёт с оценкой прослушанных разговоров с клиентами',
+        'РћС‚С‡С‘С‚ СЃ РѕС†РµРЅРєРѕР№ РїСЂРѕСЃР»СѓС€Р°РЅРЅС‹С… СЂР°Р·РіРѕРІРѕСЂРѕРІ СЃ РєР»РёРµРЅС‚Р°РјРё',
       ),
-      service('quality', 'На Контроле + Рубичат'),
+      service('quality', 'РќР° РљРѕРЅС‚СЂРѕР»Рµ + Р СѓР±РёС‡Р°С‚'),
     ];
 
     const result = ranker.rankRecommendations(
@@ -855,8 +855,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
   it('keeps a strong legacy recommendation when its replacement is below the score threshold', () => {
     const candidates = [
-      service('office', 'Офис'),
-      service('office-pro', 'Офис PRO'),
+      service('office', 'РћС„РёСЃ'),
+      service('office-pro', 'РћС„РёСЃ PRO'),
     ];
 
     const result = ranker.rankRecommendations(
@@ -873,7 +873,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'office',
-          serviceName: 'Офис',
+          serviceName: 'РћС„РёСЃ',
           priority: RecommendationPriority.Low,
           rationale: 'weak replacement',
           diagnosticSignals: [],
@@ -881,7 +881,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'office-pro',
-          serviceName: 'Офис PRO',
+          serviceName: 'РћС„РёСЃ PRO',
           priority: RecommendationPriority.Medium,
           rationale: 'strong alternative',
           diagnosticSignals: [],
@@ -897,9 +897,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
   });
 
   it.each([
-    ['crm', 'ИИ анализ CRM'],
-    ['salesDocuments', 'ИИ анализ документов'],
-    ['telephony', 'ИИ анализ звонков и менеджеров'],
+    ['crm', 'РР Р°РЅР°Р»РёР· CRM'],
+    ['salesDocuments', 'РР Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ'],
+    ['telephony', 'РР Р°РЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ Рё РјРµРЅРµРґР¶РµСЂРѕРІ'],
   ])(
     'adds %s AI analysis when that component already exists',
     (component, expectedServiceName) => {
@@ -914,10 +914,10 @@ describe('QuestionnaireRelevanceRankerService', () => {
           persist: false,
         },
         [
-          service('ai-crm', 'ИИ анализ CRM'),
-          service('ai-dashboard', 'ИИ анализ дашборда'),
-          service('ai-documents', 'ИИ анализ документов'),
-          service('ai-calls', 'ИИ анализ звонков и менеджеров'),
+          service('ai-crm', 'РР Р°РЅР°Р»РёР· CRM'),
+          service('ai-dashboard', 'РР Р°РЅР°Р»РёР· РґР°С€Р±РѕСЂРґР°'),
+          service('ai-documents', 'РР Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ'),
+          service('ai-calls', 'РР Р°РЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ Рё РјРµРЅРµРґР¶РµСЂРѕРІ'),
         ],
         [],
         '',
@@ -940,11 +940,11 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         persist: false,
       },
-      [service('ai-dashboard', 'ИИ анализ дашборда')],
+      [service('ai-dashboard', 'РР Р°РЅР°Р»РёР· РґР°С€Р±РѕСЂРґР°')],
       [
         {
           serviceId: 'ai-dashboard',
-          serviceName: 'ИИ анализ дашборда',
+          serviceName: 'РР Р°РЅР°Р»РёР· РґР°С€Р±РѕСЂРґР°',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -956,7 +956,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
     expect(result).not.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ serviceName: 'ИИ анализ дашборда' }),
+        expect.objectContaining({ serviceName: 'РР Р°РЅР°Р»РёР· РґР°С€Р±РѕСЂРґР°' }),
       ]),
     );
   });
@@ -976,9 +976,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
         persist: false,
       },
       [
-        service('ai-calls', 'ИИ анализ звонков и менеджеров'),
-        service('telephony', 'Интеграция телефонии'),
-        service('messenger', 'Интеграция мессенджера'),
+        service('ai-calls', 'РР Р°РЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ Рё РјРµРЅРµРґР¶РµСЂРѕРІ'),
+        service('telephony', 'РРЅС‚РµРіСЂР°С†РёСЏ С‚РµР»РµС„РѕРЅРёРё'),
+        service('messenger', 'РРЅС‚РµРіСЂР°С†РёСЏ РјРµСЃСЃРµРЅРґР¶РµСЂР°'),
       ],
       [],
       '',
@@ -1003,9 +1003,9 @@ describe('QuestionnaireRelevanceRankerService', () => {
         persist: false,
       },
       [
-        service('office', 'Офис'),
-        service('office-pro', 'Офис PRO'),
-        service('online', 'Стандарт Online'),
+        service('office', 'РћС„РёСЃ'),
+        service('office-pro', 'РћС„РёСЃ PRO'),
+        service('online', 'РЎС‚Р°РЅРґР°СЂС‚ Online'),
       ],
       [],
       '',
@@ -1016,12 +1016,12 @@ describe('QuestionnaireRelevanceRankerService', () => {
 
   it('fills the limit after collapsing alternative hiring formats', () => {
     const candidates = [
-      service('office', 'Офис'),
-      service('office-pro', 'Офис PRO'),
-      service('service-1', 'Услуга 1'),
-      service('service-2', 'Услуга 2'),
-      service('service-3', 'Услуга 3'),
-      service('service-4', 'Услуга 4'),
+      service('office', 'РћС„РёСЃ'),
+      service('office-pro', 'РћС„РёСЃ PRO'),
+      service('service-1', 'РЈСЃР»СѓРіР° 1'),
+      service('service-2', 'РЈСЃР»СѓРіР° 2'),
+      service('service-3', 'РЈСЃР»СѓРіР° 3'),
+      service('service-4', 'РЈСЃР»СѓРіР° 4'),
     ];
     const ranked = candidates.map((candidate, index) => ({
       serviceId: candidate.id,
@@ -1037,7 +1037,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           productStage: 'existing',
-          desiredResult: { description: 'Усилить продажи' },
+          desiredResult: { description: 'РЈСЃРёР»РёС‚СЊ РїСЂРѕРґР°Р¶Рё' },
         },
         persist: false,
       },
@@ -1079,7 +1079,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         persist: false,
       },
-      [service('report-setup', 'Настройка отчёта')],
+      [service('report-setup', 'РќР°СЃС‚СЂРѕР№РєР° РѕС‚С‡С‘С‚Р°')],
       [],
       '',
     );
@@ -1155,7 +1155,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Строительные материалы',
+          product: 'РЎС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РјР°С‚РµСЂРёР°Р»С‹',
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
           components: components({
@@ -1171,7 +1171,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         persist: false,
       },
-      [service('exact-from-zero', 'Пакет ОП с нуля'), ...services],
+      [service('exact-from-zero', 'РџР°РєРµС‚ РћРџ СЃ РЅСѓР»СЏ'), ...services],
       [],
       '',
       6,
@@ -1186,7 +1186,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2C',
-          product: 'Строительные материалы',
+          product: 'РЎС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РјР°С‚РµСЂРёР°Р»С‹',
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
           components: components({
@@ -1216,18 +1216,18 @@ describe('QuestionnaireRelevanceRankerService', () => {
   it('keeps golden reference items above expanded LLM-ranked candidates', () => {
     const customCandidate = service(
       'custom-growth-audit',
-      'Индивидуальный аудит роста продаж',
+      'РРЅРґРёРІРёРґСѓР°Р»СЊРЅС‹Р№ Р°СѓРґРёС‚ СЂРѕСЃС‚Р° РїСЂРѕРґР°Р¶',
     );
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Строительные материалы',
+          product: 'РЎС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РјР°С‚РµСЂРёР°Р»С‹',
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
           desiredResult: {
-            description: 'Дополнительно нужен аудит роста продаж',
+            description: 'Р”РѕРїРѕР»РЅРёС‚РµР»СЊРЅРѕ РЅСѓР¶РµРЅ Р°СѓРґРёС‚ СЂРѕСЃС‚Р° РїСЂРѕРґР°Р¶',
           },
           components: components({
             crm: true,
@@ -1246,7 +1246,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'custom-growth-audit',
-          serviceName: 'Индивидуальный аудит роста продаж',
+          serviceName: 'РРЅРґРёРІРёРґСѓР°Р»СЊРЅС‹Р№ Р°СѓРґРёС‚ СЂРѕСЃС‚Р° РїСЂРѕРґР°Р¶',
           priority: RecommendationPriority.Urgent,
           rationale: 'LLM found a custom fit from questionnaire text',
           diagnosticSignals: ['ai_generated', 'custom_growth_fit'],
@@ -1320,7 +1320,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           productStage: 'existing',
-          desiredResult: { description: 'Усилить продажи' },
+          desiredResult: { description: 'РЈСЃРёР»РёС‚СЊ РїСЂРѕРґР°Р¶Рё' },
         },
         persist: false,
       },
@@ -1347,7 +1347,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'ai-rop',
-          serviceName: 'ИИ РОП',
+          serviceName: 'РР Р РћРџ',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1355,7 +1355,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'sales-head',
-          serviceName: 'Руководитель отдела продаж',
+          serviceName: 'Р СѓРєРѕРІРѕРґРёС‚РµР»СЊ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1379,7 +1379,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Бухгалтерские услуги',
+          product: 'Р‘СѓС…РіР°Р»С‚РµСЂСЃРєРёРµ СѓСЃР»СѓРіРё',
           productStage: 'existing',
           leadGenerationTypes: ['inbound'],
           components: components({
@@ -1417,11 +1417,11 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           salesDirection: 'B2B',
-          product: 'Бухгалтерские услуги',
+          product: 'Р‘СѓС…РіР°Р»С‚РµСЂСЃРєРёРµ СѓСЃР»СѓРіРё',
           productStage: 'existing',
           leadGenerationTypes: ['inbound'],
           desiredResult: {
-            description: 'Нужно фиксировать входящие заявки и переписки',
+            description: 'РќСѓР¶РЅРѕ С„РёРєСЃРёСЂРѕРІР°С‚СЊ РІС…РѕРґСЏС‰РёРµ Р·Р°СЏРІРєРё Рё РїРµСЂРµРїРёСЃРєРё',
           },
           components: components({
             telephony: true,
@@ -1431,11 +1431,11 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         persist: false,
       },
-      [...services, service('contact-db', 'База контактов')],
+      [...services, service('contact-db', 'Р‘Р°Р·Р° РєРѕРЅС‚Р°РєС‚РѕРІ')],
       [
         {
           serviceId: 'contact-db',
-          serviceName: 'База контактов',
+          serviceName: 'Р‘Р°Р·Р° РєРѕРЅС‚Р°РєС‚РѕРІ',
           priority: RecommendationPriority.Urgent,
           rationale: 'fallback',
           diagnosticSignals: ['lead_generation_gap'],
@@ -1457,7 +1457,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '3m',
-            description: 'Автоматизировать повторяющиеся действия отдела',
+            description: 'РђРІС‚РѕРјР°С‚РёР·РёСЂРѕРІР°С‚СЊ РїРѕРІС‚РѕСЂСЏСЋС‰РёРµСЃСЏ РґРµР№СЃС‚РІРёСЏ РѕС‚РґРµР»Р°',
           },
           targetRevenue: 4000000,
           leadGenerationTypes: ['inbound'],
@@ -1487,7 +1487,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           desiredResult: {
             period: '1m',
             description:
-              'отсутствует отдел продаж, нужно настроить отдел продаж',
+              'РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚ РѕС‚РґРµР» РїСЂРѕРґР°Р¶, РЅСѓР¶РЅРѕ РЅР°СЃС‚СЂРѕРёС‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶',
           },
           targetRevenue: 500000,
           averageCheck: 1000000,
@@ -1519,8 +1519,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Новый',
-          targetResult: 'Построить отдел продаж с нуля',
+          productStage: 'РќРѕРІС‹Р№',
+          targetResult: 'РџРѕСЃС‚СЂРѕРёС‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ',
         },
         persist: false,
       },
@@ -1528,7 +1528,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'from-zero',
-          serviceName: 'Отдел продаж с нуля',
+          serviceName: 'РћС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1536,7 +1536,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'crm-start',
-          serviceName: 'CRM Старт',
+          serviceName: 'CRM РЎС‚Р°СЂС‚',
           priority: RecommendationPriority.Medium,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1561,7 +1561,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '3m',
-            description: 'Навести порядок в работе 2 менеджеров',
+            description: 'РќР°РІРµСЃС‚Рё РїРѕСЂСЏРґРѕРє РІ СЂР°Р±РѕС‚Рµ 2 РјРµРЅРµРґР¶РµСЂРѕРІ',
           },
           targetRevenue: 4000000,
           components: components({
@@ -1594,7 +1594,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '3m',
-            description: 'Навести порядок в работе 2 менеджеров',
+            description: 'РќР°РІРµСЃС‚Рё РїРѕСЂСЏРґРѕРє РІ СЂР°Р±РѕС‚Рµ 2 РјРµРЅРµРґР¶РµСЂРѕРІ',
           },
           targetRevenue: 4000000,
           components: components({
@@ -1610,7 +1610,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'base-setup',
-          serviceName: 'Базовая настройка работы отдела продаж',
+          serviceName: 'Р‘Р°Р·РѕРІР°СЏ РЅР°СЃС‚СЂРѕР№РєР° СЂР°Р±РѕС‚С‹ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1624,13 +1624,13 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result.map((item) => item.serviceId)).not.toContain('base-setup');
   });
 
-  it('treats the questionnaire value "Нет, продукт новый" as a new sales department', () => {
+  it('treats the questionnaire value "РќРµС‚, РїСЂРѕРґСѓРєС‚ РЅРѕРІС‹Р№" as a new sales department', () => {
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Нет, продукт новый',
-          targetResult: 'Увеличить продажи в команде из 6 менеджеров',
+          productStage: 'РќРµС‚, РїСЂРѕРґСѓРєС‚ РЅРѕРІС‹Р№',
+          targetResult: 'РЈРІРµР»РёС‡РёС‚СЊ РїСЂРѕРґР°Р¶Рё РІ РєРѕРјР°РЅРґРµ РёР· 6 РјРµРЅРµРґР¶РµСЂРѕРІ',
           calculatedManagersCount: 6,
           components: components({
             analytics: true,
@@ -1654,13 +1654,13 @@ describe('QuestionnaireRelevanceRankerService', () => {
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Новый',
-          leadGenerationType: 'Входящая',
-          targetResult: 'Построить отдел продаж с нуля',
+          productStage: 'РќРѕРІС‹Р№',
+          leadGenerationType: 'Р’С…РѕРґСЏС‰Р°СЏ',
+          targetResult: 'РџРѕСЃС‚СЂРѕРёС‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ',
           desiredSalesDepartment: [
-            'Телефония',
-            'Мессенджер',
-            'Менеджер по продажам',
+            'РўРµР»РµС„РѕРЅРёСЏ',
+            'РњРµСЃСЃРµРЅРґР¶РµСЂ',
+            'РњРµРЅРµРґР¶РµСЂ РїРѕ РїСЂРѕРґР°Р¶Р°Рј',
           ],
         },
         persist: false,
@@ -1669,7 +1669,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'crm-audit',
-          serviceName: 'Аудит CRM',
+          serviceName: 'РђСѓРґРёС‚ CRM',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1677,7 +1677,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'crm-funnels',
-          serviceName: 'Настройка воронок сделок (до 3 шт)',
+          serviceName: 'РќР°СЃС‚СЂРѕР№РєР° РІРѕСЂРѕРЅРѕРє СЃРґРµР»РѕРє (РґРѕ 3 С€С‚)',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1685,7 +1685,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'crm-tech-spec',
-          serviceName: 'Подготовка технического задания',
+          serviceName: 'РџРѕРґРіРѕС‚РѕРІРєР° С‚РµС…РЅРёС‡РµСЃРєРѕРіРѕ Р·Р°РґР°РЅРёСЏ',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1693,7 +1693,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'crm-report-setup',
-          serviceName: 'Настройка отчёта',
+          serviceName: 'РќР°СЃС‚СЂРѕР№РєР° РѕС‚С‡С‘С‚Р°',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1701,7 +1701,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'crm-deals-report',
-          serviceName: 'Отчет по ведению сделок в CRM',
+          serviceName: 'РћС‚С‡РµС‚ РїРѕ РІРµРґРµРЅРёСЋ СЃРґРµР»РѕРє РІ CRM',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1741,7 +1741,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           leadGenerationTypes: ['inbound'],
           desiredResult: {
             period: '6m',
-            description: 'Построить отдел продаж с нуля',
+            description: 'РџРѕСЃС‚СЂРѕРёС‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ',
           },
           targetRevenue: 5000000,
           components: components({
@@ -1756,7 +1756,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'crm-audit',
-          serviceName: 'Аудит CRM',
+          serviceName: 'РђСѓРґРёС‚ CRM',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1785,7 +1785,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           desiredResult: {
             period: '1m',
             description:
-              'отсутствует отдел продаж, нужно настроить отдел продаж',
+              'РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚ РѕС‚РґРµР» РїСЂРѕРґР°Р¶, РЅСѓР¶РЅРѕ РЅР°СЃС‚СЂРѕРёС‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶',
           },
           targetRevenue: 500000,
           averageCheck: 1000000,
@@ -1810,7 +1810,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '1m',
-            description: 'Нужно быстро обучить менеджеров за месяц',
+            description: 'РќСѓР¶РЅРѕ Р±С‹СЃС‚СЂРѕ РѕР±СѓС‡РёС‚СЊ РјРµРЅРµРґР¶РµСЂРѕРІ Р·Р° РјРµСЃСЏС†',
           },
           components: components({
             trainingSystem: true,
@@ -1823,7 +1823,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       [
         {
           serviceId: 'training-3m',
-          serviceName: 'Пакет обучения на 3 месяца',
+          serviceName: 'РџР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ РЅР° 3 РјРµСЃСЏС†Р°',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1831,7 +1831,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         },
         {
           serviceId: 'training-1m',
-          serviceName: 'Пакет обучения на месяц',
+          serviceName: 'РџР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ РЅР° РјРµСЃСЏС†',
           priority: RecommendationPriority.Medium,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -1855,7 +1855,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           leadGenerationTypes: ['inbound'],
           desiredResult: {
             period: '6m',
-            description: 'Построить отдел продаж с нуля',
+            description: 'РџРѕСЃС‚СЂРѕРёС‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶ СЃ РЅСѓР»СЏ',
           },
           targetRevenue: 5000000,
           components: components({
@@ -1894,17 +1894,17 @@ describe('QuestionnaireRelevanceRankerService', () => {
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Уже продаю',
-          targetResult: 'Нужны CRM, аналитика, телефония и контроль качества',
+          productStage: 'РЈР¶Рµ РїСЂРѕРґР°СЋ',
+          targetResult: 'РќСѓР¶РЅС‹ CRM, Р°РЅР°Р»РёС‚РёРєР°, С‚РµР»РµС„РѕРЅРёСЏ Рё РєРѕРЅС‚СЂРѕР»СЊ РєР°С‡РµСЃС‚РІР°',
           desiredRevenue: 15000000,
           calculatedManagersCount: 8,
           desiredSalesDepartment: [
             'CRM',
-            'Телефония',
-            'Мессенджер',
-            'Аналитика',
-            'Анализ звонков',
-            'РОП',
+            'РўРµР»РµС„РѕРЅРёСЏ',
+            'РњРµСЃСЃРµРЅРґР¶РµСЂ',
+            'РђРЅР°Р»РёС‚РёРєР°',
+            'РђРЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ',
+            'Р РћРџ',
           ],
         },
         persist: false,
@@ -1932,7 +1932,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '6m',
-            description: 'Масштабировать продажи и управлять отделом по данным',
+            description: 'РњР°СЃС€С‚Р°Р±РёСЂРѕРІР°С‚СЊ РїСЂРѕРґР°Р¶Рё Рё СѓРїСЂР°РІР»СЏС‚СЊ РѕС‚РґРµР»РѕРј РїРѕ РґР°РЅРЅС‹Рј',
           },
           targetRevenue: 15000000,
           leadGenerationTypes: ['inbound', 'outbound'],
@@ -1970,7 +1970,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           productStage: 'existing',
           desiredResult: {
             period: '3m',
-            description: 'Масштабировать отдел продаж до 8 менеджеров',
+            description: 'РњР°СЃС€С‚Р°Р±РёСЂРѕРІР°С‚СЊ РѕС‚РґРµР» РїСЂРѕРґР°Р¶ РґРѕ 8 РјРµРЅРµРґР¶РµСЂРѕРІ',
           },
           targetRevenue: 4000000,
           leadGenerationTypes: ['outbound'],
@@ -1999,17 +1999,17 @@ describe('QuestionnaireRelevanceRankerService', () => {
   it('selects one-month training, CRM Start, AI analyses and launch ROP for the new-OP questionnaire', () => {
     const extendedServices = [
       ...services,
-      service('ai-docs', 'ИИ анализ документов'),
-      service('ai-crm', 'ИИ анализ CRM'),
-      service('ai-calls', 'ИИ анализ звонков и менеджеров'),
-      service('rop-expert', 'Эксперт РОП: консультация'),
+      service('ai-docs', 'РР Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ'),
+      service('ai-crm', 'РР Р°РЅР°Р»РёР· CRM'),
+      service('ai-calls', 'РР Р°РЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ Рё РјРµРЅРµРґР¶РµСЂРѕРІ'),
+      service('rop-expert', 'Р­РєСЃРїРµСЂС‚ Р РћРџ: РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ'),
     ];
     const result = ranker.rankRecommendations(
       {
         userId: 'user-id',
         clientProfile: {
-          productStage: 'Нет, продукт новый',
-          desiredResult: { period: '1 месяц', description: 'Запустить ОП' },
+          productStage: 'РќРµС‚, РїСЂРѕРґСѓРєС‚ РЅРѕРІС‹Р№',
+          desiredResult: { period: '1 РјРµСЃСЏС†', description: 'Р—Р°РїСѓСЃС‚РёС‚СЊ РћРџ' },
           components: components({
             crm: true,
             trainingSystem: true,
@@ -2027,16 +2027,16 @@ describe('QuestionnaireRelevanceRankerService', () => {
     const names = result.map((item) => item.serviceName);
     expect(names).toEqual(
       expect.arrayContaining([
-        'Пакет обучения на месяц',
-        'CRM Старт',
-        'ИИ анализ документов',
-        'ИИ анализ CRM',
-        'ИИ анализ звонков и менеджеров',
-        'Руководитель отдела продаж',
+        'РџР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ РЅР° РјРµСЃСЏС†',
+        'CRM РЎС‚Р°СЂС‚',
+        'РР Р°РЅР°Р»РёР· РґРѕРєСѓРјРµРЅС‚РѕРІ',
+        'РР Р°РЅР°Р»РёР· CRM',
+        'РР Р°РЅР°Р»РёР· Р·РІРѕРЅРєРѕРІ Рё РјРµРЅРµРґР¶РµСЂРѕРІ',
+        'Р СѓРєРѕРІРѕРґРёС‚РµР»СЊ РѕС‚РґРµР»Р° РїСЂРѕРґР°Р¶',
       ]),
     );
-    expect(names).not.toContain('Эксперт РОП: консультация');
-    expect(names).not.toContain('Пакет обучения на 3 месяца');
+    expect(names).not.toContain('Р­РєСЃРїРµСЂС‚ Р РћРџ: РєРѕРЅСЃСѓР»СЊС‚Р°С†РёСЏ');
+    expect(names).not.toContain('РџР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ РЅР° 3 РјРµСЃСЏС†Р°');
   });
 
   it('runs the full new-OP scenario against stable catalog IDs', () => {
@@ -2050,7 +2050,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         userId: 'user-id',
         clientProfile: {
           productStage: 'new',
-          desiredResult: { period: '1m', description: 'Запустить продажи' },
+          desiredResult: { period: '1m', description: 'Р—Р°РїСѓСЃС‚РёС‚СЊ РїСЂРѕРґР°Р¶Рё' },
           components: components({
             crm: true,
             telephony: true,
@@ -2091,7 +2091,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
       ...service(
         entry.id,
         entry.id === RECOMMENDATION_CATALOG.trainingThreeMonths.id
-          ? 'Переименованный пакет обучения'
+          ? 'РџРµСЂРµРёРјРµРЅРѕРІР°РЅРЅС‹Р№ РїР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ'
           : entry.displayName,
       ),
       serviceId: entry.kind === 'service' ? entry.id : null,
@@ -2105,7 +2105,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
           leadGenerationTypes: ['outbound'],
           desiredResult: {
             period: '1m',
-            description: 'Усилить существующий отдел продаж',
+            description: 'РЈСЃРёР»РёС‚СЊ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ РѕС‚РґРµР» РїСЂРѕРґР°Р¶',
           },
           components: components({
             crm: true,
@@ -2130,7 +2130,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         {
           serviceId: null,
           packageId: RECOMMENDATION_CATALOG.trainingThreeMonths.id,
-          serviceName: 'Переименованный пакет обучения',
+          serviceName: 'РџРµСЂРµРёРјРµРЅРѕРІР°РЅРЅС‹Р№ РїР°РєРµС‚ РѕР±СѓС‡РµРЅРёСЏ',
           priority: RecommendationPriority.Urgent,
           rationale: 'llm',
           diagnosticSignals: ['ai_generated'],
@@ -2160,8 +2160,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
             serviceId: null,
             packageId: RECOMMENDATION_CATALOG.crmStart.id,
             coveredServiceIds: [
-              RECOMMENDATION_CATALOG.telephonyIntegration.id,
-              RECOMMENDATION_CATALOG.messengerIntegration.id,
+                RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                RECOMMENDATION_CATALOG.messengerIntegration.id,
             ],
           };
         }
@@ -2174,8 +2174,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(compactedTargetIds).toContain(RECOMMENDATION_CATALOG.crmStart.id);
     expect(compactedTargetIds).not.toEqual(
       expect.arrayContaining([
-        RECOMMENDATION_CATALOG.telephonyIntegration.id,
-        RECOMMENDATION_CATALOG.messengerIntegration.id,
+                RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                RECOMMENDATION_CATALOG.messengerIntegration.id,
       ]),
     );
   });
@@ -2187,7 +2187,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         clientProfile: {
           productStage: 'existing',
           leadGenerationTypes: ['outbound'],
-          desiredResult: { period: '3m', description: 'Усилить текущий ОП' },
+          desiredResult: { period: '3m', description: 'РЈСЃРёР»РёС‚СЊ С‚РµРєСѓС‰РёР№ РћРџ' },
           components: components({
             crm: true,
             contactDatabase: true,
@@ -2230,8 +2230,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
     expect(targetIds).not.toEqual(
       expect.arrayContaining([
-        RECOMMENDATION_CATALOG.telephonyIntegration.id,
-        RECOMMENDATION_CATALOG.messengerIntegration.id,
+                RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                RECOMMENDATION_CATALOG.messengerIntegration.id,
       ]),
     );
   });
@@ -2243,7 +2243,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         clientProfile: {
           productStage: 'new',
           leadGenerationTypes: ['inbound'],
-          desiredResult: { period: '3m', description: 'Запустить новый ОП' },
+          desiredResult: { period: '3m', description: 'Р—Р°РїСѓСЃС‚РёС‚СЊ РЅРѕРІС‹Р№ РћРџ' },
           components: components({
             crm: true,
             telephony: true,
@@ -2285,8 +2285,8 @@ describe('QuestionnaireRelevanceRankerService', () => {
     );
     expect(targetIds).not.toEqual(
       expect.arrayContaining([
-        RECOMMENDATION_CATALOG.telephonyIntegration.id,
-        RECOMMENDATION_CATALOG.messengerIntegration.id,
+                RECOMMENDATION_CATALOG.telephonyIntegration.id,
+                RECOMMENDATION_CATALOG.messengerIntegration.id,
       ]),
     );
   });
@@ -2298,7 +2298,7 @@ describe('QuestionnaireRelevanceRankerService', () => {
         clientProfile: {
           productStage: 'new',
           leadGenerationTypes: ['outbound'],
-          desiredResult: { period: '3m', description: 'Запустить продажи' },
+          desiredResult: { period: '3m', description: 'Р—Р°РїСѓСЃС‚РёС‚СЊ РїСЂРѕРґР°Р¶Рё' },
           components: components({
             crm: true,
             telephony: true,
