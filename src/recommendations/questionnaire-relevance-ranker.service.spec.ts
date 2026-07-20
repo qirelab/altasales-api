@@ -126,6 +126,12 @@ describe('QuestionnaireRelevanceRankerService', () => {
       usedTargetIds: Set<string>,
       additionalAliases?: string[],
     ): ServiceCandidate | null;
+    addDominatedPackageResidualServices(
+      items: GeneratedRecommendationItem[],
+      services: ServiceCandidate[],
+      context: string,
+      idealTargetIds: ReadonlySet<string>,
+    ): GeneratedRecommendationItem[];
   };
 
   const getRankerTestApi = (
@@ -136,6 +142,92 @@ describe('QuestionnaireRelevanceRankerService', () => {
     ranker = new QuestionnaireRelevanceRankerService(
       scoringService as unknown as RecommendationScoringService,
     );
+  });
+
+  it('adds every uncovered service from a compacted package without name-specific rules', () => {
+    const shared = Array.from({ length: 8 }, (_, index) => `shared-${index}`);
+    const packageItem = (
+      packageId: string,
+      serviceName: string,
+      coverageKeys: string[],
+      score: number,
+    ): GeneratedRecommendationItem => ({
+      serviceId: null,
+      packageId,
+      serviceName,
+      priority: RecommendationPriority.Urgent,
+      rationale: 'package fit',
+      diagnosticSignals: [],
+      score,
+      coveredServiceIds: coverageKeys,
+      coverageKeys,
+    });
+    const residualService = (
+      serviceId: string,
+      name: string,
+      coverageKey: string,
+    ): ServiceCandidate =>
+      ({
+        ...service(serviceId, name),
+        serviceId,
+        packageId: null,
+        coveredServiceIds: [serviceId],
+        coverageKeys: [serviceId, coverageKey],
+      }) as ServiceCandidate;
+    const items = [
+      packageItem(
+        'smaller-package',
+        'Smaller package',
+        [...shared, 'catalog_name:residual one', 'catalog_name:residual two'],
+        90,
+      ),
+      packageItem(
+        'larger-package',
+        'Larger package',
+        [
+          ...shared,
+          'catalog_name:large extra one',
+          'catalog_name:large extra two',
+          'catalog_name:large extra three',
+          'catalog_name:large extra four',
+        ],
+        85,
+      ),
+    ];
+
+    const result = getRankerTestApi(ranker).addDominatedPackageResidualServices(
+      items,
+      [
+        residualService(
+          'residual-one-id',
+          'Residual one',
+          'catalog_name:residual one',
+        ),
+        residualService(
+          'residual-two-id',
+          'Residual two',
+          'catalog_name:residual two',
+        ),
+      ],
+      '',
+      new Set(),
+    );
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual(
+      expect.arrayContaining([
+        'smaller-package',
+        'larger-package',
+        'residual-one-id',
+        'residual-two-id',
+      ]),
+    );
+    expect(
+      result
+        .filter((item) =>
+          item.diagnosticSignals.includes('uncovered_package_service'),
+        )
+        .map((item) => item.serviceId),
+    ).toEqual(['residual-one-id', 'residual-two-id']);
   });
 
   it('resolves configured catalog items by stable ID after a display name change', () => {
@@ -1650,6 +1742,31 @@ describe('QuestionnaireRelevanceRankerService', () => {
     expect(result.map((item) => item.serviceId)).toContain('dashboard');
     expect(result.map((item) => item.serviceId)).toContain('from-zero');
     expect(result.map((item) => item.serviceId)).not.toContain('sales-head');
+  });
+
+  it('keeps only the new-department foundation when only ROP is selected', () => {
+    const result = ranker.rankRecommendations(
+      {
+        userId: 'user-id',
+        clientProfile: {
+          productStage: 'new',
+          leadGenerationTypes: ['inbound'],
+          components: components({ salesHead: true }),
+        },
+        persist: false,
+      },
+      services,
+      [],
+      '',
+    );
+    const targetIds = result.map((item) => item.packageId ?? item.serviceId);
+
+    expect(targetIds).toEqual(
+      expect.arrayContaining(['from-zero', 'sales-head']),
+    );
+    expect(targetIds).not.toEqual(
+      expect.arrayContaining(['crm-start', 'docs-package']),
+    );
   });
 
   it('prioritizes requested tools and hiring for a new product with inbound leads', () => {
