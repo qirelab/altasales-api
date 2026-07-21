@@ -29,6 +29,12 @@ describe('RecommendationsService', () => {
     return privateMethod.apply(service, args);
   };
   const userId = 'user-id';
+  const twoManagerTurnkeyHiringName = [
+    '\u041f\u043e\u0434\u0431\u043e\u0440',
+    ' 2\u0445 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u043e\u0432',
+    ' \u0443\u0434\u0430\u043b\u0435\u043d\u043d\u043e',
+    ' \u043f\u043e\u0434 \u043a\u043b\u044e\u0447',
+  ].join('');
   const questionnaireAnswers = {
     companyName: 'AltaSales',
     productStage: 'existing',
@@ -1014,6 +1020,99 @@ describe('RecommendationsService', () => {
     expect(result.map((row: { id: string }) => row.id)).toEqual([
       'completed-package-recommendation-id',
       'active-service-recommendation-id',
+    ]);
+  });
+
+  it('hides standalone turnkey hiring covered by two-manager turnkey hiring', () => {
+    const { service } = createService();
+    const rows = [
+      {
+        id: 'from-zero-recommendation-id',
+        packageId: 'from-zero-package-id',
+        serviceId: null,
+        status: RecommendationStatus.Recommended,
+      },
+      {
+        id: 'turnkey-hiring-recommendation-id',
+        packageId: null,
+        serviceId: 'turnkey-hiring-service-id',
+        status: RecommendationStatus.Recommended,
+        name: '\u041f\u043e\u0434\u0431\u043e\u0440 \u043f\u043e\u0434 \u043a\u043b\u044e\u0447',
+      },
+    ];
+    const packages = [
+      {
+        id: 'from-zero-package-id',
+        services: [
+          {
+            id: 'two-manager-hiring-service-id',
+            name: twoManagerTurnkeyHiringName,
+            description: 'Full-cycle hiring of two sales managers',
+            skills: [],
+            category: null,
+            isHidden: false,
+            deletedAt: null,
+          },
+        ],
+      },
+    ];
+
+    const result = callPrivate<Array<{ id: string }>>(
+      service,
+      'filterPackageCoveredStandaloneRecommendations',
+      rows,
+      packages,
+    );
+
+    expect(result.map((row: { id: string }) => row.id)).toEqual([
+      'from-zero-recommendation-id',
+    ]);
+  });
+
+  it('does not hide a different standalone hiring service', () => {
+    const { service } = createService();
+    const rows = [
+      {
+        id: 'from-zero-recommendation-id',
+        packageId: 'from-zero-package-id',
+        serviceId: null,
+        status: RecommendationStatus.Recommended,
+      },
+      {
+        id: 'candidate-search-recommendation-id',
+        packageId: null,
+        serviceId: 'candidate-search-service-id',
+        status: RecommendationStatus.Recommended,
+        name: 'Candidate search',
+      },
+    ];
+    const packages = [
+      {
+        id: 'from-zero-package-id',
+        services: [
+          {
+            id: 'two-manager-hiring-service-id',
+            name: twoManagerTurnkeyHiringName,
+            description: 'Full-cycle hiring of two sales managers',
+            skills: [],
+            category: null,
+            isHidden: false,
+            deletedAt: null,
+          },
+        ],
+      },
+    ];
+
+    const result = callPrivate<Array<{ id: string }>>(
+      service,
+      'filterPackageCoveredStandaloneRecommendations',
+      rows,
+      packages,
+    );
+
+    expect(result.map((row: { id: string }) => row.id)).toEqual([
+      'from-zero-recommendation-id',
+      'candidate-search-recommendation-id',
     ]);
   });
 
@@ -2192,6 +2291,49 @@ describe('RecommendationsService', () => {
     ]);
   });
 
+  it('lets a training package replace a legacy questionnaire child', async () => {
+    const { service, recommendationRepository, relevanceRanker } =
+      createService();
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'legacy-training-plan-recommendation-id',
+        serviceId: 'training-plan-service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.Manual,
+        rationale: null,
+        diagnosticSignals: [],
+        generatedAt: new Date('2026-06-19T10:00:00.000Z'),
+        orderId: null,
+      },
+    ]);
+    relevanceRanker.rankRecommendations.mockReturnValue([
+      {
+        serviceId: null,
+        packageId: 'training-three-months-package-id',
+        serviceName: 'Training package for three months',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'systematic preparation of a new team',
+        diagnosticSignals: [],
+        score: 122,
+        coveredServiceIds: [
+          'training-plan-service-id',
+          'training-service-id',
+          'training-exercise-service-id',
+        ],
+      },
+    ]);
+
+    const result = await service.generateForUser({
+      userId,
+      persist: false,
+    });
+
+    expect(result.map((item) => item.packageId ?? item.serviceId)).toEqual([
+      'training-three-months-package-id',
+    ]);
+  });
+
   it('keeps manual coverage from being replaced by a generated package', async () => {
     const { service, recommendationRepository, relevanceRanker } =
       createService();
@@ -2834,6 +2976,58 @@ describe('RecommendationsService', () => {
     );
 
     expect(recommendationRepository.delete).not.toHaveBeenCalled();
+  });
+
+  it('prunes standalone turnkey hiring covered by two-manager hiring', async () => {
+    const { service, packageRepository, recommendationRepository } =
+      createService();
+    packageRepository.findOne.mockResolvedValue({
+      id: 'from-zero-package-id',
+      deletedAt: null,
+      isHidden: false,
+      services: [
+        {
+          id: 'two-manager-hiring-service-id',
+          name: twoManagerTurnkeyHiringName,
+          description: 'Full-cycle hiring of two sales managers',
+          category: null,
+          skills: [],
+          deletedAt: null,
+          isHidden: false,
+        },
+      ],
+    });
+    recommendationRepository.find.mockResolvedValue([
+      {
+        id: 'turnkey-hiring-recommendation-id',
+        serviceId: 'turnkey-hiring-service-id',
+        packageId: null,
+        status: RecommendationStatus.Recommended,
+        source: RecommendationSource.AI,
+        orderId: null,
+        diagnosticSignals: [],
+        service: {
+          id: 'turnkey-hiring-service-id',
+          name: '\u041f\u043e\u0434\u0431\u043e\u0440 \u043f\u043e\u0434 \u043a\u043b\u044e\u0447',
+          description: 'Full-cycle hiring of one sales manager',
+          category: null,
+          skills: [],
+          deletedAt: null,
+          isHidden: false,
+        },
+      },
+    ]);
+
+    await callPrivate<Promise<void>>(
+      service,
+      'pruneReplaceableRecommendationsCoveredByPackage',
+      userId,
+      'from-zero-package-id',
+    );
+
+    expect(recommendationRepository.delete).toHaveBeenCalledWith([
+      'turnkey-hiring-recommendation-id',
+    ]);
   });
 
   it('prefers a relevant package over covered services even when they scored higher', async () => {
