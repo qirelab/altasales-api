@@ -70,6 +70,20 @@ type LogicalCoverageRule = {
   minTerms?: number;
 };
 
+const EQUIVALENT_COVERAGE_RULES: LogicalCoverageRule[] = [
+  {
+    key: 'turnkey_hiring',
+    variants: [
+      '\u043f\u043e\u0434\u0431\u043e\u0440 \u043f\u043e\u0434 \u043a\u043b\u044e\u0447',
+    ],
+    terms: [
+      '\u043f\u043e\u0434\u0431\u043e\u0440',
+      '\u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440',
+      '\u043f\u043e\u0434 \u043a\u043b\u044e\u0447',
+    ],
+  },
+];
+
 const LOGICAL_COVERAGE_RULES: LogicalCoverageRule[] = [
   {
     key: 'vacancy_profile',
@@ -395,6 +409,7 @@ export class RecommendationsService implements OnModuleInit {
 
     const coveredServiceIds = new Set<string>();
     const coveredServiceNames = new Set<string>();
+    const coveredCoverageKeys = new Set<string>();
     packages.forEach((servicePackage) => {
       if (!packageIds.has(servicePackage.id)) return;
       filterActiveServices(servicePackage.services)
@@ -402,6 +417,9 @@ export class RecommendationsService implements OnModuleInit {
         .forEach((service) => {
           coveredServiceIds.add(service.id);
           coveredServiceNames.add(this.normalizeCatalogName(service.name));
+          this.getPackageCoverageIds([service]).forEach((coverageKey) =>
+            coveredCoverageKeys.add(coverageKey),
+          );
         });
     });
 
@@ -410,9 +428,16 @@ export class RecommendationsService implements OnModuleInit {
         return true;
       }
 
+      const rowCoverageKeys = this.getSafeOverlapCoverageIds([
+        row.serviceId,
+        ...this.getLogicalCoverageKeys([row.name], [row.name]),
+      ]);
       return (
         !coveredServiceIds.has(row.serviceId) &&
-        !coveredServiceNames.has(this.normalizeCatalogName(row.name))
+        !coveredServiceNames.has(this.normalizeCatalogName(row.name)) &&
+        !rowCoverageKeys.some((coverageKey) =>
+          coveredCoverageKeys.has(coverageKey),
+        )
       );
     });
   }
@@ -1149,12 +1174,12 @@ export class RecommendationsService implements OnModuleInit {
     return this.uniqueIds(
       activeServices
         .filter((service) => !service.deletedAt)
-        .map(
-          (service) =>
-            this.getServiceCoverageKeys(service).find((coverageKey) =>
-              coverageKey.startsWith('catalog_name:'),
-            ) ?? service.id,
-        ),
+        .flatMap((service) => {
+          const safeCoverageKeys = this.getServiceCoverageKeys(service).filter(
+            (coverageKey) => !coverageKey.startsWith('catalog_semantic:'),
+          );
+          return safeCoverageKeys.length > 0 ? safeCoverageKeys : [service.id];
+        }),
     );
   }
 
@@ -1187,6 +1212,11 @@ export class RecommendationsService implements OnModuleInit {
       if (part && part.length >= 4) {
         keys.add(`catalog_name:${part}`);
       }
+      EQUIVALENT_COVERAGE_RULES.forEach((rule) => {
+        if (this.matchesLogicalCoverageRule(part, rule)) {
+          keys.add(`catalog_equivalent:${rule.key}`);
+        }
+      });
     });
 
     LOGICAL_COVERAGE_RULES.forEach((rule) => {
@@ -1590,7 +1620,7 @@ export class RecommendationsService implements OnModuleInit {
 
   private isLegacyQuestionnaireRecommendation(
     recommendation: Pick<Recommendation, 'source' | 'orderId'> &
-      Partial<Pick<Recommendation, 'rationale'>>,
+      Partial<Pick<Recommendation, 'rationale' | 'generatedAt'>>,
   ): boolean {
     if (
       recommendation.source !== RecommendationSource.Manual ||
@@ -1598,6 +1628,8 @@ export class RecommendationsService implements OnModuleInit {
     ) {
       return false;
     }
+
+    if (recommendation.generatedAt != null) return true;
 
     const rationale = (recommendation.rationale ?? '').toLocaleLowerCase();
     return [
