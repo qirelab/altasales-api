@@ -13,7 +13,10 @@ export class RopDocumentResponseDto {
   @ApiProperty({ example: '/rop/documents/55/download' })
   downloadUrl: string;
 
-  @ApiPropertyOptional({ example: 'Актуальная версия договора', nullable: true })
+  @ApiPropertyOptional({
+    example: 'Актуальная версия договора',
+    nullable: true,
+  })
   description?: string | null;
 
   @ApiPropertyOptional({ example: 'Подписан обеими сторонами', nullable: true })

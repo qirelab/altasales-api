@@ -6,7 +6,13 @@ import {
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
@@ -37,7 +43,9 @@ export class RopController {
   ) {}
 
   @Get('indicators/month-dashboard')
-  @ApiOperation({ summary: 'Get ROP month dashboard for current user project department' })
+  @ApiOperation({
+    summary: 'Get ROP month dashboard for current user project department',
+  })
   async getMonthDashboard(
     @CurrentUser() user: CurrentUserData,
     @Query() query: RopMonthDashboardQueryDto,
@@ -46,27 +54,41 @@ export class RopController {
   }
 
   @Get('indicators/interim-report')
-  @ApiOperation({ summary: 'Get ROP interval dashboard (interim report) for current user project department' })
+  @ApiOperation({
+    summary:
+      'Get ROP interval dashboard (interim report) for current user project department',
+  })
   async getInterimReport(
     @CurrentUser() user: CurrentUserData,
     @Query() query: RopIntervalDashboardQueryDto,
   ): Promise<Record<string, unknown>> {
-    return this.ropIndicatorsService.getIntervalDashboardForUser(user.id, query);
+    return this.ropIndicatorsService.getIntervalDashboardForUser(
+      user.id,
+      query,
+    );
   }
 
   @Get('indicators/decomposition')
-  @ApiOperation({ summary: 'Get ROP benchmark decomposition for current user project department' })
+  @ApiOperation({
+    summary:
+      'Get ROP benchmark decomposition for current user project department',
+  })
   async getDecomposition(
     @CurrentUser() user: CurrentUserData,
     @Query() query: RopBenchmarkDecompositionQueryDto,
   ): Promise<Record<string, unknown>> {
-    return this.ropIndicatorsService.getBenchmarkDecompositionForUser(user.id, query);
+    return this.ropIndicatorsService.getBenchmarkDecompositionForUser(
+      user.id,
+      query,
+    );
   }
 
   @Get('documents')
   @ApiOperation({ summary: 'List ROP project documents for the current user' })
   @ApiOkResponse({ type: RopDocumentListItemResponseDto, isArray: true })
-  async listDocuments(@CurrentUser() user: CurrentUserData): Promise<RopDocumentListItemResponseDto[]> {
+  async listDocuments(
+    @CurrentUser() user: CurrentUserData,
+  ): Promise<RopDocumentListItemResponseDto[]> {
     return this.ropDocumentsService.listForUser(user.id);
   }
 
@@ -96,7 +118,9 @@ export class RopController {
   @Get('meetings')
   @ApiOperation({ summary: 'List ROP project meetings for the current user' })
   @ApiOkResponse({ type: RopMeetingResponseDto, isArray: true })
-  async listMeetings(@CurrentUser() user: CurrentUserData): Promise<RopMeetingResponseDto[]> {
+  async listMeetings(
+    @CurrentUser() user: CurrentUserData,
+  ): Promise<RopMeetingResponseDto[]> {
     return this.ropMeetingsService.listForUser(user.id);
   }
 

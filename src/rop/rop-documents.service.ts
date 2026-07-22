@@ -34,28 +34,41 @@ export class RopDocumentsService {
     }));
   }
 
-  async getForUser(userId: string, documentId: string): Promise<RopDocumentResponseDto> {
+  async getForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<RopDocumentResponseDto> {
     const projectId = await this.requireProjectId(userId);
     const document = await this.ropService.getDocument(projectId, documentId);
     return mapRopDocument(document);
   }
 
-  async getDownloadUrlForUser(userId: string, documentId: string): Promise<string> {
+  async getDownloadUrlForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<string> {
     const projectId = await this.requireProjectId(userId);
     return this.ropService.getDownloadUrl(projectId, documentId);
   }
 
-  async downloadForUser(userId: string, documentId: string): Promise<StreamableFile> {
+  async downloadForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<StreamableFile> {
     const downloadUrl = await this.getDownloadUrlForUser(userId, documentId);
     const upstream = await fetch(downloadUrl);
 
     if (!upstream.ok) {
-      throw new InternalServerErrorException('Failed to download document from ROP');
+      throw new InternalServerErrorException(
+        'Failed to download document from ROP',
+      );
     }
 
     const buffer = Buffer.from(await upstream.arrayBuffer());
-    const contentType = upstream.headers.get('content-type') ?? 'application/octet-stream';
-    const disposition = upstream.headers.get('content-disposition') ?? 'attachment';
+    const contentType =
+      upstream.headers.get('content-type') ?? 'application/octet-stream';
+    const disposition =
+      upstream.headers.get('content-disposition') ?? 'attachment';
 
     return new StreamableFile(buffer, {
       type: contentType,

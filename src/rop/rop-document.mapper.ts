@@ -1,7 +1,9 @@
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import { RopDocumentRecord } from './rop.types';
 
-export function mapRopDocument(document: RopDocumentRecord): RopDocumentResponseDto {
+export function mapRopDocument(
+  document: RopDocumentRecord,
+): RopDocumentResponseDto {
   return {
     id: String(document.id),
     projectId: String(document.project_id),
