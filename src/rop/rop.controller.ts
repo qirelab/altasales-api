@@ -3,15 +3,15 @@ import {
   Get,
   Param,
   Query,
-  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
-import type { Response } from 'express';
+import { ApiOkResponse, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
+import { RopDocumentListItemResponseDto } from './dto/rop-document-list-item-response.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import {
   RopBenchmarkDecompositionQueryDto,
@@ -65,22 +65,21 @@ export class RopController {
 
   @Get('documents')
   @ApiOperation({ summary: 'List ROP project documents for the current user' })
-  @ApiOkResponse({ type: RopDocumentResponseDto, isArray: true })
-  async listDocuments(@CurrentUser() user: CurrentUserData): Promise<RopDocumentResponseDto[]> {
+  @ApiOkResponse({ type: RopDocumentListItemResponseDto, isArray: true })
+  async listDocuments(@CurrentUser() user: CurrentUserData): Promise<RopDocumentListItemResponseDto[]> {
     return this.ropDocumentsService.listForUser(user.id);
   }
 
   @Get('documents/:documentId/download')
-  @ApiOperation({ summary: 'Redirect to ROP document download URL' })
+  @ApiOperation({ summary: 'Download a ROP project document' })
   @ApiParam({ name: 'documentId', description: 'ROP document ID' })
-  @ApiResponse({ status: 302, description: 'Redirect to presigned download URL' })
+  @ApiProduces('application/octet-stream')
+  @ApiOkResponse({ description: 'Document file stream' })
   async downloadDocument(
     @CurrentUser() user: CurrentUserData,
     @Param('documentId') documentId: string,
-    @Res() res: Response,
-  ): Promise<void> {
-    const downloadUrl = await this.ropDocumentsService.getDownloadUrlForUser(user.id, documentId);
-    res.redirect(downloadUrl);
+  ): Promise<StreamableFile> {
+    return this.ropDocumentsService.downloadForUser(user.id, documentId);
   }
 
   @Get('documents/:documentId')

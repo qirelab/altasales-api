@@ -10,6 +10,9 @@ export class RopDocumentResponseDto {
   @ApiProperty({ example: 'Договор оказания услуг v3.pdf' })
   name: string;
 
+  @ApiProperty({ example: '/rop/documents/55/download' })
+  downloadUrl: string;
+
   @ApiPropertyOptional({ example: 'Актуальная версия договора', nullable: true })
   description?: string | null;
 

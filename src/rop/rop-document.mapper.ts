@@ -6,6 +6,7 @@ export function mapRopDocument(document: RopDocumentRecord): RopDocumentResponse
     id: String(document.id),
     projectId: String(document.project_id),
     name: document.name,
+    downloadUrl: `/rop/documents/${encodeURIComponent(String(document.id))}/download`,
     description: document.description ?? null,
     comment: document.comment ?? null,
     link: document.link ?? null,
