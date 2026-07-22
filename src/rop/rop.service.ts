@@ -1,4 +1,9 @@
-import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   RopDocumentRecord,
   RopMeetingRecord,
@@ -29,7 +34,9 @@ export class RopService {
     this.apiKey = process.env.ROP_API_KEY || '';
 
     if (!this.isConfigured()) {
-      this.logger.warn('ROP API credentials not configured. ROP integration is disabled.');
+      this.logger.warn(
+        'ROP API credentials not configured. ROP integration is disabled.',
+      );
     }
   }
 
@@ -48,10 +55,16 @@ export class RopService {
     return String(value);
   }
 
-  private logRopFailure(action: string, response: Response, body: string): void {
+  private logRopFailure(
+    action: string,
+    response: Response,
+    body: string,
+  ): void {
     const requestId = response.headers.get('X-Request-ID');
     const suffix = requestId ? ` [X-Request-ID: ${requestId}]` : '';
-    this.logger.error(`ROP ${action} failed (${response.status}): ${body}${suffix}`);
+    this.logger.error(
+      `ROP ${action} failed (${response.status}): ${body}${suffix}`,
+    );
   }
 
   private ensureConfigured(): void {
@@ -75,7 +88,10 @@ export class RopService {
       throw new InternalServerErrorException('Failed to create project in ROP');
     }
 
-    const data = await response.json() as { id: string | number; name: string };
+    const data = (await response.json()) as {
+      id: string | number;
+      name: string;
+    };
     return {
       id: this.normalizeId(data.id),
       name: data.name,
@@ -85,21 +101,29 @@ export class RopService {
   async listDocuments(projectId: string): Promise<RopDocumentRecord[]> {
     this.ensureConfigured();
 
-    const response = await fetch(`${this.apiUrl}/projects/${projectId}/documents`, {
-      method: 'GET',
-      headers: this.jsonHeaders,
-    });
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/documents`,
+      {
+        method: 'GET',
+        headers: this.jsonHeaders,
+      },
+    );
 
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('list documents', response, error);
-      throw new InternalServerErrorException('Failed to list documents from ROP');
+      throw new InternalServerErrorException(
+        'Failed to list documents from ROP',
+      );
     }
 
     return response.json() as Promise<RopDocumentRecord[]>;
   }
 
-  async getDocument(projectId: string, documentId: string): Promise<RopDocumentRecord> {
+  async getDocument(
+    projectId: string,
+    documentId: string,
+  ): Promise<RopDocumentRecord> {
     this.ensureConfigured();
 
     const response = await fetch(
@@ -123,7 +147,10 @@ export class RopService {
     return response.json() as Promise<RopDocumentRecord>;
   }
 
-  async getDocumentAnalyze(projectId: string, documentId: string): Promise<Record<string, unknown>> {
+  async getDocumentAnalyze(
+    projectId: string,
+    documentId: string,
+  ): Promise<Record<string, unknown>> {
     this.ensureConfigured();
 
     const response = await fetch(
@@ -141,7 +168,9 @@ export class RopService {
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('get document analysis', response, error);
-      throw new InternalServerErrorException('Failed to get document analysis from ROP');
+      throw new InternalServerErrorException(
+        'Failed to get document analysis from ROP',
+      );
     }
 
     return response.json() as Promise<Record<string, unknown>>;
@@ -154,22 +183,29 @@ export class RopService {
   ): Promise<RopDocument> {
     this.ensureConfigured();
 
-    const response = await fetch(`${this.apiUrl}/projects/${projectId}/documents`, {
-      method: 'POST',
-      headers: this.jsonHeaders,
-      body: JSON.stringify({
-        name,
-        ...(link ? { link } : {}),
-      }),
-    });
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/documents`,
+      {
+        method: 'POST',
+        headers: this.jsonHeaders,
+        body: JSON.stringify({
+          name,
+          ...(link ? { link } : {}),
+        }),
+      },
+    );
 
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('create document', response, error);
-      throw new InternalServerErrorException('Failed to create document in ROP');
+      throw new InternalServerErrorException(
+        'Failed to create document in ROP',
+      );
     }
 
-    const data = await response.json() as { id: string | number } & RopDocument;
+    const data = (await response.json()) as {
+      id: string | number;
+    } & RopDocument;
     return {
       ...data,
       id: this.normalizeId(data.id),
@@ -183,7 +219,9 @@ export class RopService {
   ): Promise<RopDocument> {
     this.ensureConfigured();
 
-    const blob = new Blob([new Uint8Array(file.buffer)], { type: file.mimetype });
+    const blob = new Blob([new Uint8Array(file.buffer)], {
+      type: file.mimetype,
+    });
     const formData = new FormData();
     formData.append('file', blob, file.originalname);
 
@@ -204,7 +242,9 @@ export class RopService {
       throw new InternalServerErrorException('Failed to upload file to ROP');
     }
 
-    const data = await response.json() as { id: string | number } & RopDocument;
+    const data = (await response.json()) as {
+      id: string | number;
+    } & RopDocument;
     return {
       ...data,
       id: this.normalizeId(data.id),
@@ -225,14 +265,19 @@ export class RopService {
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('get download URL', response, error);
-      throw new InternalServerErrorException('Failed to get download URL from ROP');
+      throw new InternalServerErrorException(
+        'Failed to get download URL from ROP',
+      );
     }
 
-    const data = await response.json() as { download_url: string };
+    const data = (await response.json()) as { download_url: string };
     return data.download_url;
   }
 
-  async listTasks(projectId: string, filters: RopTaskListFilters = {}): Promise<RopTaskRecord[]> {
+  async listTasks(
+    projectId: string,
+    filters: RopTaskListFilters = {},
+  ): Promise<RopTaskRecord[]> {
     this.ensureConfigured();
 
     const params = new URLSearchParams();
@@ -310,7 +355,9 @@ export class RopService {
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('get month dashboard', response, error);
-      throw new InternalServerErrorException('Failed to get month dashboard from ROP');
+      throw new InternalServerErrorException(
+        'Failed to get month dashboard from ROP',
+      );
     }
 
     return response.json() as Promise<Record<string, unknown>>;
@@ -338,7 +385,9 @@ export class RopService {
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('get interval dashboard', response, error);
-      throw new InternalServerErrorException('Failed to get interval dashboard from ROP');
+      throw new InternalServerErrorException(
+        'Failed to get interval dashboard from ROP',
+      );
     }
 
     return response.json() as Promise<Record<string, unknown>>;
@@ -363,7 +412,9 @@ export class RopService {
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('get benchmark decomposition', response, error);
-      throw new InternalServerErrorException('Failed to get benchmark decomposition from ROP');
+      throw new InternalServerErrorException(
+        'Failed to get benchmark decomposition from ROP',
+      );
     }
 
     return response.json() as Promise<Record<string, unknown>>;
@@ -372,21 +423,29 @@ export class RopService {
   async listMeetings(projectId: string): Promise<RopMeetingRecord[]> {
     this.ensureConfigured();
 
-    const response = await fetch(`${this.apiUrl}/projects/${projectId}/meetings`, {
-      method: 'GET',
-      headers: this.jsonHeaders,
-    });
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/meetings`,
+      {
+        method: 'GET',
+        headers: this.jsonHeaders,
+      },
+    );
 
     if (!response.ok) {
       const error = await response.text();
       this.logRopFailure('list meetings', response, error);
-      throw new InternalServerErrorException('Failed to list meetings from ROP');
+      throw new InternalServerErrorException(
+        'Failed to list meetings from ROP',
+      );
     }
 
     return response.json() as Promise<RopMeetingRecord[]>;
   }
 
-  async getMeeting(projectId: string, meetingId: string): Promise<RopMeetingRecord> {
+  async getMeeting(
+    projectId: string,
+    meetingId: string,
+  ): Promise<RopMeetingRecord> {
     this.ensureConfigured();
 
     const response = await fetch(

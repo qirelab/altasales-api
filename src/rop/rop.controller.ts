@@ -53,7 +53,9 @@ export class RopController {
   ) {}
 
   @Get('indicators/month-dashboard')
-  @ApiOperation({ summary: 'Get ROP month dashboard for current user project department' })
+  @ApiOperation({
+    summary: 'Get ROP month dashboard for current user project department',
+  })
   async getMonthDashboard(
     @CurrentUser() user: CurrentUserData,
     @Query() query: RopMonthDashboardQueryDto,
@@ -62,32 +64,48 @@ export class RopController {
   }
 
   @Get('indicators/interim-report')
-  @ApiOperation({ summary: 'Get ROP interval dashboard (interim report) for current user project department' })
+  @ApiOperation({
+    summary:
+      'Get ROP interval dashboard (interim report) for current user project department',
+  })
   async getInterimReport(
     @CurrentUser() user: CurrentUserData,
     @Query() query: RopIntervalDashboardQueryDto,
   ): Promise<Record<string, unknown>> {
-    return this.ropIndicatorsService.getIntervalDashboardForUser(user.id, query);
+    return this.ropIndicatorsService.getIntervalDashboardForUser(
+      user.id,
+      query,
+    );
   }
 
   @Get('indicators/decomposition')
-  @ApiOperation({ summary: 'Get ROP benchmark decomposition for current user project department' })
+  @ApiOperation({
+    summary:
+      'Get ROP benchmark decomposition for current user project department',
+  })
   async getDecomposition(
     @CurrentUser() user: CurrentUserData,
     @Query() query: RopBenchmarkDecompositionQueryDto,
   ): Promise<Record<string, unknown>> {
-    return this.ropIndicatorsService.getBenchmarkDecompositionForUser(user.id, query);
+    return this.ropIndicatorsService.getBenchmarkDecompositionForUser(
+      user.id,
+      query,
+    );
   }
 
   @Get('documents')
   @ApiOperation({ summary: 'List ROP project documents for the current user' })
   @ApiOkResponse({ type: RopDocumentResponseDto, isArray: true })
-  async listDocuments(@CurrentUser() user: CurrentUserData): Promise<RopDocumentResponseDto[]> {
+  async listDocuments(
+    @CurrentUser() user: CurrentUserData,
+  ): Promise<RopDocumentResponseDto[]> {
     return this.ropDocumentsService.listForUser(user.id);
   }
 
   @Post('documents/analyze/upload')
-  @ApiOperation({ summary: 'Upload a document to ROP and start its AI analysis' })
+  @ApiOperation({
+    summary: 'Upload a document to ROP and start its AI analysis',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -99,7 +117,9 @@ export class RopController {
     },
   })
   @ApiCreatedResponse({ type: RopDocumentResponseDto })
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }),
+  )
   async uploadDocumentForAnalyze(
     @CurrentUser() user: CurrentUserData,
     @UploadedFile() file: Express.Multer.File,
@@ -112,13 +132,18 @@ export class RopController {
   }
 
   @Post('documents/analyze/link')
-  @ApiOperation({ summary: 'Send a document URL to ROP and start its AI analysis' })
+  @ApiOperation({
+    summary: 'Send a document URL to ROP and start its AI analysis',
+  })
   @ApiCreatedResponse({ type: RopDocumentResponseDto })
   async createDocumentFromLinkForAnalyze(
     @CurrentUser() user: CurrentUserData,
     @Body() dto: CreateRopDocumentAnalysisLinkDto,
   ): Promise<RopDocumentResponseDto> {
-    return this.ropDocumentsService.createFromLinkForAnalyzeForUser(user.id, dto);
+    return this.ropDocumentsService.createFromLinkForAnalyzeForUser(
+      user.id,
+      dto,
+    );
   }
 
   @Get('documents/:documentId/analyze')
@@ -135,13 +160,19 @@ export class RopController {
   @Get('documents/:documentId/download')
   @ApiOperation({ summary: 'Redirect to ROP document download URL' })
   @ApiParam({ name: 'documentId', description: 'ROP document ID' })
-  @ApiResponse({ status: 302, description: 'Redirect to presigned download URL' })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirect to presigned download URL',
+  })
   async downloadDocument(
     @CurrentUser() user: CurrentUserData,
     @Param('documentId') documentId: string,
     @Res() res: Response,
   ): Promise<void> {
-    const downloadUrl = await this.ropDocumentsService.getDownloadUrlForUser(user.id, documentId);
+    const downloadUrl = await this.ropDocumentsService.getDownloadUrlForUser(
+      user.id,
+      documentId,
+    );
     res.redirect(downloadUrl);
   }
 
@@ -159,7 +190,9 @@ export class RopController {
   @Get('meetings')
   @ApiOperation({ summary: 'List ROP project meetings for the current user' })
   @ApiOkResponse({ type: RopMeetingResponseDto, isArray: true })
-  async listMeetings(@CurrentUser() user: CurrentUserData): Promise<RopMeetingResponseDto[]> {
+  async listMeetings(
+    @CurrentUser() user: CurrentUserData,
+  ): Promise<RopMeetingResponseDto[]> {
     return this.ropMeetingsService.listForUser(user.id);
   }
 

@@ -30,13 +30,19 @@ export class RopDocumentsService {
     return documents.map(mapRopDocument);
   }
 
-  async getForUser(userId: string, documentId: string): Promise<RopDocumentResponseDto> {
+  async getForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<RopDocumentResponseDto> {
     const projectId = await this.requireProjectId(userId);
     const document = await this.ropService.getDocument(projectId, documentId);
     return mapRopDocument(document);
   }
 
-  async getDownloadUrlForUser(userId: string, documentId: string): Promise<string> {
+  async getDownloadUrlForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<string> {
     const projectId = await this.requireProjectId(userId);
     return this.ropService.getDownloadUrl(projectId, documentId);
   }
@@ -46,7 +52,10 @@ export class RopDocumentsService {
     file: Express.Multer.File,
   ): Promise<RopDocumentResponseDto> {
     const projectId = await this.requireProjectId(userId);
-    const document = await this.ropService.createDocument(projectId, file.originalname);
+    const document = await this.ropService.createDocument(
+      projectId,
+      file.originalname,
+    );
     await this.ropService.uploadFile(projectId, document.id, file);
     return this.getForUser(userId, document.id);
   }
@@ -64,7 +73,10 @@ export class RopDocumentsService {
     return this.getForUser(userId, document.id);
   }
 
-  async getAnalyzeForUser(userId: string, documentId: string): Promise<Record<string, unknown>> {
+  async getAnalyzeForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<Record<string, unknown>> {
     const projectId = await this.requireProjectId(userId);
     return this.ropService.getDocumentAnalyze(projectId, documentId);
   }
