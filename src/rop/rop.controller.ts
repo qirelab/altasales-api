@@ -1,16 +1,32 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
   Param,
+  Post,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
+import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-analysis-link.dto';
 import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import {
@@ -68,6 +84,52 @@ export class RopController {
   @ApiOkResponse({ type: RopDocumentResponseDto, isArray: true })
   async listDocuments(@CurrentUser() user: CurrentUserData): Promise<RopDocumentResponseDto[]> {
     return this.ropDocumentsService.listForUser(user.id);
+  }
+
+  @Post('documents/analyze/upload')
+  @ApiOperation({ summary: 'Upload a document to ROP and start its AI analysis' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiCreatedResponse({ type: RopDocumentResponseDto })
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }))
+  async uploadDocumentForAnalyze(
+    @CurrentUser() user: CurrentUserData,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<RopDocumentResponseDto> {
+    if (!file) {
+      throw new BadRequestException('Файл не предоставлен');
+    }
+
+    return this.ropDocumentsService.uploadForAnalyzeForUser(user.id, file);
+  }
+
+  @Post('documents/analyze/link')
+  @ApiOperation({ summary: 'Send a document URL to ROP and start its AI analysis' })
+  @ApiCreatedResponse({ type: RopDocumentResponseDto })
+  async createDocumentFromLinkForAnalyze(
+    @CurrentUser() user: CurrentUserData,
+    @Body() dto: CreateRopDocumentAnalysisLinkDto,
+  ): Promise<RopDocumentResponseDto> {
+    return this.ropDocumentsService.createFromLinkForAnalyzeForUser(user.id, dto);
+  }
+
+  @Get('documents/:documentId/analyze')
+  @ApiOperation({ summary: 'Get ROP document AI analysis result' })
+  @ApiParam({ name: 'documentId', description: 'ROP document ID' })
+  @ApiOkResponse({ description: 'Document AI analysis status and result' })
+  async getDocumentAnalyze(
+    @CurrentUser() user: CurrentUserData,
+    @Param('documentId') documentId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.ropDocumentsService.getAnalyzeForUser(user.id, documentId);
   }
 
   @Get('documents/:documentId/download')

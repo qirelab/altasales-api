@@ -123,16 +123,44 @@ export class RopService {
     return response.json() as Promise<RopDocumentRecord>;
   }
 
+  async getDocumentAnalyze(projectId: string, documentId: string): Promise<Record<string, unknown>> {
+    this.ensureConfigured();
+
+    const response = await fetch(
+      `${this.apiUrl}/projects/${projectId}/documents/${documentId}/analyze`,
+      {
+        method: 'GET',
+        headers: this.jsonHeaders,
+      },
+    );
+
+    if (response.status === 404) {
+      throw new NotFoundException('Результат анализа документа не найден');
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('get document analysis', response, error);
+      throw new InternalServerErrorException('Failed to get document analysis from ROP');
+    }
+
+    return response.json() as Promise<Record<string, unknown>>;
+  }
+
   async createDocument(
     projectId: string,
     name: string,
+    link?: string,
   ): Promise<RopDocument> {
     this.ensureConfigured();
 
     const response = await fetch(`${this.apiUrl}/projects/${projectId}/documents`, {
       method: 'POST',
       headers: this.jsonHeaders,
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({
+        name,
+        ...(link ? { link } : {}),
+      }),
     });
 
     if (!response.ok) {
