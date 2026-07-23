@@ -179,7 +179,10 @@ export class RopService {
   async createDocument(
     projectId: string,
     name: string,
-    link?: string,
+    options?: {
+      link?: string;
+      categoryId?: number;
+    },
   ): Promise<RopDocument> {
     this.ensureConfigured();
 
@@ -190,7 +193,10 @@ export class RopService {
         headers: this.jsonHeaders,
         body: JSON.stringify({
           name,
-          ...(link ? { link } : {}),
+          ...(options?.link ? { link: options.link } : {}),
+          ...(options?.categoryId != null
+            ? { category_id: options.categoryId }
+            : {}),
         }),
       },
     );

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { User } from '../users/entities/user.entity';
 import { RopController } from './rop.controller';
+import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
 import { RopDocumentsService } from './rop-documents.service';
 import { RopIndicatorsService } from './rop-indicators.service';
 import { RopMeetingsService } from './rop-meetings.service';
@@ -16,6 +17,7 @@ import { RopTasksService } from './rop-tasks.service';
   providers: [
     RopService,
     RopProvisioningService,
+    RopDocumentLinkDownloadService,
     RopDocumentsService,
     RopIndicatorsService,
     RopMeetingsService,

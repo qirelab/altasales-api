@@ -133,7 +133,7 @@ export class RopController {
 
   @Post('documents/analyze/link')
   @ApiOperation({
-    summary: 'Send a document URL to ROP and start its AI analysis',
+    summary: 'Download a document by URL and upload it to ROP for AI analysis',
   })
   @ApiCreatedResponse({ type: RopDocumentResponseDto })
   async createDocumentFromLinkForAnalyze(

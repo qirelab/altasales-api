@@ -10,12 +10,16 @@ import { User } from '../users/entities/user.entity';
 import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-analysis-link.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import { mapRopDocument } from './rop-document.mapper';
+import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
 import { RopService } from './rop.service';
 
 @Injectable()
 export class RopDocumentsService {
+  private static readonly GENERAL_CATEGORY_ID = 1;
+
   constructor(
     private readonly ropService: RopService,
+    private readonly linkDownloadService: RopDocumentLinkDownloadService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
   ) {}
@@ -55,6 +59,7 @@ export class RopDocumentsService {
     const document = await this.ropService.createDocument(
       projectId,
       file.originalname,
+      { categoryId: RopDocumentsService.GENERAL_CATEGORY_ID },
     );
     await this.ropService.uploadFile(projectId, document.id, file);
     return this.getForUser(userId, document.id);
@@ -64,13 +69,11 @@ export class RopDocumentsService {
     userId: string,
     dto: CreateRopDocumentAnalysisLinkDto,
   ): Promise<RopDocumentResponseDto> {
-    const projectId = await this.requireProjectId(userId);
-    const document = await this.ropService.createDocument(
-      projectId,
-      dto.name ?? this.getDocumentNameFromLink(dto.link),
+    const file = await this.linkDownloadService.downloadAsFile(
       dto.link,
+      dto.name,
     );
-    return this.getForUser(userId, document.id);
+    return this.uploadForAnalyzeForUser(userId, file);
   }
 
   async getAnalyzeForUser(
@@ -79,12 +82,6 @@ export class RopDocumentsService {
   ): Promise<Record<string, unknown>> {
     const projectId = await this.requireProjectId(userId);
     return this.ropService.getDocumentAnalyze(projectId, documentId);
-  }
-
-  private getDocumentNameFromLink(link: string): string {
-    const url = new URL(link);
-    const fileName = url.pathname.split('/').filter(Boolean).at(-1);
-    return fileName || url.hostname;
   }
 
   private async getProjectId(userId: string): Promise<string | null> {
