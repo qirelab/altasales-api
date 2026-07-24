@@ -1,13 +1,15 @@
 import {
+  Body,
   Controller,
   Get,
-  Post,
-  Patch,
+  HttpCode,
+  HttpStatus,
   Param,
-  Body,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   UseGuards,
-  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 import { SessionGuard } from '../auth/guards/session.guard';
@@ -76,6 +78,7 @@ export class ChatController {
   }
 
   @Post('conversations/platform')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Open or return the client\'s single platform chat with AI-консультант AltaSales',
@@ -85,6 +88,7 @@ export class ChatController {
   }
 
   @Post('conversations/:id/messages')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Send a message inside a platform conversation. Client messages trigger '

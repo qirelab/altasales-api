@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThanOrEqual, Repository } from 'typeorm';
 import { ChatbotRagService } from '../../chatbot/services/chatbot-rag.service';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
 import { ChatConversation } from '../entities/chat-conversation.entity';
+import { ChatConversationParticipant } from '../entities/chat-conversation-participant.entity';
+import { ChatConversationType } from '../entities/chat-conversation-type.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatHistoryMapperService } from './chat-history-mapper.service';
 
@@ -15,69 +17,85 @@ type RespondInput = {
   clientUserId: string;
   clientMessageId: string;
   question: string;
-  recipientIds: string[];
 };
 
 /**
  * Async orchestrator for the AI half of a platform conversation.
  *
- * `respondToClientMessage` is called from ChatService.sendMessage after the
- * client's own message has been persisted. It runs fire-and-forget:
+ * `scheduleReply` is called from ChatService.sendPlatformMessage after the
+ * client's own message has been persisted. It runs fire-and-forget, but
+ * tasks are serialized per-conversation via `queues` so a client that
+ * types two messages in quick succession never has task-2 finish before
+ * task-1, and task-1's history never sees the future m2 as "past".
  *
- *   1. Load the last N messages of the conversation (chronological).
- *   2. Map them to ChatbotHistoryEntry[] via ChatHistoryMapperService.
- *   3. Call ChatbotRagService.askQuestion({ question, history }).
- *   4. Persist the returned answer as a ChatMessage from AI_SYSTEM_USER_ID
- *      with isAiGenerated=true.
- *   5. Broadcast `chat:new_message` to every current recipient of the
- *      conversation (client + expert + operator, whoever's added).
- *
- * All failures are caught and logged — the caller (POST /chat/…) already
- * returned 200 to the client, so we must never re-throw. On RAG failure we
- * still write the fallback message from ChatbotRagService so the client
- * sees something instead of dead silence.
+ * Recipient list is resolved right before WS emit (not at schedule time)
+ * so an admin who revokes an expert's chat access while the AI is still
+ * generating stops that message from reaching the expert.
  */
 @Injectable()
 export class AiChatOrchestratorService {
   private readonly logger = new Logger(AiChatOrchestratorService.name);
+  private readonly queues = new Map<string, Promise<void>>();
 
   constructor(
     @InjectRepository(ChatMessage)
     private readonly messageRepository: Repository<ChatMessage>,
     @InjectRepository(ChatConversation)
     private readonly conversationRepository: Repository<ChatConversation>,
+    @InjectRepository(ChatConversationParticipant)
+    private readonly participantRepository: Repository<ChatConversationParticipant>,
     private readonly ragService: ChatbotRagService,
     private readonly historyMapper: ChatHistoryMapperService,
     private readonly wsGateway: WebSocketGatewayService,
   ) {}
 
   scheduleReply(input: RespondInput): void {
-    // Detach from the caller's request lifecycle. We never await the promise;
-    // WS delivers the answer when it is ready.
-    void this.respondToClientMessage(input).catch((error) => {
-      this.logger.error(
-        `AI chat orchestration crashed for conversation ${input.conversation.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        error instanceof Error ? error.stack : undefined,
-      );
+    const conversationId = input.conversation.id;
+    const previous = this.queues.get(conversationId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(() => this.respondToClientMessage(input))
+      .catch((error) => {
+        this.logger.error(
+          `AI chat orchestration crashed for conversation ${conversationId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      });
+    this.queues.set(conversationId, next);
+    void next.finally(() => {
+      if (this.queues.get(conversationId) === next) {
+        this.queues.delete(conversationId);
+      }
     });
   }
 
   private async respondToClientMessage(input: RespondInput): Promise<void> {
     const startedAt = Date.now();
 
+    const currentMessage = await this.messageRepository.findOne({
+      where: { id: input.clientMessageId },
+    });
+    if (!currentMessage) {
+      // Message was deleted before we could respond; skip.
+      return;
+    }
+
+    // Only load messages that existed at or before the current turn. This
+    // prevents a fast-typing client from injecting a future message into the
+    // "history" the LLM sees for the current turn.
     const recentMessages = await this.messageRepository.find({
-      where: { conversationId: input.conversation.id },
+      where: {
+        conversationId: input.conversation.id,
+        createdAt: LessThanOrEqual(currentMessage.createdAt),
+      },
       order: { createdAt: 'DESC' },
       take: HISTORY_FETCH_LIMIT,
     });
     const chronological = [...recentMessages].reverse();
     // The current-turn message is already inside `input.question`. Drop it
-    // (and only it) from `history` by id, not by position — a fast-typing
-    // client can queue a second message before this task runs, in which case
-    // slicing `.slice(0, -1)` would drop the wrong one and let the LLM see
-    // its own question twice.
+    // (and only it) from `history` by id, not by position.
     const historySource = chronological.filter(
       (m) => m.id !== input.clientMessageId,
     );
@@ -104,6 +122,10 @@ export class AiChatOrchestratorService {
       updatedAt: now,
     });
 
+    // Re-read participants NOW (not at schedule time) so a revoke during
+    // AI generation immediately stops delivery to the revoked user.
+    const recipientIds = await this.resolveRecipientIds(input.conversation);
+
     const payload = {
       message: { ...savedAnswer, files: [] },
       conversation: {
@@ -112,7 +134,7 @@ export class AiChatOrchestratorService {
       },
     };
 
-    for (const recipientId of input.recipientIds) {
+    for (const recipientId of recipientIds) {
       this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
     }
 
@@ -121,5 +143,22 @@ export class AiChatOrchestratorService {
         Date.now() - startedAt
       }ms (refusalReason=${ragResponse.refusalReason ?? 'none'})`,
     );
+  }
+
+  private async resolveRecipientIds(
+    conversation: ChatConversation,
+  ): Promise<string[]> {
+    if (conversation.type === ChatConversationType.Platform) {
+      const participants = await this.participantRepository.find({
+        where: { conversationId: conversation.id },
+      });
+      return participants
+        .map((p) => p.userId)
+        .filter((id) => id !== AI_SYSTEM_USER_ID);
+    }
+    return [
+      conversation.participantOneId,
+      conversation.participantTwoId,
+    ].filter((id) => id !== AI_SYSTEM_USER_ID);
   }
 }

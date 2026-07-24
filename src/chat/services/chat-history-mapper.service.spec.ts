@@ -1,5 +1,5 @@
-import { ChatHistoryMapperService } from './chat-history-mapper.service';
 import { ChatMessage } from '../entities/chat-message.entity';
+import { ChatHistoryMapperService } from './chat-history-mapper.service';
 
 function msg(overrides: Partial<ChatMessage>): ChatMessage {
   return {

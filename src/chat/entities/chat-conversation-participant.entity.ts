@@ -48,4 +48,14 @@ export class ChatConversationParticipant {
   @ApiProperty({ description: 'Date the participant joined the conversation' })
   @CreateDateColumn()
   addedAt: Date;
+
+  @ApiProperty({
+    description:
+      'Timestamp of the last message this participant has seen. Null means '
+      + 'the participant has never opened the conversation, in which case all '
+      + 'messages sent by others count as unread.',
+    nullable: true,
+  })
+  @Column({ type: 'timestamptz', nullable: true })
+  lastReadAt: Date | null;
 }

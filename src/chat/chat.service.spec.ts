@@ -1,10 +1,10 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
+import { UserRole } from '../users/entities/user-role.enum';
 import { AI_SYSTEM_USER_ID, AI_WELCOME_MESSAGE } from './chat.constants';
 import { ChatService } from './chat.service';
 import { ChatConversationType } from './entities/chat-conversation-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
-import { UserRole } from '../users/entities/user-role.enum';
 
 function makeUser(overrides: Partial<{
   id: string;
@@ -266,10 +266,10 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(arg.clientMessageId).toBe('client-msg-42');
     expect(arg.clientUserId).toBe('client-1');
     expect(arg.question).toBe('q?');
-    // Recipients include the sender themselves so they get their own AI reply
-    // over WS on other tabs / devices, but never the AI user.
-    expect(arg.recipientIds).toContain('client-1');
-    expect(arg.recipientIds).not.toContain(AI_SYSTEM_USER_ID);
+    // Recipients are resolved by the orchestrator at emit time so a revoke
+    // during AI generation cuts off delivery — they are no longer part of
+    // the scheduleReply payload.
+    expect(arg.recipientIds).toBeUndefined();
   });
 
   it('expert message does NOT trigger the AI orchestrator', async () => {

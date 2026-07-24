@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class EnforcePlatformChatUniqueness1782910000000
-  implements MigrationInterface
+implements MigrationInterface
 {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Guard against concurrent openPlatformConversation races. The existing

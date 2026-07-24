@@ -87,12 +87,7 @@ export class ChatService {
           order: { createdAt: 'DESC' },
         });
 
-        const unreadCount = await this.messageRepository
-          .createQueryBuilder('m')
-          .where('m."conversationId" = :conversationId', { conversationId: conv.id })
-          .andWhere('m."isRead" = false')
-          .andWhere('m."senderId" != :userId', { userId })
-          .getCount();
+        const unreadCount = await this.computeUnreadCount(conv, userId);
 
         return {
           id: conv.id,
@@ -164,15 +159,12 @@ export class ChatService {
       files: filesByMessageId.get(m.id) ?? [],
     }));
 
-    // Mark other users' unread messages as read.
-    await this.messageRepository
-      .createQueryBuilder()
-      .update(ChatMessage)
-      .set({ isRead: true })
-      .where('conversationId = :conversationId', { conversationId })
-      .andWhere('senderId != :userId', { userId })
-      .andWhere('isRead = false')
-      .execute();
+    // Mark the conversation as read for THIS participant. In platform chats
+    // we track a per-participant `lastReadAt` cursor because 3+ people share
+    // the same messages and a global `isRead` flag would zero out unread
+    // counts for everyone else once the first participant reads. Legacy
+    // expert chats stay on the message-level flag (only two participants).
+    await this.markConversationRead(userId, conversation);
 
     // WS: notify other participants that we read their messages.
     const otherRecipients = await this.getRecipientIds(conversation, userId);
@@ -466,13 +458,13 @@ export class ChatService {
     if (membership.role === ChatParticipantRole.Client) {
       // Only client turns trigger an AI reply. Expert / operator turns are
       // human-authored answers to the client and must not spawn an AI echo.
-      const allRecipients = [userId, ...recipientIds];
+      // Orchestrator re-reads participants at emit time so a revoke during
+      // AI generation stops delivery to the revoked user.
       this.aiOrchestrator.scheduleReply({
         conversation,
         clientUserId: userId,
         clientMessageId: savedMessage.id,
         question: dto.text,
-        recipientIds: allRecipients,
       });
     }
 
@@ -550,14 +542,7 @@ export class ChatService {
 
     await this.assertConversationAccess(userId, conversation);
 
-    await this.messageRepository
-      .createQueryBuilder()
-      .update(ChatMessage)
-      .set({ isRead: true })
-      .where('conversationId = :conversationId', { conversationId })
-      .andWhere('senderId != :userId', { userId })
-      .andWhere('isRead = false')
-      .execute();
+    await this.markConversationRead(userId, conversation);
 
     const recipients = await this.getRecipientIds(conversation, userId);
     for (const recipient of recipients) {
@@ -713,6 +698,60 @@ export class ChatService {
     return (
       conversation.participantTwo ?? conversation.participantOne ?? null
     );
+  }
+
+  private async markConversationRead(
+    userId: string,
+    conversation: ChatConversation,
+  ): Promise<void> {
+    if (conversation.type === ChatConversationType.Platform) {
+      await this.participantRepository.update(
+        { conversationId: conversation.id, userId },
+        { lastReadAt: new Date() },
+      );
+      return;
+    }
+    await this.messageRepository
+      .createQueryBuilder()
+      .update(ChatMessage)
+      .set({ isRead: true })
+      .where('conversationId = :conversationId', {
+        conversationId: conversation.id,
+      })
+      .andWhere('senderId != :userId', { userId })
+      .andWhere('isRead = false')
+      .execute();
+  }
+
+  private async computeUnreadCount(
+    conversation: ChatConversation,
+    userId: string,
+  ): Promise<number> {
+    if (conversation.type === ChatConversationType.Platform) {
+      const participant = await this.participantRepository.findOne({
+        where: { conversationId: conversation.id, userId },
+      });
+      const qb = this.messageRepository
+        .createQueryBuilder('m')
+        .where('m."conversationId" = :conversationId', {
+          conversationId: conversation.id,
+        })
+        .andWhere('m."senderId" != :userId', { userId });
+      if (participant?.lastReadAt) {
+        qb.andWhere('m."createdAt" > :lastReadAt', {
+          lastReadAt: participant.lastReadAt,
+        });
+      }
+      return qb.getCount();
+    }
+    return this.messageRepository
+      .createQueryBuilder('m')
+      .where('m."conversationId" = :conversationId', {
+        conversationId: conversation.id,
+      })
+      .andWhere('m."isRead" = false')
+      .andWhere('m."senderId" != :userId', { userId })
+      .getCount();
   }
 
   private async getRecipientIds(
