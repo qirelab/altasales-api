@@ -15,6 +15,7 @@ export type ServiceCandidate = Omit<Service, 'type'> & {
   packageId?: string | null;
   type: ServiceType | 'Пакет услуг';
   coveredServiceIds?: string[];
+  coverageKeys?: string[];
 };
 
 export type GeneratedRecommendationItem = {
@@ -26,6 +27,7 @@ export type GeneratedRecommendationItem = {
   diagnosticSignals: string[];
   score: number;
   coveredServiceIds?: string[];
+  coverageKeys?: string[];
   recommendation?: Recommendation;
 };
 
@@ -105,6 +107,7 @@ export class RecommendationScoringService {
       diagnosticSignals: matchedSignals.map((group) => group.signal),
       score,
       coveredServiceIds: this.getCandidateCoveredServiceIds(service, serviceId),
+      coverageKeys: this.getCandidateCoverageKeys(service, serviceId),
     };
   }
 
@@ -127,14 +130,27 @@ export class RecommendationScoringService {
         messages: [
           {
             role: 'system',
-            content:
-              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог. Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава, рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией. Не придумывай диагнозы, метрики или проблемы, которых нет в clientProfile или diagnostics. Обоснование пиши на русском. Верни только валидный JSON.',
+            content: [
+              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог.',
+              'Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава,',
+              'рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией.',
+              'Не придумывай диагнозы, метрики или проблемы, которых нет в clientProfile или diagnostics.',
+              'Обоснование пиши на русском. Верни только валидный JSON.',
+            ].join(' '),
           },
           {
             role: 'user',
             content: JSON.stringify({
-              instruction:
-                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low","rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}. Возвращай только реально релевантные рекомендации. Для productStage=existing поле components описывает, что уже есть, а componentsToAdd — что нужно добавить; не предлагай стартовое внедрение того, что уже есть. Не возвращай отдельные услуги, если выбранный пакет уже содержит или логически покрывает их результат.',
+              instruction: [
+                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low",',
+                '"rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}',
+                'Возвращай только реально релевантные рекомендации.',
+                'Для productStage=existing поле components описывает, что уже есть,',
+                'а componentsToAdd — что нужно добавить; не предлагай стартовое внедрение того, что уже есть.',
+                'Для productStage=new поле components описывает желаемый новый ОП; пакет «Отдел продаж с нуля» обязателен.',
+                'Для productStage=existing пакет «Отдел продаж с нуля» запрещён.',
+                'Не возвращай отдельные услуги, если выбранный пакет уже содержит или логически покрывает их результат.',
+              ].join(' '),
               clientProfile: dto.clientProfile ?? {},
               diagnostics: dto.diagnostics ?? [],
               catalog: catalogSlice.map((service) => ({
@@ -201,6 +217,7 @@ export class RecommendationScoringService {
           diagnosticSignals,
           score,
           coveredServiceIds: fallback.coveredServiceIds,
+          coverageKeys: fallback.coverageKeys,
         });
       }
 
@@ -242,7 +259,9 @@ export class RecommendationScoringService {
         (item.rationale === undefined || typeof item.rationale === 'string') &&
         (item.diagnosticSignals === undefined ||
           (Array.isArray(item.diagnosticSignals) &&
-            item.diagnosticSignals.every((signal) => typeof signal === 'string'))),
+            item.diagnosticSignals.every(
+              (signal) => typeof signal === 'string',
+            ))),
     );
   }
 
@@ -281,7 +300,12 @@ export class RecommendationScoringService {
 
   normalizeSignals(signals: string[]): string[] {
     return Array.from(
-      new Set(signals.filter((s): s is string => typeof s === 'string').map((s) => s.trim()).filter((s) => s.length > 0)),
+      new Set(
+        signals
+          .filter((s): s is string => typeof s === 'string')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      ),
     );
   }
 
@@ -325,6 +349,15 @@ export class RecommendationScoringService {
     if (service.coveredServiceIds?.length) {
       return service.coveredServiceIds;
     }
+    return serviceId ? [serviceId] : [];
+  }
+
+  private getCandidateCoverageKeys(
+    service: ServiceCandidate,
+    serviceId: string | null,
+  ): string[] {
+    if (service.coverageKeys?.length) return service.coverageKeys;
+    if (service.coveredServiceIds?.length) return service.coveredServiceIds;
     return serviceId ? [serviceId] : [];
   }
 

@@ -6,11 +6,11 @@ import { Order } from '../orders/entities/order.entity';
 import { OrderItem } from '../orders/entities/order-item.entity';
 import { Service } from '../services/entities/service.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { filterActiveServices } from '../services/service-visibility';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { GetAdminPackagesQueryDto } from './dto/get-admin-packages-query.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 import { ServicePackage } from './entities/package.entity';
-import { filterActiveServices } from '../services/service-visibility';
 import {
   activePackageWhere,
   applyActivePackageFilter,

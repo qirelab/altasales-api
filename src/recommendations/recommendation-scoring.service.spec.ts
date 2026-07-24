@@ -1,7 +1,11 @@
 import { BadRequestException, Logger } from '@nestjs/common';
+import { LlmProxyService } from '../ai/llm-proxy.service';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { RecommendationPriority } from './entities/recommendation-priority.enum';
-import { RecommendationScoringService } from './recommendation-scoring.service';
+import {
+  RecommendationScoringService,
+  ServiceCandidate,
+} from './recommendation-scoring.service';
 
 describe('RecommendationScoringService', () => {
   const llmProxy = {
@@ -13,7 +17,9 @@ describe('RecommendationScoringService', () => {
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     llmProxy.chat.mockReset();
-    service = new RecommendationScoringService(llmProxy as any);
+    service = new RecommendationScoringService(
+      llmProxy as unknown as LlmProxyService,
+    );
   });
 
   afterEach(() => {
@@ -36,7 +42,7 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Service,
       skills: [],
       category: null,
-    } as any;
+    } as unknown as ServiceCandidate;
 
     const falsePositive = service.scoreService(
       candidate,
@@ -108,10 +114,11 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Service,
       skills: ['CRM', 'analytics'],
       category: { name: 'Пакет услуг' },
-    } as any;
+    } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"service-id","priority":"medium","rationale":"Best service fit","diagnosticSignals":["crm_quality"]}]}',
+        '{"recommendations":[{"serviceId":"service-id","priority":"medium","rationale":"Best serv' +
+        'ice fit","diagnosticSignals":["crm_quality"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -137,10 +144,12 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Service,
       skills: [],
       category: null,
-    } as any;
+    } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"semantic-service-id","priority":"medium","rationale":"Подходит, потому что нужна внедренческая настройка под клиента.","diagnosticSignals":["custom_fit"]}]}',
+        '{"recommendations":[{"serviceId":"semantic-service-id","priority":"medium","rationale":"' +
+        'Подходит, потому что нужна внедренческая настройка под клиента.","diagnosticSignals":["c' +
+        'ustom_fit"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -172,10 +181,11 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Service,
       skills: ['CRM'],
       category: null,
-    } as any;
+    } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"crm-service-id","priority":"medium","rationale":"У клиента просадка конверсии.","diagnosticSignals":["conversion_drop"]}]}',
+        '{"recommendations":[{"serviceId":"crm-service-id","priority":"medium","rationale":"У кли' +
+        'ента просадка конверсии.","diagnosticSignals":["conversion_drop"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -196,10 +206,12 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Document,
       skills: ['legal'],
       category: null,
-    } as any;
+    } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"unrelated-service-id","priority":"medium","rationale":"Подходит, потому что закрывает описанный клиентом сценарий.","diagnosticSignals":["custom_fit"]}]}',
+        '{"recommendations":[{"serviceId":"unrelated-service-id","priority":"medium","rationale":' +
+        '"Подходит, потому что закрывает описанный клиентом сценарий.","diagnosticSignals":["cust' +
+        'om_fit"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -225,10 +237,11 @@ describe('RecommendationScoringService', () => {
       skills: ['CRM', 'telephony'],
       category: { name: 'Пакет услуг' },
       coveredServiceIds: ['service-id'],
-    } as any;
+    } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"package-id","priority":"urgent","rationale":"Best package fit","diagnosticSignals":["crm_quality"]}]}',
+        '{"recommendations":[{"serviceId":"package-id","priority":"urgent","rationale":"Best pack' +
+        'age fit","diagnosticSignals":["crm_quality"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -256,7 +269,7 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Service,
       skills: ['CRM'],
       category: null,
-    } as any;
+    } as unknown as ServiceCandidate;
     const unrelatedCandidate = {
       id: 'unrelated-service-id',
       name: 'Legal document',
@@ -264,10 +277,12 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Document,
       skills: ['legal'],
       category: null,
-    } as any;
+    } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"crm-service-id","priority":"medium","rationale":"Подходит для CRM","diagnosticSignals":["crm_quality"]},{"serviceId":"unrelated-service-id","priority":"medium","rationale":"Looks good","diagnosticSignals":["crm_quality"]}]}',
+        '{"recommendations":[{"serviceId":"crm-service-id","priority":"medium","rationale":"Подхо' +
+        'дит для CRM","diagnosticSignals":["crm_quality"]},{"serviceId":"unrelated-service-id","p' +
+        'riority":"medium","rationale":"Looks good","diagnosticSignals":["crm_quality"]}]}',
     });
 
     const result = await service.generateAiRecommendations(
@@ -290,10 +305,11 @@ describe('RecommendationScoringService', () => {
       type: ServiceType.Service,
       skills: ['CRM'],
       category: null,
-    })) as any[];
+    })) as unknown as ServiceCandidate[];
     llmProxy.chat.mockResolvedValueOnce({
       content:
-        '{"recommendations":[{"serviceId":"crm-service-500","priority":"medium","rationale":"Подходит для CRM","diagnosticSignals":["crm_quality"]}]}',
+        '{"recommendations":[{"serviceId":"crm-service-500","priority":"medium","rationale":"Подх' +
+        'одит для CRM","diagnosticSignals":["crm_quality"]}]}',
     });
 
     const result = await service.generateAiRecommendations(

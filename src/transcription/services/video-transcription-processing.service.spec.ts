@@ -1,5 +1,5 @@
-import { Logger } from '@nestjs/common';
 import * as fsPromises from 'fs/promises';
+import { Logger } from '@nestjs/common';
 import { TranscriptionJob } from '../entities/transcription-job.entity';
 import { TranscriptionJobStatus } from '../enums/transcription-job-status.enum';
 import { TranscriptionProviderError } from './transcription-provider-error';

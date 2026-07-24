@@ -1,8 +1,8 @@
+import { Test } from '@nestjs/testing';
 import { DataClass } from './enums/data-class.enum';
 import { AnonymizerProvider } from './interfaces/anonymizer-provider.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
-import { Test } from '@nestjs/testing';
 
 describe('PiiAnonymizerService', () => {
   let provider: { anonymize: jest.Mock };
@@ -21,6 +21,7 @@ describe('PiiAnonymizerService', () => {
 
   it('detects structured PII without exposing values', () => {
     const result = service.scanText(
+      // eslint-disable-next-line max-len -- keep the comprehensive PII fixture readable.
       'Contact user@example.com, +7 (999) 123-45-67, ИНН 7707083893, СНИЛС 123-456-789 00, passport 4510 123456, card 4111 1111 1111 1111, дата рождения 01.02.1990',
     );
     const serializedResult = JSON.stringify(result);

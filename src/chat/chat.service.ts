@@ -6,20 +6,20 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, IsNull, QueryFailedError, Repository } from 'typeorm';
-import { ChatConversation } from './entities/chat-conversation.entity';
-import { ChatMessage } from './entities/chat-message.entity';
-import { ChatConversationParticipant } from './entities/chat-conversation-participant.entity';
-import { ChatConversationType } from './entities/chat-conversation-type.enum';
-import { ChatParticipantRole } from './entities/chat-participant-role.enum';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { FilesService } from '../files/files.service';
-import { SendMessageDto } from './dto/send-message.dto';
-import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
-import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { Order } from '../orders/entities/order.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
+import { ChatParticipantRole } from './entities/chat-participant-role.enum';
+import { ChatConversationType } from './entities/chat-conversation-type.enum';
+import { ChatConversationParticipant } from './entities/chat-conversation-participant.entity';
+import { ChatMessage } from './entities/chat-message.entity';
+import { ChatConversation } from './entities/chat-conversation.entity';
+import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
+import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
+import { SendMessageDto } from './dto/send-message.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
 import {
   AI_SYSTEM_USER_ID,

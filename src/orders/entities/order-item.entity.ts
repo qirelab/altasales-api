@@ -11,11 +11,11 @@ import {
 } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
-import { Order } from './order.entity';
 import { FileEntity } from '../../files/entities/file.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
 import { ExpertPosition } from '../../experts/entities/expert-position.entity';
 import { User } from '../../users/entities/user.entity';
+import { Order } from './order.entity';
 import { OrderStatus } from './order-status.enum';
 import { OrderItemSubItem } from './order-item-sub-item.entity';
 

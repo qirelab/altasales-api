@@ -18,6 +18,8 @@ import { RecommendationPriority } from './recommendation-priority.enum';
 import { RecommendationSource } from './recommendation-source.enum';
 import { RecommendationStatus } from './recommendation-status.enum';
 
+const EMPTY_JSON_ARRAY_DEFAULT = () => `'[]'`;
+
 @Entity()
 @Index('UQ_recommendation_user_service_not_null', ['userId', 'serviceId'], {
   unique: true,
@@ -27,7 +29,10 @@ import { RecommendationStatus } from './recommendation-status.enum';
   unique: true,
   where: '"packageId" IS NOT NULL',
 })
-@Check('CHK_recommendation_service_xor_package', '("serviceId" IS NOT NULL) <> ("packageId" IS NOT NULL)')
+@Check(
+  'CHK_recommendation_service_xor_package',
+  '("serviceId" IS NOT NULL) <> ("packageId" IS NOT NULL)',
+)
 export class Recommendation {
   @ApiProperty({
     example: '550e8400-e29b-41d4-a716-446655440000',
@@ -113,14 +118,14 @@ export class Recommendation {
     description: 'Prerequisite recommendation IDs',
     type: [String],
   })
-  @Column({ type: 'jsonb', default: () => "'[]'" })
+  @Column({ type: 'jsonb', default: EMPTY_JSON_ARRAY_DEFAULT })
   dependencyIds: string[];
 
   @ApiProperty({
     description: 'Diagnostic signals that led to this recommendation',
     type: [String],
   })
-  @Column({ type: 'jsonb', default: () => "'[]'" })
+  @Column({ type: 'jsonb', default: EMPTY_JSON_ARRAY_DEFAULT })
   diagnosticSignals: string[];
 
   @ApiPropertyOptional({ description: 'When recommendation was AI-generated' })

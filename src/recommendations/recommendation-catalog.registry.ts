@@ -6,6 +6,7 @@ export type RecommendationCatalogEntry = {
   displayName: string;
   legacyAliases: string[];
   requiredForValidation?: boolean;
+  availableForRecommendations?: boolean;
 };
 
 export const RECOMMENDATION_CATALOG = {
@@ -63,6 +64,13 @@ export const RECOMMENDATION_CATALOG = {
     displayName: 'Руководитель отдела продаж',
     legacyAliases: ['руководитель отдела продаж'],
   },
+  salesHeadExpertConsultation: {
+    id: 'cfc96602-9c0b-45af-809b-725b0d198993',
+    kind: 'service',
+    requiredForValidation: false,
+    displayName: 'Эксперт РОП: консультация',
+    legacyAliases: ['эксперт роп', 'консультация роп'],
+  },
   aiSalesHead: {
     id: 'e1cbfa1b-8643-42a1-944d-9f1f93522814',
     kind: 'service',
@@ -78,19 +86,23 @@ export const RECOMMENDATION_CATALOG = {
   aiDashboardAnalysis: {
     id: '93404cd2-5292-40c0-a5a3-f77e8709a904',
     kind: 'service',
-    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u0430\u0448\u0431\u043e\u0440\u0434\u0430',
+    requiredForValidation: false,
+    availableForRecommendations: false,
+    displayName:
+      '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u0430\u0448\u0431\u043e\u0440\u0434\u0430',
     legacyAliases: [],
   },
   aiDocumentAnalysis: {
     id: '68b641f3-5f6f-4d30-9f56-f77cb9cce9ed',
     kind: 'service',
-    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u043e\u0432',
+    displayName:
+      '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u043e\u0432',
     legacyAliases: [],
   },
   aiCallManagersAnalysis: {
     id: 'd2dc70e0-0774-4401-ae25-d15662fe1877',
     kind: 'service',
-    displayName: '\u0418\u0418 \u0430\u043d\u0430\u043b\u0438\u0437 \u0437\u0432\u043e\u043d\u043a\u043e\u0432 \u0438 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u043e\u0432',
+    displayName: 'ИИ анализ звонков и менеджеров',
     legacyAliases: [],
   },
   salesHeadFocus: {
@@ -161,6 +173,16 @@ export const RECOMMENDATION_CATALOG = {
     displayName: 'Отчёт по ведению сделок в CRM',
     legacyAliases: ['отчет по ведению сделок в crm'],
   },
+  rejectedDealsAnalysis: {
+    id: '8b8508c1-9e8b-44c7-a7b7-639bf0afe8a6',
+    kind: 'service',
+    requiredForValidation: false,
+    displayName: 'Аналитический отчёт по отказным сделкам',
+    legacyAliases: [
+      'аналитический отчет по отказным сделкам',
+      'отчет по отказным сделкам',
+    ],
+  },
   documentAnalysis: {
     id: '9ca7871e-3301-4ff8-981c-30f10e3c2880',
     kind: 'service',
@@ -200,9 +222,7 @@ export function getRecommendationCatalogLegacyAliases(
   ...keys: RecommendationCatalogKey[]
 ): string[] {
   return Array.from(
-    new Set(
-      keys.flatMap((key) => RECOMMENDATION_CATALOG[key].legacyAliases),
-    ),
+    new Set(keys.flatMap((key) => RECOMMENDATION_CATALOG[key].legacyAliases)),
   );
 }
 
@@ -214,3 +234,9 @@ export const REQUIRED_RECOMMENDATION_CATALOG_ENTRIES =
   RECOMMENDATION_CATALOG_ENTRIES.filter(
     (entry) => entry.requiredForValidation !== false,
   );
+
+export const DISABLED_RECOMMENDATION_CATALOG_IDS = new Set(
+  RECOMMENDATION_CATALOG_ENTRIES.filter(
+    (entry) => entry.availableForRecommendations === false,
+  ).map((entry) => entry.id),
+);

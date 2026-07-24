@@ -19,6 +19,7 @@ import { RecommendationScoringService } from './recommendation-scoring.service';
 import { QuestionnaireRelevanceRankerService } from './questionnaire-relevance-ranker.service';
 import { RecommendationsController } from './recommendations.controller';
 import { RecommendationsService } from './recommendations.service';
+import { RecommendationUserLockService } from './recommendation-user-lock.service';
 
 @Module({
   imports: [
@@ -45,7 +46,8 @@ import { RecommendationsService } from './recommendations.service';
     QuestionnaireRelevanceRankerService,
     RecommendationGenerationJobService,
     RecommendationNotificationService,
+    RecommendationUserLockService,
   ],
-  exports: [RecommendationsService],
+  exports: [RecommendationsService, RecommendationUserLockService],
 })
 export class RecommendationsModule {}

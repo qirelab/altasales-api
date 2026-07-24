@@ -20,14 +20,21 @@ type OpenAICompatibleEmbeddingResponse = {
   };
 };
 
+type OpenAICompatibleEmbeddingConfig = {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  dimensions?: number;
+};
+
 @Injectable()
-export class OpenAICompatibleEmbeddingProviderAdapter
-  implements EmbeddingProviderAdapter
-{
+export class OpenAICompatibleEmbeddingProviderAdapter implements EmbeddingProviderAdapter {
   readonly providerId = LlmProvider.OpenAICompatible;
 
   get modelId(): string {
-    return process.env.LLM_EMBEDDING_MODEL_ALIAS || DEFAULT_EMBEDDING_MODEL_ALIAS;
+    return (
+      process.env.LLM_EMBEDDING_MODEL_ALIAS || DEFAULT_EMBEDDING_MODEL_ALIAS
+    );
   }
 
   get isExternal(): boolean {
@@ -76,12 +83,7 @@ export class OpenAICompatibleEmbeddingProviderAdapter
     };
   }
 
-  private getConfig(): {
-    baseUrl: string;
-    apiKey: string;
-    model: string;
-    dimensions?: number;
-  } {
+  private getConfig(): OpenAICompatibleEmbeddingConfig {
     const baseUrl = this.normalizeBaseUrl(
       process.env.LLM_OPENAI_COMPATIBLE_BASE_URL,
     );
@@ -138,7 +140,9 @@ export class OpenAICompatibleEmbeddingProviderAdapter
     return (
       Array.isArray(value) &&
       value.length > 0 &&
-      value.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
+      value.every(
+        (entry) => typeof entry === 'number' && Number.isFinite(entry),
+      )
     );
   }
 
