@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ChatbotRagService } from '../../chatbot/services/chatbot-rag.service';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
@@ -84,21 +84,22 @@ export class AiChatOrchestratorService {
 
     // Only load messages that existed at or before the current turn. This
     // prevents a fast-typing client from injecting a future message into the
-    // "history" the LLM sees for the current turn.
-    const recentMessages = await this.messageRepository.find({
-      where: {
+    // "history" the LLM sees for the current turn. Postgres `timestamptz`
+    // is high-resolution but two inserts from the same request loop can
+    // collide, so we also exclude the current message by id — a same-tick
+    // m4 must never leak into m3's history.
+    const recentMessages = await this.messageRepository
+      .createQueryBuilder('m')
+      .where('m."conversationId" = :conversationId', {
         conversationId: input.conversation.id,
-        createdAt: LessThanOrEqual(currentMessage.createdAt),
-      },
-      order: { createdAt: 'DESC' },
-      take: HISTORY_FETCH_LIMIT,
-    });
-    const chronological = [...recentMessages].reverse();
-    // The current-turn message is already inside `input.question`. Drop it
-    // (and only it) from `history` by id, not by position.
-    const historySource = chronological.filter(
-      (m) => m.id !== input.clientMessageId,
-    );
+      })
+      .andWhere('m."createdAt" <= :cutoff', { cutoff: currentMessage.createdAt })
+      .andWhere('m."id" != :currentId', { currentId: input.clientMessageId })
+      .orderBy('m."createdAt"', 'DESC')
+      .addOrderBy('m."id"', 'DESC')
+      .take(HISTORY_FETCH_LIMIT)
+      .getMany();
+    const historySource = [...recentMessages].reverse();
     const history = this.historyMapper.toHistoryEntries(
       historySource,
       input.clientUserId,

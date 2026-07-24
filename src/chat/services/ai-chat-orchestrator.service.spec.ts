@@ -26,6 +26,41 @@ describe('AiChatOrchestratorService', () => {
   } = {}) {
     // Default: currentMessage.createdAt = now, all history rows keep their
     // (default now) timestamps so nothing is filtered out by createdAt.
+    // QueryBuilder mock that captures the where clauses the orchestrator
+    // sets and applies them against `historyRows` on `getMany()`. Only the
+    // clauses actually used by the code (createdAt cutoff + id exclude) are
+    // interpreted; unknown clauses are recorded but do not filter.
+    const qbState: { cutoff?: Date; excludeId?: string } = {};
+    const qb: {
+      where: jest.Mock; andWhere: jest.Mock;
+      orderBy: jest.Mock; addOrderBy: jest.Mock;
+      take: jest.Mock; getMany: jest.Mock;
+    } = {
+      where: jest.fn().mockImplementation(() => qb),
+      andWhere: jest.fn().mockImplementation((sql: string, params?: Record<string, unknown>) => {
+        if (sql.includes('createdAt') && sql.includes('<=') && params?.cutoff instanceof Date) {
+          qbState.cutoff = params.cutoff;
+        }
+        if (sql.includes('"id"') && sql.includes('!=') && typeof params?.currentId === 'string') {
+          qbState.excludeId = params.currentId;
+        }
+        return qb;
+      }),
+      orderBy: jest.fn().mockImplementation(() => qb),
+      addOrderBy: jest.fn().mockImplementation(() => qb),
+      take: jest.fn().mockImplementation(() => qb),
+      getMany: jest.fn().mockImplementation(() => {
+        const rows = opts.historyRows ?? [];
+        const filtered = rows.filter((m) => {
+          if (qbState.cutoff && (m.createdAt as Date) > qbState.cutoff) return false;
+          if (qbState.excludeId && m.id === qbState.excludeId) return false;
+          return true;
+        });
+        // Emulate ORDER BY createdAt DESC + take(HISTORY_FETCH_LIMIT).
+        return Promise.resolve([...filtered].reverse());
+      }),
+    };
+
     const messageRepository = {
       findOne: jest.fn().mockImplementation((options?: { where?: { id?: string } }) => {
         if (options?.where?.id && opts.currentMessage !== null) {
@@ -37,15 +72,7 @@ describe('AiChatOrchestratorService', () => {
         }
         return Promise.resolve(null);
       }),
-      find: jest.fn().mockImplementation((options?: {
-        order?: { createdAt?: 'ASC' | 'DESC' };
-      }) => {
-        const rows = opts.historyRows ?? [];
-        if (options?.order?.createdAt === 'DESC') {
-          return Promise.resolve([...rows].reverse());
-        }
-        return Promise.resolve(rows);
-      }),
+      createQueryBuilder: jest.fn().mockImplementation(() => qb),
       create: jest.fn((entity) => ({ ...entity, id: 'ai-msg-1' })),
       save: jest.fn(async (entity) => ({ ...entity, id: 'ai-msg-1' })),
     };
@@ -192,29 +219,28 @@ describe('AiChatOrchestratorService', () => {
   it('excludes future fast-typing messages from history (RAG only sees the past)', async () => {
     // Client sent m3, then m4 before m3's task ran. m3's task must load ONLY
     // messages with createdAt <= m3.createdAt and additionally drop m3 itself
-    // (already in `question`). m4 should NOT reach RAG as history.
+    // (already in `question`) and same-tick m4. m4 must NOT reach RAG.
     const t0 = new Date('2026-01-01T10:00:00.000Z');
     const t1 = new Date('2026-01-01T10:00:01.000Z');
     const t2 = new Date('2026-01-01T10:00:02.000Z');
     const t3 = new Date('2026-01-01T10:00:03.000Z');
-    const t4 = new Date('2026-01-01T10:00:04.000Z');
     const m3 = makeMessage({
       id: 'm3', senderId: clientUserId, text: 'question now', createdAt: t2,
     });
-    const { orchestrator, ragService, messageRepository } = buildOrchestrator({
+    const m4Future = makeMessage({
+      id: 'm4', senderId: clientUserId, text: 'oops one more', createdAt: t3,
+    });
+    const { orchestrator, ragService } = buildOrchestrator({
       historyRows: [
         makeMessage({ id: 'm1', senderId: clientUserId, text: 'first', createdAt: t0 }),
         makeMessage({
           id: 'm2', senderId: 'ai', isAiGenerated: true, text: 'a1', createdAt: t1,
         }),
         m3,
+        m4Future,
       ],
       currentMessage: m3,
     });
-    // find() is called with createdAt <= t2 (LessThanOrEqual on TypeORM). Our
-    // mock ignores the where clause and returns the historyRows verbatim, so
-    // we simulate the DB filter by only providing rows with createdAt <= t2.
-    void t3; void t4;
 
     await (orchestrator as unknown as {
       respondToClientMessage: (input: unknown) => Promise<void>;
@@ -230,8 +256,31 @@ describe('AiChatOrchestratorService', () => {
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'a1' },
     ]);
-    const findCall = messageRepository.find.mock.calls[0][0];
-    expect(findCall.where.createdAt).toBeDefined();
+  });
+
+  it('excludes the current message id from history via andWhere("m.id != :currentId")', async () => {
+    // Belt-and-suspenders check: even if createdAt matches exactly, the
+    // orchestrator adds an id-exclude clause so the current turn itself is
+    // never mirrored back into `history`. Verify the clause is applied.
+    const { orchestrator, messageRepository } = buildOrchestrator({
+      historyRows: [makeMessage({ id: 'm1', senderId: clientUserId })],
+      currentMessage: makeMessage({ id: 'm1', senderId: clientUserId }),
+    });
+
+    await (orchestrator as unknown as {
+      respondToClientMessage: (input: unknown) => Promise<void>;
+    }).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'q',
+    });
+
+    const qb = messageRepository.createQueryBuilder.mock.results[0].value as {
+      andWhere: jest.Mock;
+    };
+    const clauses = qb.andWhere.mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(clauses.some((c) => c.includes('"id"') && c.includes('!='))).toBe(true);
   });
 
   it('skips silently when the client message no longer exists', async () => {

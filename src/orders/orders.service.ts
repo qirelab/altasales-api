@@ -1037,6 +1037,13 @@ export class OrdersService {
       .where('o.id != :excludeOrderId', { excludeOrderId })
       .andWhere('o."userId" = :clientUserId', { clientUserId })
       .andWhere('o."contractorChatAccess" = true')
+      // Cancelled orders keep their historical `contractorChatAccess = true`
+      // flag but must NOT count as an active grant — the expert should lose
+      // chat membership when the last non-cancelled order granting access is
+      // revoked or removed.
+      .andWhere('o.status != :cancelledStatus', {
+        cancelledStatus: OrderStatus.Cancelled,
+      })
       .andWhere(
         new Brackets((qbInner) => {
           qbInner

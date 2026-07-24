@@ -281,14 +281,7 @@ export class ChatService {
       where: { conversationId: conversation.id },
       order: { createdAt: 'DESC' },
     });
-    const unreadCount = await this.messageRepository
-      .createQueryBuilder('m')
-      .where('m."conversationId" = :conversationId', {
-        conversationId: conversation.id,
-      })
-      .andWhere('m."isRead" = false')
-      .andWhere('m."senderId" != :userId', { userId })
-      .getCount();
+    const unreadCount = await this.computeUnreadCount(conversation, userId);
 
     return {
       id: conversation.id,
