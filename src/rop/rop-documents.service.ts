@@ -8,15 +8,20 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
+import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-analysis-link.dto';
 import { RopDocumentListItemResponseDto } from './dto/rop-document-list-item-response.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import { mapRopDocument } from './rop-document.mapper';
+import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
 import { RopService } from './rop.service';
 
 @Injectable()
 export class RopDocumentsService {
+  private static readonly GENERAL_CATEGORY_ID = 1;
+
   constructor(
     private readonly ropService: RopService,
+    private readonly linkDownloadService: RopDocumentLinkDownloadService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
   ) {}
@@ -49,6 +54,39 @@ export class RopDocumentsService {
   ): Promise<string> {
     const projectId = await this.requireProjectId(userId);
     return this.ropService.getDownloadUrl(projectId, documentId);
+  }
+
+  async uploadForAnalyzeForUser(
+    userId: string,
+    file: Express.Multer.File,
+  ): Promise<RopDocumentResponseDto> {
+    const projectId = await this.requireProjectId(userId);
+    const document = await this.ropService.createDocument(
+      projectId,
+      file.originalname,
+      { categoryId: RopDocumentsService.GENERAL_CATEGORY_ID },
+    );
+    await this.ropService.uploadFile(projectId, document.id, file);
+    return this.getForUser(userId, document.id);
+  }
+
+  async createFromLinkForAnalyzeForUser(
+    userId: string,
+    dto: CreateRopDocumentAnalysisLinkDto,
+  ): Promise<RopDocumentResponseDto> {
+    const file = await this.linkDownloadService.downloadAsFile(
+      dto.link,
+      dto.name,
+    );
+    return this.uploadForAnalyzeForUser(userId, file);
+  }
+
+  async getAnalyzeForUser(
+    userId: string,
+    documentId: string,
+  ): Promise<Record<string, unknown>> {
+    const projectId = await this.requireProjectId(userId);
+    return this.ropService.getDocumentAnalyze(projectId, documentId);
   }
 
   async downloadForUser(
