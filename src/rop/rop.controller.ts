@@ -146,6 +146,54 @@ export class RopController {
     );
   }
 
+  @Post('dashboards/analyze/upload')
+  @ApiOperation({
+    summary: 'Upload a dashboard file to ROP and start its AI analysis',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiCreatedResponse({ type: RopDocumentResponseDto })
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
+  )
+  async uploadDashboardForAnalyze(
+    @CurrentUser() user: CurrentUserData,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<RopDocumentResponseDto> {
+    if (!file) {
+      throw new BadRequestException('Файл не предоставлен');
+    }
+
+    return this.ropDocumentsService.uploadDashboardForAnalyzeForUser(
+      user.id,
+      file,
+    );
+  }
+
+  @Post('dashboards/analyze/link')
+  @ApiOperation({
+    summary:
+      'Download a dashboard file by URL and upload it to ROP for AI analysis',
+  })
+  @ApiCreatedResponse({ type: RopDocumentResponseDto })
+  async createDashboardFromLinkForAnalyze(
+    @CurrentUser() user: CurrentUserData,
+    @Body() dto: CreateRopDocumentAnalysisLinkDto,
+  ): Promise<RopDocumentResponseDto> {
+    return this.ropDocumentsService.createDashboardFromLinkForAnalyzeForUser(
+      user.id,
+      dto,
+    );
+  }
+
   @Get('documents/:documentId/analyze')
   @ApiOperation({ summary: 'Get ROP document AI analysis result' })
   @ApiParam({ name: 'documentId', description: 'ROP document ID' })

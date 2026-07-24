@@ -12,12 +12,17 @@ import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-anal
 import { RopDocumentListItemResponseDto } from './dto/rop-document-list-item-response.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import { mapRopDocument } from './rop-document.mapper';
+import {
+  assertAnalyzeUploadFile,
+  getAnalyzeUploadProfileByCategoryId,
+} from './rop-analyze-upload-profile';
 import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
 import { RopService } from './rop.service';
 
 @Injectable()
 export class RopDocumentsService {
   private static readonly GENERAL_CATEGORY_ID = 1;
+  private static readonly DASHBOARD_CATEGORY_ID = 6;
 
   constructor(
     private readonly ropService: RopService,
@@ -59,12 +64,19 @@ export class RopDocumentsService {
   async uploadForAnalyzeForUser(
     userId: string,
     file: Express.Multer.File,
+    categoryId: number = RopDocumentsService.GENERAL_CATEGORY_ID,
   ): Promise<RopDocumentResponseDto> {
+    const profile = getAnalyzeUploadProfileByCategoryId(
+      categoryId,
+      RopDocumentsService.DASHBOARD_CATEGORY_ID,
+    );
+    assertAnalyzeUploadFile(file, profile);
+
     const projectId = await this.requireProjectId(userId);
     const document = await this.ropService.createDocument(
       projectId,
       file.originalname,
-      { categoryId: RopDocumentsService.GENERAL_CATEGORY_ID },
+      { categoryId },
     );
     await this.ropService.uploadFile(projectId, document.id, file);
     return this.getForUser(userId, document.id);
@@ -73,12 +85,40 @@ export class RopDocumentsService {
   async createFromLinkForAnalyzeForUser(
     userId: string,
     dto: CreateRopDocumentAnalysisLinkDto,
+    categoryId: number = RopDocumentsService.GENERAL_CATEGORY_ID,
   ): Promise<RopDocumentResponseDto> {
+    const profile = getAnalyzeUploadProfileByCategoryId(
+      categoryId,
+      RopDocumentsService.DASHBOARD_CATEGORY_ID,
+    );
     const file = await this.linkDownloadService.downloadAsFile(
       dto.link,
       dto.name,
+      profile,
     );
-    return this.uploadForAnalyzeForUser(userId, file);
+    return this.uploadForAnalyzeForUser(userId, file, categoryId);
+  }
+
+  async uploadDashboardForAnalyzeForUser(
+    userId: string,
+    file: Express.Multer.File,
+  ): Promise<RopDocumentResponseDto> {
+    return this.uploadForAnalyzeForUser(
+      userId,
+      file,
+      RopDocumentsService.DASHBOARD_CATEGORY_ID,
+    );
+  }
+
+  async createDashboardFromLinkForAnalyzeForUser(
+    userId: string,
+    dto: CreateRopDocumentAnalysisLinkDto,
+  ): Promise<RopDocumentResponseDto> {
+    return this.createFromLinkForAnalyzeForUser(
+      userId,
+      dto,
+      RopDocumentsService.DASHBOARD_CATEGORY_ID,
+    );
   }
 
   async getAnalyzeForUser(
