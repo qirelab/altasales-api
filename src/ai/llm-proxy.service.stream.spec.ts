@@ -129,6 +129,28 @@ describe('LlmProxyService.chatStream', () => {
     );
   });
 
+  it('forwards the AbortSignal to provider.streamChat', async () => {
+    streamingProvider.streamChat.mockImplementation(() =>
+      asyncIterable<LlmProviderStreamEvent>([
+        { type: 'delta', content: 'ok' },
+        {
+          type: 'done',
+          usage: { tokensIn: 1, tokensOut: 1, costRub: 0, latencyMs: 1 },
+        },
+      ]),
+    );
+    const controller = new AbortController();
+
+    for await (const _ of service.chatStream(request, controller.signal)) {
+      // consume
+    }
+
+    expect(streamingProvider.streamChat).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
   it('halts the stream when the accumulated buffer surfaces PII in the response', async () => {
     // The upstream emits partial PII across two deltas — the accumulated
     // scanner must catch it as soon as the full pattern lands.

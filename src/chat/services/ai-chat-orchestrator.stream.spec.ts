@@ -229,6 +229,52 @@ describe('AiChatOrchestratorService.streamReply', () => {
     expect(messageRepository.save).not.toHaveBeenCalled();
   });
 
+  it('forwards the AbortSignal down to askQuestionStream and bails before persisting on abort', async () => {
+    const askQuestionStream = jest.fn((_input, _signal) =>
+      (async function* () {
+        yield {
+          type: 'refusal',
+          response: {
+            answer: 'Сервис временно недоступен.',
+            hasContext: false,
+            sources: [],
+            refusalReason: 'generation_failed',
+          },
+        };
+      })(),
+    );
+    const { orchestrator, messageRepository } = buildOrchestrator({
+      participants: [{ userId: 'client-1' }, { userId: 'expert-1' }],
+    });
+    // Swap the default rag mock for one that captures the signal and returns
+    // a refusal (mirroring what RAG does on AbortError).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (orchestrator as any).ragService = { askQuestionStream };
+    const { hooks, calls } = makeHooks();
+    const controller = new AbortController();
+    controller.abort();
+
+    await orchestrator.streamReply(
+      {
+        conversation,
+        clientUserId: 'client-1',
+        clientMessageId: 'client-msg-1',
+        question: 'anything',
+      },
+      hooks,
+      controller.signal,
+    );
+
+    expect(askQuestionStream).toHaveBeenCalledWith(
+      expect.any(Object),
+      controller.signal,
+    );
+    // On abort we surface client_disconnected and NEVER persist a synthetic
+    // "service unavailable" AI message — the QA'd regression.
+    expect(calls.error).toEqual(['client_disconnected']);
+    expect(messageRepository.save).not.toHaveBeenCalled();
+  });
+
   it('emits onError when the RAG stream throws mid-flight', async () => {
     const { orchestrator } = buildOrchestrator({
       ragThrows: new Error('boom'),

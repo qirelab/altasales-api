@@ -124,6 +124,17 @@ describe('ChatStreamingService.validate', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('rejects with BadRequest when the DTO carries fileIds (streaming is text-only)', async () => {
+    const { service } = buildService();
+
+    await expect(
+      service.validate('client-1', 'conv-1', {
+        text: 'Hi',
+        fileIds: ['00000000-0000-4000-8000-000000000001'],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rejects with BadRequest when the caller is not a Client', async () => {
     const { service } = buildService({
       membership: {

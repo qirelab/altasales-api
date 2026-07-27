@@ -239,6 +239,15 @@ export class AiChatOrchestratorService {
       return;
     }
 
+    // If the client disconnected mid-stream, `askQuestionStream` catches the
+    // AbortError and turns it into a `generation_failed` refusal — which
+    // would then be persisted as an infra-error message the user never
+    // asked for. Detect the abort here and bail before touching the DB.
+    if (signal?.aborted) {
+      hooks.onError('client_disconnected');
+      return;
+    }
+
     // A refusal replaces any partial deltas — the RAG service only emits
     // deltas on the success path. Persist the final answer (delta-accumulated
     // or refusal message) as a single ChatMessage row.

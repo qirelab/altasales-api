@@ -101,6 +101,16 @@ export class ChatStreamingService {
         'Streaming is available only for client-authored messages',
       );
     }
+    if (dto.fileIds?.length) {
+      // The streaming endpoint is text-only for now. The non-streaming
+      // sendPlatformMessage path already handles attachments; silently
+      // accepting fileIds here would drop the files without warning because
+      // `runStream` does not thread them through to `filesService.linkToMessage`.
+      throw new BadRequestException(
+        'File attachments are not supported on the streaming endpoint. ' +
+          'Use POST /chat/conversations/:id/messages instead.',
+      );
+    }
 
     return { conversation, userId, text: dto.text };
   }

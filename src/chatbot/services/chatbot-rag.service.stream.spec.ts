@@ -177,4 +177,18 @@ describe('ChatbotRagService.askQuestionStream', () => {
       response: expect.objectContaining({ refusalReason: 'generation_failed' }),
     });
   });
+
+  it('forwards the AbortSignal to llmProxy.chatStream', async () => {
+    const { service, llmProxy } = buildService();
+    const controller = new AbortController();
+
+    await collect(
+      service.askQuestionStream({ question: 'ok?' }, controller.signal),
+    );
+
+    expect(llmProxy.chatStream).toHaveBeenCalledWith(
+      expect.any(Object),
+      controller.signal,
+    );
+  });
 });

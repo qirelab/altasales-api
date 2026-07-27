@@ -1102,8 +1102,12 @@ export class LlmProxyService {
       let sawContent = false;
       // The PII scanner must catch a pattern that straddles two deltas but
       // it does not need to rescan the entire response on every chunk. Keep
-      // a sliding window equal to the longest recognised placeholder plus
-      // the new delta so worst-case work stays O(window) per event.
+      // a sliding window sized for the longest PII pattern in `PII_PATTERNS`
+      // plus the current delta, so worst-case work stays O(window) per event.
+      // Today the widest pattern (`birth_date` trigger "date of birth" + a
+      // 40-char content window + date literal) fits in ~63 chars. If a new
+      // pattern longer than 63 chars is added to `pii-anonymizer.service.ts`,
+      // raise `piiWindowSize` accordingly or a straddle can slip through.
       const piiWindowSize = 64;
       let piiScanCursor = 0;
 
