@@ -81,7 +81,7 @@ export class ChatController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Open or return the client\'s single platform chat with AI-консультант AltaSales',
+      "Open or return the client's single platform chat with AI-консультант AltaSales",
   })
   openPlatformConversation(@CurrentUser() user: CurrentUserData) {
     return this.chatService.openPlatformConversation(user.id);
@@ -91,8 +91,8 @@ export class ChatController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Send a message inside a platform conversation. Client messages trigger '
-      + 'an async AI reply (delivered via chat:new_message WS event).',
+      'Send a message inside a platform conversation. Client messages trigger ' +
+      'an async AI reply (delivered via chat:new_message WS event).',
   })
   sendPlatformMessage(
     @CurrentUser() user: CurrentUserData,

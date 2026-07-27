@@ -168,7 +168,9 @@ export class AddPlatformChatSupport1782900000000 implements MigrationInterface {
     await queryRunner.query(
       `DROP INDEX IF EXISTS "IDX_chat_conversation_participant_conversation"`,
     );
-    await queryRunner.query(`DROP TABLE IF EXISTS "chat_conversation_participant"`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "chat_conversation_participant"`,
+    );
     await queryRunner.query(`DROP TYPE IF EXISTS "chat_participant_role_enum"`);
 
     await queryRunner.query(
@@ -177,12 +179,13 @@ export class AddPlatformChatSupport1782900000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "chat_conversation" DROP COLUMN IF EXISTS "type"`,
     );
-    await queryRunner.query(`DROP TYPE IF EXISTS "chat_conversation_type_enum"`);
-
     await queryRunner.query(
-      `DELETE FROM "user" WHERE "id" = $1`,
-      [AI_SYSTEM_USER_ID],
+      `DROP TYPE IF EXISTS "chat_conversation_type_enum"`,
     );
+
+    await queryRunner.query(`DELETE FROM "user" WHERE "id" = $1`, [
+      AI_SYSTEM_USER_ID,
+    ]);
 
     // We intentionally do NOT remove 'system_ai' from the user_role_enum:
     // Postgres does not support removing enum values without recreating the

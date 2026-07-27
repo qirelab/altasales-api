@@ -7,8 +7,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * first the client's unread counter drops to zero even though they never
  * read the AI's reply.
  */
-export class AddChatParticipantLastReadAt1782920000000
-implements MigrationInterface {
+export class AddChatParticipantLastReadAt1782920000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE "chat_conversation_participant"

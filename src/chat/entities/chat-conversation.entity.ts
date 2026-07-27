@@ -26,8 +26,8 @@ export class ChatConversation {
   @ApiProperty({
     enum: ChatConversationType,
     description:
-      'Conversation type. `expert` is the legacy client-expert-per-order chat. '
-      + '`platform` is the single AI-consultant chat between the client and the platform.',
+      'Conversation type. `expert` is the legacy client-expert-per-order chat. ' +
+      '`platform` is the single AI-consultant chat between the client and the platform.',
   })
   @Column({
     type: 'enum',

@@ -21,10 +21,12 @@ interface Order {
   } | null;
 }
 
-function makeService(overrides: {
-  order: Order;
-  hasOtherGrant?: boolean;
-} = { order: {} as Order }) {
+function makeService(
+  overrides: {
+    order: Order;
+    hasOtherGrant?: boolean;
+  } = { order: {} as Order },
+) {
   const orderRepository = {
     findOne: jest.fn().mockResolvedValue(overrides.order),
     save: jest.fn(async (o: Order) => o),
@@ -32,9 +34,9 @@ function makeService(overrides: {
       leftJoin: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
-      getCount: jest.fn().mockResolvedValue(
-        overrides.hasOtherGrant === true ? 1 : 0,
-      ),
+      getCount: jest
+        .fn()
+        .mockResolvedValue(overrides.hasOtherGrant === true ? 1 : 0),
     })),
   };
   const chatService = {
@@ -42,11 +44,10 @@ function makeService(overrides: {
     removeExpertFromClientPlatformChat: jest.fn().mockResolvedValue(undefined),
   };
 
-  // OrdersService has 15 constructor deps — we only need order + chat.
-  // Stub the rest as empty objects; the code paths we exercise never touch
-  // them. Order (14 stubs sandwiched between orderRepository at slot #1 and
-  // chatService at slot #15):
-  //   1  orderRepository        ← real
+  // OrdersService has 16 constructor deps — we only need order + chat +
+  // dataSource (for the advisory-lock transaction). Stub the rest as
+  // empty objects; the code paths we exercise never touch them.
+  //   1  orderRepository                ← real
   //   2  orderItemRepository
   //   3  orderItemSubItemRepository
   //   4  serviceRepository
@@ -56,16 +57,38 @@ function makeService(overrides: {
   //   8  expertOfferingRepository
   //   9  expertsService
   //  10  paymentService
-  //  11  dataSource
+  //  11  dataSource                     ← real (transaction stub)
   //  12  balanceService
   //  13  cartService
   //  14  orderNotificationService
-  //  15  chatService              ← real
+  //  15  chatService                    ← real
+  //  16  recommendationUserLockService
   const stub = {} as never;
+  // Minimal dataSource stub: `transaction(fn)` just runs `fn` with a fake
+  // manager that has a no-op `query`. The advisory-lock SQL is not executed
+  // by jest; we only need `withClientExpertLock` to not blow up.
+  const dataSource = {
+    transaction: (
+      fn: (manager: { query: () => Promise<unknown> }) => unknown,
+    ) => fn({ query: () => Promise.resolve(undefined) }),
+  } as never;
   const service = new OrdersService(
     orderRepository as never,
-    stub, stub, stub, stub, stub, stub, stub, stub, stub, stub, stub, stub, stub,
+    stub,
+    stub,
+    stub,
+    stub,
+    stub,
+    stub,
+    stub,
+    stub,
+    stub,
+    dataSource,
+    stub,
+    stub,
+    stub,
     chatService as never,
+    stub,
   );
 
   return { service, orderRepository, chatService };
@@ -164,7 +187,9 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: false,
     } as never);
 
-    expect(chatService.removeExpertFromClientPlatformChat).not.toHaveBeenCalled();
+    expect(
+      chatService.removeExpertFromClientPlatformChat,
+    ).not.toHaveBeenCalled();
     expect(orderRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ contractorChatAccess: false }),
     );
@@ -186,10 +211,12 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     // Grant fired, save failed, compensation must roll the expert back so
     // there's no orphan participant with `contractorChatAccess=false`.
     expect(chatService.addExpertToClientPlatformChat).toHaveBeenCalledWith(
-      'client-1', 'expert-1',
+      'client-1',
+      'expert-1',
     );
     expect(chatService.removeExpertFromClientPlatformChat).toHaveBeenCalledWith(
-      'client-1', 'expert-1',
+      'client-1',
+      'expert-1',
     );
   });
 
@@ -206,7 +233,9 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       } as never),
     ).rejects.toThrow('DB down');
 
-    expect(chatService.removeExpertFromClientPlatformChat).not.toHaveBeenCalled();
+    expect(
+      chatService.removeExpertFromClientPlatformChat,
+    ).not.toHaveBeenCalled();
   });
 
   it('does not touch chat when the resolved expert equals the client', async () => {

@@ -16,14 +16,16 @@ function makeMessage(overrides: Record<string, unknown> = {}) {
 }
 
 describe('AiChatOrchestratorService', () => {
-  function buildOrchestrator(opts: {
-    historyRows?: ReturnType<typeof makeMessage>[];
-    currentMessage?: ReturnType<typeof makeMessage> | null;
-    ragAnswer?: string;
-    ragRefusalReason?: string;
-    ragThrows?: Error;
-    participants?: { userId: string }[];
-  } = {}) {
+  function buildOrchestrator(
+    opts: {
+      historyRows?: ReturnType<typeof makeMessage>[];
+      currentMessage?: ReturnType<typeof makeMessage> | null;
+      ragAnswer?: string;
+      ragRefusalReason?: string;
+      ragThrows?: Error;
+      participants?: { userId: string }[];
+    } = {},
+  ) {
     // Default: currentMessage.createdAt = now, all history rows keep their
     // (default now) timestamps so nothing is filtered out by createdAt.
     // QueryBuilder mock that captures the where clauses the orchestrator
@@ -32,17 +34,26 @@ describe('AiChatOrchestratorService', () => {
     // interpreted; unknown clauses are recorded but do not filter.
     const qbState: { cutoff?: Date } = {};
     const qb: {
-      where: jest.Mock; andWhere: jest.Mock;
-      orderBy: jest.Mock; addOrderBy: jest.Mock;
-      take: jest.Mock; getMany: jest.Mock;
+      where: jest.Mock;
+      andWhere: jest.Mock;
+      orderBy: jest.Mock;
+      addOrderBy: jest.Mock;
+      take: jest.Mock;
+      getMany: jest.Mock;
     } = {
       where: jest.fn().mockImplementation(() => qb),
-      andWhere: jest.fn().mockImplementation((sql: string, params?: Record<string, unknown>) => {
-        if (sql.includes('createdAt') && sql.includes('<') && params?.cutoff instanceof Date) {
-          qbState.cutoff = params.cutoff;
-        }
-        return qb;
-      }),
+      andWhere: jest
+        .fn()
+        .mockImplementation((sql: string, params?: Record<string, unknown>) => {
+          if (
+            sql.includes('createdAt') &&
+            sql.includes('<') &&
+            params?.cutoff instanceof Date
+          ) {
+            qbState.cutoff = params.cutoff;
+          }
+          return qb;
+        }),
       orderBy: jest.fn().mockImplementation(() => qb),
       addOrderBy: jest.fn().mockImplementation(() => qb),
       take: jest.fn().mockImplementation(() => qb),
@@ -51,7 +62,8 @@ describe('AiChatOrchestratorService', () => {
         const filtered = rows.filter((m) => {
           // Strict `<` — same-tick messages (including the current turn
           // itself and any fast-typing sibling) are excluded.
-          if (qbState.cutoff && (m.createdAt as Date) >= qbState.cutoff) return false;
+          if (qbState.cutoff && (m.createdAt as Date) >= qbState.cutoff)
+            return false;
           return true;
         });
         // Emulate ORDER BY createdAt DESC + take(HISTORY_FETCH_LIMIT).
@@ -60,16 +72,20 @@ describe('AiChatOrchestratorService', () => {
     };
 
     const messageRepository = {
-      findOne: jest.fn().mockImplementation((options?: { where?: { id?: string } }) => {
-        if (options?.where?.id && opts.currentMessage !== null) {
-          return Promise.resolve(
-            opts.currentMessage
-            ?? (opts.historyRows ?? []).find((m) => m.id === options.where?.id)
-            ?? null,
-          );
-        }
-        return Promise.resolve(null);
-      }),
+      findOne: jest
+        .fn()
+        .mockImplementation((options?: { where?: { id?: string } }) => {
+          if (options?.where?.id && opts.currentMessage !== null) {
+            return Promise.resolve(
+              opts.currentMessage ??
+                (opts.historyRows ?? []).find(
+                  (m) => m.id === options.where?.id,
+                ) ??
+                null,
+            );
+          }
+          return Promise.resolve(null);
+        }),
       createQueryBuilder: jest.fn().mockImplementation(() => qb),
       create: jest.fn((entity) => ({ ...entity, id: 'ai-msg-1' })),
       save: jest.fn(async (entity) => ({ ...entity, id: 'ai-msg-1' })),
@@ -78,20 +94,24 @@ describe('AiChatOrchestratorService', () => {
       update: jest.fn().mockResolvedValue(undefined),
     };
     const participantRepository = {
-      find: jest.fn().mockResolvedValue(opts.participants ?? [
-        { userId: 'client-1' },
-        { userId: AI_SYSTEM_USER_ID },
-      ]),
+      find: jest
+        .fn()
+        .mockResolvedValue(
+          opts.participants ?? [
+            { userId: 'client-1' },
+            { userId: AI_SYSTEM_USER_ID },
+          ],
+        ),
     };
     const ragService = {
       askQuestion: opts.ragThrows
         ? jest.fn().mockRejectedValue(opts.ragThrows)
         : jest.fn().mockResolvedValue({
-          answer: opts.ragAnswer ?? 'AI answer',
-          hasContext: true,
-          sources: [],
-          refusalReason: opts.ragRefusalReason,
-        }),
+            answer: opts.ragAnswer ?? 'AI answer',
+            hasContext: true,
+            sources: [],
+            refusalReason: opts.ragRefusalReason,
+          }),
     };
     const wsGateway = {
       emitToUser: jest.fn(),
@@ -126,15 +146,31 @@ describe('AiChatOrchestratorService', () => {
     const t1 = new Date('2026-01-01T10:00:01.000Z');
     const t2 = new Date('2026-01-01T10:00:02.000Z');
     const m3 = makeMessage({
-      id: 'm3', senderId: clientUserId, text: 'question now', createdAt: t2,
+      id: 'm3',
+      senderId: clientUserId,
+      text: 'question now',
+      createdAt: t2,
     });
     const {
-      orchestrator, messageRepository, conversationRepository, ragService, wsGateway,
+      orchestrator,
+      messageRepository,
+      conversationRepository,
+      ragService,
+      wsGateway,
     } = buildOrchestrator({
       historyRows: [
-        makeMessage({ id: 'm1', senderId: clientUserId, text: 'first', createdAt: t0 }),
         makeMessage({
-          id: 'm2', senderId: 'ai', isAiGenerated: true, text: 'a1', createdAt: t1,
+          id: 'm1',
+          senderId: clientUserId,
+          text: 'first',
+          createdAt: t0,
+        }),
+        makeMessage({
+          id: 'm2',
+          senderId: 'ai',
+          isAiGenerated: true,
+          text: 'a1',
+          createdAt: t1,
         }),
         m3,
       ],
@@ -147,9 +183,11 @@ describe('AiChatOrchestratorService', () => {
       ],
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm3',
@@ -202,15 +240,21 @@ describe('AiChatOrchestratorService', () => {
   });
 
   it('handles empty history (fresh conversation) — only the current question is passed', async () => {
-    const m1 = makeMessage({ id: 'm1', senderId: clientUserId, text: 'first ever' });
+    const m1 = makeMessage({
+      id: 'm1',
+      senderId: clientUserId,
+      text: 'first ever',
+    });
     const { orchestrator, ragService } = buildOrchestrator({
       historyRows: [m1],
       currentMessage: m1,
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm1',
@@ -230,16 +274,31 @@ describe('AiChatOrchestratorService', () => {
     const t2 = new Date('2026-01-01T10:00:02.000Z');
     const t3 = new Date('2026-01-01T10:00:03.000Z');
     const m3 = makeMessage({
-      id: 'm3', senderId: clientUserId, text: 'question now', createdAt: t2,
+      id: 'm3',
+      senderId: clientUserId,
+      text: 'question now',
+      createdAt: t2,
     });
     const m4Future = makeMessage({
-      id: 'm4', senderId: clientUserId, text: 'oops one more', createdAt: t3,
+      id: 'm4',
+      senderId: clientUserId,
+      text: 'oops one more',
+      createdAt: t3,
     });
     const { orchestrator, ragService } = buildOrchestrator({
       historyRows: [
-        makeMessage({ id: 'm1', senderId: clientUserId, text: 'first', createdAt: t0 }),
         makeMessage({
-          id: 'm2', senderId: 'ai', isAiGenerated: true, text: 'a1', createdAt: t1,
+          id: 'm1',
+          senderId: clientUserId,
+          text: 'first',
+          createdAt: t0,
+        }),
+        makeMessage({
+          id: 'm2',
+          senderId: 'ai',
+          isAiGenerated: true,
+          text: 'a1',
+          createdAt: t1,
         }),
         m3,
         m4Future,
@@ -247,9 +306,11 @@ describe('AiChatOrchestratorService', () => {
       currentMessage: m3,
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm3',
@@ -271,22 +332,33 @@ describe('AiChatOrchestratorService', () => {
     const sameTick = new Date('2026-01-01T10:00:02.000Z');
     const before = new Date('2026-01-01T10:00:01.000Z');
     const m1 = makeMessage({
-      id: 'm1', senderId: clientUserId, text: 'earlier', createdAt: before,
+      id: 'm1',
+      senderId: clientUserId,
+      text: 'earlier',
+      createdAt: before,
     });
     const m3 = makeMessage({
-      id: 'm3', senderId: clientUserId, text: 'q now', createdAt: sameTick,
+      id: 'm3',
+      senderId: clientUserId,
+      text: 'q now',
+      createdAt: sameTick,
     });
     const m4Same = makeMessage({
-      id: 'm4', senderId: clientUserId, text: 'q sibling', createdAt: sameTick,
+      id: 'm4',
+      senderId: clientUserId,
+      text: 'q sibling',
+      createdAt: sameTick,
     });
     const { orchestrator, ragService } = buildOrchestrator({
       historyRows: [m1, m3, m4Same],
       currentMessage: m3,
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm3',
@@ -295,9 +367,7 @@ describe('AiChatOrchestratorService', () => {
 
     const ragCall = ragService.askQuestion.mock.calls[0][0];
     // Only strictly-past m1 remains. m3 (self) and m4 (same tick) are dropped.
-    expect(ragCall.history).toEqual([
-      { role: 'user', content: 'earlier' },
-    ]);
+    expect(ragCall.history).toEqual([{ role: 'user', content: 'earlier' }]);
   });
 
   it('skips silently when the client message no longer exists', async () => {
@@ -306,9 +376,11 @@ describe('AiChatOrchestratorService', () => {
       currentMessage: null,
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'deleted',
@@ -322,23 +394,29 @@ describe('AiChatOrchestratorService', () => {
     const t1 = new Date('2026-01-01T10:00:01.000Z');
     const t2 = new Date('2026-01-01T10:00:02.000Z');
     const m3 = makeMessage({
-      id: 'm3', senderId: clientUserId, text: 'q1', createdAt: t1,
+      id: 'm3',
+      senderId: clientUserId,
+      text: 'q1',
+      createdAt: t1,
     });
     const m4 = makeMessage({
-      id: 'm4', senderId: clientUserId, text: 'q2', createdAt: t2,
+      id: 'm4',
+      senderId: clientUserId,
+      text: 'q2',
+      createdAt: t2,
     });
     const started: string[] = [];
     const finished: string[] = [];
     const { orchestrator, messageRepository, ragService } = buildOrchestrator({
       historyRows: [m3, m4],
     });
-    messageRepository.findOne.mockImplementation(async (opts: {
-      where?: { id?: string };
-    }) => {
-      const id = opts.where?.id;
-      started.push(id ?? 'unknown');
-      return id === 'm3' ? m3 : id === 'm4' ? m4 : null;
-    });
+    messageRepository.findOne.mockImplementation(
+      async (opts: { where?: { id?: string } }) => {
+        const id = opts.where?.id;
+        started.push(id ?? 'unknown');
+        return id === 'm3' ? m3 : id === 'm4' ? m4 : null;
+      },
+    );
     ragService.askQuestion.mockImplementation(async (input) => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       finished.push(input.question);
@@ -346,10 +424,16 @@ describe('AiChatOrchestratorService', () => {
     });
 
     orchestrator.scheduleReply({
-      conversation, clientUserId, clientMessageId: 'm3', question: 'q1',
+      conversation,
+      clientUserId,
+      clientMessageId: 'm3',
+      question: 'q1',
     });
     orchestrator.scheduleReply({
-      conversation, clientUserId, clientMessageId: 'm4', question: 'q2',
+      conversation,
+      clientUserId,
+      clientMessageId: 'm4',
+      question: 'q2',
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
 

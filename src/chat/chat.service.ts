@@ -21,10 +21,7 @@ import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
 import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { StartConversationDto } from './dto/start-conversation.dto';
-import {
-  AI_SYSTEM_USER_ID,
-  AI_WELCOME_MESSAGE,
-} from './chat.constants';
+import { AI_SYSTEM_USER_ID, AI_WELCOME_MESSAGE } from './chat.constants';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
 
@@ -66,9 +63,9 @@ export class ChatService {
           .andWhere('part."userId" = :userId')
           .getQuery();
         return (
-          '(conv."participantOneId" = :userId OR conv."participantTwoId" = :userId OR EXISTS '
-          + memberSub
-          + ')'
+          '(conv."participantOneId" = :userId OR conv."participantTwoId" = :userId OR EXISTS ' +
+          memberSub +
+          ')'
         );
       })
       .setParameter('userId', userId)
@@ -95,20 +92,20 @@ export class ChatService {
           orderId: conv.orderId,
           participant: otherUser
             ? {
-              id: otherUser.id,
-              name: otherUser.name,
-              lastName: otherUser.lastName,
-              email: otherUser.email,
-            }
+                id: otherUser.id,
+                name: otherUser.name,
+                lastName: otherUser.lastName,
+                email: otherUser.email,
+              }
             : null,
           lastMessage: lastMessage
             ? {
-              id: lastMessage.id,
-              text: lastMessage.text,
-              senderId: lastMessage.senderId,
-              isAiGenerated: lastMessage.isAiGenerated,
-              createdAt: lastMessage.createdAt,
-            }
+                id: lastMessage.id,
+                text: lastMessage.text,
+                senderId: lastMessage.senderId,
+                isAiGenerated: lastMessage.isAiGenerated,
+                createdAt: lastMessage.createdAt,
+              }
             : null,
           unreadCount,
           updatedAt: conv.updatedAt,
@@ -151,7 +148,12 @@ export class ChatService {
     >();
     for (const f of allFiles) {
       const arr = filesByMessageId.get(f.messageId!) ?? [];
-      arr.push({ id: f.id, name: f.originalName, size: f.size, type: f.mimeType });
+      arr.push({
+        id: f.id,
+        name: f.originalName,
+        size: f.size,
+        type: f.mimeType,
+      });
       filesByMessageId.set(f.messageId!, arr);
     }
     const messagesWithFiles = messages.map((m) => ({
@@ -164,7 +166,12 @@ export class ChatService {
     // the same messages and a global `isRead` flag would zero out unread
     // counts for everyone else once the first participant reads. Legacy
     // expert chats stay on the message-level flag (only two participants).
-    await this.markConversationRead(userId, conversation);
+    //
+    // Anchor the cursor to the newest LOADED message's timestamp (not NOW)
+    // so a message inserted between the load and this update stays unread
+    // — otherwise the client would never see it in their unread counter.
+    const readCursor = messages.length > 0 ? messages[0].createdAt : null;
+    await this.markConversationRead(userId, conversation, readCursor);
 
     // WS: notify other participants that we read their messages.
     const otherRecipients = await this.getRecipientIds(conversation, userId);
@@ -184,12 +191,15 @@ export class ChatService {
     }
     if (dto.recipientId === AI_SYSTEM_USER_ID) {
       throw new BadRequestException(
-        'Use POST /chat/conversations/platform to open the AI-консультант chat, '
-        + 'then POST /chat/conversations/:id/messages to send messages there.',
+        'Use POST /chat/conversations/platform to open the AI-консультант chat, ' +
+          'then POST /chat/conversations/:id/messages to send messages there.',
       );
     }
 
-    const recipient = await this.requireUserById(dto.recipientId, 'Recipient not found');
+    const recipient = await this.requireUserById(
+      dto.recipientId,
+      'Recipient not found',
+    );
 
     const [participantOneId, participantTwoId] =
       userId < dto.recipientId
@@ -288,20 +298,20 @@ export class ChatService {
       type: conversation.type,
       participant: aiUser
         ? {
-          id: aiUser.id,
-          name: aiUser.name,
-          lastName: aiUser.lastName,
-          email: aiUser.email,
-        }
+            id: aiUser.id,
+            name: aiUser.name,
+            lastName: aiUser.lastName,
+            email: aiUser.email,
+          }
         : null,
       lastMessage: lastMessage
         ? {
-          id: lastMessage.id,
-          text: lastMessage.text,
-          senderId: lastMessage.senderId,
-          isAiGenerated: lastMessage.isAiGenerated,
-          createdAt: lastMessage.createdAt,
-        }
+            id: lastMessage.id,
+            text: lastMessage.text,
+            senderId: lastMessage.senderId,
+            isAiGenerated: lastMessage.isAiGenerated,
+            createdAt: lastMessage.createdAt,
+          }
         : null,
       unreadCount,
       orderId: conversation.orderId,
@@ -380,8 +390,8 @@ export class ChatService {
       // 23505 = unique_violation. Another concurrent request created the same
       // (participantOneId, participantTwoId, orderId) row a beat before us.
       if (
-        error instanceof QueryFailedError
-        && (error as QueryFailedError & { code?: string }).code === '23505'
+        error instanceof QueryFailedError &&
+        (error as QueryFailedError & { code?: string }).code === '23505'
       ) {
         const raced = await this.conversationRepository.findOne({
           where: {
@@ -426,7 +436,9 @@ export class ChatService {
       where: { conversationId: conversation.id, userId },
     });
     if (!membership) {
-      throw new ForbiddenException('You are not a participant of this conversation');
+      throw new ForbiddenException(
+        'You are not a participant of this conversation',
+      );
     }
 
     const savedMessage = await this.persistMessage({
@@ -436,7 +448,9 @@ export class ChatService {
     });
     const files = await this.linkFilesToMessage(dto.fileIds, savedMessage.id);
     const now = new Date();
-    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+    await this.conversationRepository.update(conversation.id, {
+      updatedAt: now,
+    });
 
     const recipientIds = await this.getRecipientIds(conversation, userId);
     const payload = {
@@ -550,7 +564,9 @@ export class ChatService {
 
   async findOrCreateConversation(userId: string, dto: StartConversationDto) {
     if (userId === dto.recipientId) {
-      throw new BadRequestException('Cannot start a conversation with yourself');
+      throw new BadRequestException(
+        'Cannot start a conversation with yourself',
+      );
     }
     if (dto.recipientId === AI_SYSTEM_USER_ID) {
       throw new BadRequestException(
@@ -558,7 +574,10 @@ export class ChatService {
       );
     }
 
-    const recipient = await this.requireUserById(dto.recipientId, 'Recipient not found');
+    const recipient = await this.requireUserById(
+      dto.recipientId,
+      'Recipient not found',
+    );
     const normalizedOrderId = dto.orderId ?? null;
     await this.assertCanUseChatContext(userId, recipient, normalizedOrderId);
 
@@ -662,9 +681,7 @@ export class ChatService {
     await this.participantRepository.save(participant);
   }
 
-  private mapUserRoleToParticipantRole(
-    role: UserRole,
-  ): ChatParticipantRole {
+  private mapUserRoleToParticipantRole(role: UserRole): ChatParticipantRole {
     switch (role) {
       case UserRole.EXPERT:
         return ChatParticipantRole.Expert;
@@ -688,19 +705,32 @@ export class ChatService {
       return conversation.participantOne ?? null;
     }
     // User is a member (e.g. expert joined), pick the client side.
-    return (
-      conversation.participantTwo ?? conversation.participantOne ?? null
-    );
+    return conversation.participantTwo ?? conversation.participantOne ?? null;
   }
 
   private async markConversationRead(
     userId: string,
     conversation: ChatConversation,
+    cursor?: Date | null,
   ): Promise<void> {
     if (conversation.type === ChatConversationType.Platform) {
+      // Cursor defaults to the newest existing message's timestamp — resolved
+      // here so callers like markAsRead don't need to fetch it themselves.
+      // Using createdAt of an actual message (not NOW()) makes the read
+      // marker race-free: a message inserted after our fetch has a strictly
+      // greater createdAt and stays unread until the next read pass.
+      let effectiveCursor = cursor ?? null;
+      if (!effectiveCursor) {
+        const latest = await this.messageRepository.findOne({
+          where: { conversationId: conversation.id },
+          order: { createdAt: 'DESC' },
+        });
+        effectiveCursor = latest?.createdAt ?? null;
+      }
+      if (!effectiveCursor) return;
       await this.participantRepository.update(
         { conversationId: conversation.id, userId },
-        { lastReadAt: new Date() },
+        { lastReadAt: effectiveCursor },
       );
       return;
     }
@@ -794,10 +824,12 @@ export class ChatService {
     }
 
     if (
-      conversation.participantOneId !== userId
-      && conversation.participantTwoId !== userId
+      conversation.participantOneId !== userId &&
+      conversation.participantTwoId !== userId
     ) {
-      throw new ForbiddenException('You are not a participant of this conversation');
+      throw new ForbiddenException(
+        'You are not a participant of this conversation',
+      );
     }
 
     if (!conversation.orderId) {
@@ -903,14 +935,19 @@ export class ChatService {
       .createQueryBuilder('o')
       .innerJoin('o.item', 'item')
       .where('o.id = :orderId', { orderId })
-      .andWhere('item."executorUserId" = :expertParticipantId', { expertParticipantId })
+      .andWhere('item."executorUserId" = :expertParticipantId', {
+        expertParticipantId,
+      })
       .select('item.id', 'id')
       .getRawOne<{ id: string }>();
 
     return Boolean(matchedPositionExecutor);
   }
 
-  private async requireUserById(userId: string, message: string): Promise<User> {
+  private async requireUserById(
+    userId: string,
+    message: string,
+  ): Promise<User> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException(message);

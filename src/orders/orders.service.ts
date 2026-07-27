@@ -997,8 +997,8 @@ export class OrdersService {
     const wasGranted = order.contractorChatAccess === true;
     const willGrant = dto.contractorChatAccess === true;
     const expertUserId = this.resolveOrderExpertUserId(order);
-    const shouldSyncParticipant = expertUserId !== null
-      && expertUserId !== order.userId;
+    const shouldSyncParticipant =
+      expertUserId !== null && expertUserId !== order.userId;
 
     // Sync platform-chat membership BEFORE persisting the flag so a failed
     // participant mutation leaves the durable order row unchanged. Retries
@@ -1010,38 +1010,50 @@ export class OrdersService {
         order.userId,
         expertUserId,
       );
-      // Compensation: if we granted access but the flag save then fails,
-      // roll the participant back so the order row and chat membership
-      // don't drift apart (`contractorChatAccess=false` with expert still
-      // able to read the client's private chat).
+      // Compensation: if we FRESHLY granted access and the flag save then
+      // fails, roll the participant back. When wasGranted was already true
+      // the addExpertToClientPlatformChat call was a no-op — rolling back
+      // in that case would delete the LEGITIMATE existing membership.
       try {
         order.contractorChatAccess = dto.contractorChatAccess;
         return await this.orderRepository.save(order);
       } catch (error) {
-        const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
-          order.id, order.userId, expertUserId,
-        );
-        if (!hasOtherGrant) {
-          await this.chatService
-            .removeExpertFromClientPlatformChat(order.userId, expertUserId)
-            .catch(() => undefined);
+        if (!wasGranted) {
+          const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
+            order.id,
+            order.userId,
+            expertUserId,
+          );
+          if (!hasOtherGrant) {
+            await this.chatService
+              .removeExpertFromClientPlatformChat(order.userId, expertUserId)
+              .catch((err: unknown) =>
+                this.logger.error(
+                  `Compensation removeExpert failed for order ${order.id}: ${
+                    err instanceof Error ? err.message : String(err)
+                  }`,
+                ),
+              );
+          }
         }
         throw error;
       }
     }
 
     if (!willGrant && wasGranted && shouldSyncParticipant) {
-      const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
-        order.id,
-        order.userId,
-        expertUserId,
-      );
-      if (!hasOtherGrant) {
-        await this.chatService.removeExpertFromClientPlatformChat(
+      await this.withClientExpertLock(order.userId, expertUserId, async () => {
+        const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
+          order.id,
           order.userId,
           expertUserId,
         );
-      }
+        if (!hasOtherGrant) {
+          await this.chatService.removeExpertFromClientPlatformChat(
+            order.userId,
+            expertUserId,
+          );
+        }
+      });
     }
 
     order.contractorChatAccess = dto.contractorChatAccess;
@@ -1050,21 +1062,51 @@ export class OrdersService {
 
   /**
    * Revoke expert's platform-chat membership if THIS order was the last
-   * active grant. Safe to call multiple times (removeExpertFromClientPlatformChat
-   * is idempotent). Callers must load `order.item` + `order.item.service`
-   * so `resolveOrderExpertUserId` can figure out who the expert was.
+   * active grant. Serialised per (client, expert) pair via a Postgres
+   * advisory lock so two concurrent revokes cannot both read "other grant
+   * still active" and skip the delete. Safe to call multiple times
+   * (removeExpertFromClientPlatformChat is idempotent). Callers must load
+   * `order.item` + `order.item.service` so `resolveOrderExpertUserId` can
+   * figure out who the expert was.
    */
   private async syncContractorChatOnRevoke(order: Order): Promise<void> {
     if (!order.contractorChatAccess) return;
     const expertUserId = this.resolveOrderExpertUserId(order);
     if (!expertUserId || expertUserId === order.userId) return;
-    const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
-      order.id, order.userId, expertUserId,
-    );
-    if (hasOtherGrant) return;
-    await this.chatService.removeExpertFromClientPlatformChat(
-      order.userId, expertUserId,
-    );
+    await this.withClientExpertLock(order.userId, expertUserId, async () => {
+      const hasOtherGrant = await this.hasOtherActiveContractorChatGrant(
+        order.id,
+        order.userId,
+        expertUserId,
+      );
+      if (hasOtherGrant) return;
+      await this.chatService.removeExpertFromClientPlatformChat(
+        order.userId,
+        expertUserId,
+      );
+    });
+  }
+
+  /**
+   * Serialize check-then-remove for a specific (client, expert) pair via
+   * a transaction-scoped Postgres advisory lock. Concurrent revoke paths
+   * that would otherwise race (two admins revoking the last two grants of
+   * the same pair simultaneously) queue up here and see each other's
+   * committed state before deciding whether to remove chat membership.
+   */
+  private async withClientExpertLock<T>(
+    clientUserId: string,
+    expertUserId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const lockKey = `contractor-chat:${clientUserId}:${expertUserId}`;
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+        [lockKey],
+      );
+      return fn();
+    });
   }
 
   /**
@@ -1124,7 +1166,10 @@ export class OrdersService {
     return null;
   }
 
-  async updateStatusForAdmin(id: string, dto: UpdateOrderStatusDto): Promise<Order> {
+  async updateStatusForAdmin(
+    id: string,
+    dto: UpdateOrderStatusDto,
+  ): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id },
       relations: ['item', 'item.service'],
@@ -1140,6 +1185,18 @@ export class OrdersService {
     }
 
     const previousStatus = order.status;
+    // Chat revoke MUST run BEFORE the status save so a chat-service failure
+    // aborts the whole transition. If we saved first and the revoke then
+    // threw, the order would be stuck as Cancelled forever with the expert
+    // still able to read the chat — a retry would see previousStatus =
+    // Cancelled and skip the sync.
+    if (
+      previousStatus !== OrderStatus.Cancelled &&
+      dto.status === OrderStatus.Cancelled
+    ) {
+      order.status = OrderStatus.Cancelled;
+      await this.syncContractorChatOnRevoke(order);
+    }
     order.status = dto.status;
     const savedOrder = await this.orderRepository.save(order);
     if (order.item?.serviceId) {
@@ -1151,15 +1208,6 @@ export class OrdersService {
         packageId: order.item.packageId,
       });
     }
-    // A manual status change to Cancelled otherwise leaves the expert with
-    // read/write access to the client's private platform-chat. Sync
-    // membership on the transition.
-    if (
-      previousStatus !== OrderStatus.Cancelled
-      && savedOrder.status === OrderStatus.Cancelled
-    ) {
-      await this.syncContractorChatOnRevoke(savedOrder);
-    }
     return savedOrder;
   }
 
@@ -1169,7 +1217,7 @@ export class OrdersService {
   ): Promise<OrderItem> {
     const item = await this.orderItemRepository.findOne({
       where: { id: itemId },
-      relations: ['order', 'subItems'],
+      relations: ['order', 'order.item', 'order.item.service', 'subItems'],
     });
     if (!item) {
       throw new NotFoundException(`Order item with id ${itemId} not found`);
@@ -1181,8 +1229,28 @@ export class OrdersService {
       );
     }
 
+    // For a simple (non-composite) order item is 1:1 with order — item.status
+    // and order.status must move together, otherwise cancelling the item via
+    // this endpoint leaves the parent order in its old status and the expert
+    // keeps chat membership.
+    const previousOrderStatus = item.order.status;
+    const orderJustCancelled =
+      previousOrderStatus !== OrderStatus.Cancelled &&
+      status === OrderStatus.Cancelled;
+
+    if (orderJustCancelled) {
+      // Revoke BEFORE persisting so a chat-service failure leaves the order
+      // and item untouched — see the same pattern in updateStatusForAdmin.
+      await this.syncContractorChatOnRevoke(item.order);
+    }
+
     item.status = status;
     const savedItem = await this.orderItemRepository.save(item);
+
+    if (orderJustCancelled) {
+      item.order.status = OrderStatus.Cancelled;
+      await this.orderRepository.save(item.order);
+    }
 
     if (savedItem.serviceId) {
       await this.syncRecommendationForOrder(savedItem.order, {
@@ -1259,8 +1327,8 @@ export class OrdersService {
       let parentJustCancelled = false;
       if (parentOrder && parentOrder.status !== recalculatedStatus) {
         parentJustCancelled =
-          parentOrder.status !== OrderStatus.Cancelled
-          && recalculatedStatus === OrderStatus.Cancelled;
+          parentOrder.status !== OrderStatus.Cancelled &&
+          recalculatedStatus === OrderStatus.Cancelled;
         parentOrder.status = recalculatedStatus;
         await orderRepo.save(parentOrder);
       }
@@ -1282,21 +1350,26 @@ export class OrdersService {
         }
       }
 
-      await queryRunner.commitTransaction();
-
-      // Chat-participant sync runs OUTSIDE the queryRunner tx: chatService
-      // uses the default connection, so touching it inside would either
-      // ignore the rollback or need EntityManager injection. Called only
-      // after commit succeeds so we never revoke on a rolled-back path.
+      // Chat revoke runs BEFORE commit so a chat-service failure rolls the
+      // whole transaction back and a retry re-computes parentJustCancelled.
+      // The chat call uses the default connection (not this queryRunner),
+      // so on a chat-side failure we throw → outer catch → rollback → order
+      // state stays untouched → next retry can try again. If chat succeeds
+      // but the commit right after fails, the expert is TEMPORARILY removed
+      // — the same retry will re-add via the normal grant path.
       if (parentJustCancelled) {
-        const orderForRevoke = await this.orderRepository.findOne({
-          where: { id: item.orderId },
-          relations: ['item', 'item.service'],
-        });
+        const orderForRevoke = await queryRunner.manager
+          .getRepository(Order)
+          .findOne({
+            where: { id: item.orderId },
+            relations: ['item', 'item.service'],
+          });
         if (orderForRevoke) {
           await this.syncContractorChatOnRevoke(orderForRevoke);
         }
       }
+
+      await queryRunner.commitTransaction();
 
       return { subItem, itemStatus: recalculatedStatus };
     } catch (error) {

@@ -6,13 +6,15 @@ import { ChatService } from './chat.service';
 import { ChatConversationType } from './entities/chat-conversation-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
 
-function makeUser(overrides: Partial<{
-  id: string;
-  role: UserRole;
-  name: string;
-  lastName: string;
-  email: string;
-}> = {}) {
+function makeUser(
+  overrides: Partial<{
+    id: string;
+    role: UserRole;
+    name: string;
+    lastName: string;
+    email: string;
+  }> = {},
+) {
   return {
     id: overrides.id ?? 'client-1',
     name: overrides.name ?? 'Client',
@@ -22,14 +24,16 @@ function makeUser(overrides: Partial<{
   };
 }
 
-function buildService(opts: {
-  existingConversation?: unknown;
-  existingParticipant?: unknown;
-  saveConversationThrows?: Error;
-  transactionThrows?: Error;
-  users?: Record<string, unknown>;
-  historyMessages?: unknown[];
-} = {}) {
+function buildService(
+  opts: {
+    existingConversation?: unknown;
+    existingParticipant?: unknown;
+    saveConversationThrows?: Error;
+    transactionThrows?: Error;
+    users?: Record<string, unknown>;
+    historyMessages?: unknown[];
+  } = {},
+) {
   const users = opts.users ?? { 'client-1': makeUser() };
   const conversationRepository = {
     findOne: jest.fn().mockResolvedValue(opts.existingConversation ?? null),
@@ -63,7 +67,9 @@ function buildService(opts: {
     save: jest.fn(async (entity) => entity),
   };
   const userRepository = {
-    findOne: jest.fn(async ({ where }: { where: { id: string } }) => users[where.id] ?? null),
+    findOne: jest.fn(
+      async ({ where }: { where: { id: string } }) => users[where.id] ?? null,
+    ),
   };
   const orderRepository = {
     findOne: jest.fn(),
@@ -80,19 +86,21 @@ function buildService(opts: {
     transaction: opts.transactionThrows
       ? jest.fn().mockRejectedValue(opts.transactionThrows)
       : jest.fn(async (fn) => {
-        const manager = {
-          getRepository: (entity: unknown) => {
-            const name =
-              (entity as { name?: string })?.name
-              ?? (entity as { constructor?: { name?: string } })?.constructor?.name;
-            if (name === 'ChatConversation') return conversationRepository;
-            if (name === 'ChatMessage') return messageRepository;
-            if (name === 'ChatConversationParticipant') return participantRepository;
-            return { create: jest.fn(), save: jest.fn() };
-          },
-        };
-        return fn(manager);
-      }),
+          const manager = {
+            getRepository: (entity: unknown) => {
+              const name =
+                (entity as { name?: string })?.name ??
+                (entity as { constructor?: { name?: string } })?.constructor
+                  ?.name;
+              if (name === 'ChatConversation') return conversationRepository;
+              if (name === 'ChatMessage') return messageRepository;
+              if (name === 'ChatConversationParticipant')
+                return participantRepository;
+              return { create: jest.fn(), save: jest.fn() };
+            },
+          };
+          return fn(manager);
+        }),
   };
 
   const service = new ChatService(
@@ -122,7 +130,9 @@ function buildService(opts: {
 describe('ChatService.openPlatformConversation', () => {
   it('rejects a non-USER role with 403', async () => {
     const { service } = buildService({
-      users: { 'expert-1': makeUser({ id: 'expert-1', role: UserRole.EXPERT }) },
+      users: {
+        'expert-1': makeUser({ id: 'expert-1', role: UserRole.EXPERT }),
+      },
     });
     await expect(service.openPlatformConversation('expert-1')).rejects.toThrow(
       ForbiddenException,
@@ -224,7 +234,8 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 
   it('rejects with 403 when user is not a member', async () => {
-    const { service, conversationRepository, participantRepository } = buildService();
+    const { service, conversationRepository, participantRepository } =
+      buildService();
     conversationRepository.findOne.mockResolvedValueOnce(makeConversation());
     participantRepository.findOne.mockResolvedValueOnce(null);
     await expect(
@@ -235,8 +246,13 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 
   it('client message triggers scheduleReply with the persisted message id', async () => {
-    const { service, conversationRepository, participantRepository, aiOrchestrator, messageRepository } =
-      buildService();
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      aiOrchestrator,
+      messageRepository,
+    } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(makeConversation());
     participantRepository.findOne.mockResolvedValueOnce({
       conversationId: 'conv-1',
@@ -273,8 +289,12 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 
   it('expert message does NOT trigger the AI orchestrator', async () => {
-    const { service, conversationRepository, participantRepository, aiOrchestrator } =
-      buildService();
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      aiOrchestrator,
+    } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(makeConversation());
     participantRepository.findOne.mockResolvedValueOnce({
       conversationId: 'conv-1',
@@ -344,11 +364,13 @@ describe('ChatService.removeExpertFromClientPlatformChat', () => {
       participantTwoId: 'client-1',
       orderId: null,
     };
-    const { service, participantRepository, conversationRepository } = buildService({
-      existingConversation: conversationRow,
-    });
-    (participantRepository as unknown as { delete: jest.Mock }).delete =
-      jest.fn().mockResolvedValue({ affected: 1 });
+    const { service, participantRepository, conversationRepository } =
+      buildService({
+        existingConversation: conversationRow,
+      });
+    (participantRepository as unknown as { delete: jest.Mock }).delete = jest
+      .fn()
+      .mockResolvedValue({ affected: 1 });
 
     await service.removeExpertFromClientPlatformChat('client-1', 'expert-99');
 

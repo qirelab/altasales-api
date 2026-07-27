@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class EnforcePlatformChatUniqueness1782910000000
-implements MigrationInterface
-{
+export class EnforcePlatformChatUniqueness1782910000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Guard against concurrent openPlatformConversation races. The existing
     // UQ_chat_conversation_participants_order constraint is not NULL-safe:
