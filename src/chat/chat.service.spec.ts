@@ -83,25 +83,28 @@ function buildService(
   };
   const aiOrchestrator = { scheduleReply: jest.fn() };
   const dataSource = {
-    transaction: opts.transactionThrows
-      ? jest.fn().mockRejectedValue(opts.transactionThrows)
-      : jest.fn(async (fn) => {
-        const manager = {
-          getRepository: (entity: unknown) => {
-            const name =
-                (entity as { name?: string })?.name ??
-                (entity as { constructor?: { name?: string } })?.constructor
-                  ?.name;
-            if (name === 'ChatConversation') return conversationRepository;
-            if (name === 'ChatMessage') return messageRepository;
-            if (name === 'ChatConversationParticipant')
-              return participantRepository;
-            return { create: jest.fn(), save: jest.fn() };
-          },
-        };
-        return fn(manager);
-      }),
+    transaction: makeTransaction(),
   };
+  function makeTransaction() {
+    if (opts.transactionThrows) {
+      return jest.fn().mockRejectedValue(opts.transactionThrows);
+    }
+    return jest.fn(async (fn) => {
+      const manager = {
+        getRepository: (entity: unknown) => {
+          const name =
+            (entity as { name?: string })?.name ??
+            (entity as { constructor?: { name?: string } })?.constructor?.name;
+          if (name === 'ChatConversation') return conversationRepository;
+          if (name === 'ChatMessage') return messageRepository;
+          if (name === 'ChatConversationParticipant')
+            return participantRepository;
+          return { create: jest.fn(), save: jest.fn() };
+        },
+      };
+      return fn(manager);
+    });
+  }
 
   const service = new ChatService(
     conversationRepository as never,

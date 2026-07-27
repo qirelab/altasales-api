@@ -102,6 +102,11 @@ export type ChatbotRagResponse = {
   refusalReason?: ChatbotRagRefusalReason;
 };
 
+export type ChatbotRagStreamEvent =
+  | { type: 'refusal'; response: ChatbotRagResponse }
+  | { type: 'delta'; content: string }
+  | { type: 'done'; response: ChatbotRagResponse };
+
 type RefusalMetrics = Record<string, number | undefined>;
 
 @Injectable()
@@ -262,6 +267,193 @@ export class ChatbotRagService {
         chunkIndex: entry.chunkIndex,
         score: entry.score,
       })),
+    };
+  }
+
+  /**
+   * Streaming counterpart of `askQuestion`. Retrieval and refusal logic stay
+   * identical — the only difference is the LLM call routes through
+   * `llmProxy.chatStream`, so callers see the answer accumulate delta by delta.
+   *
+   * Emits exactly one of:
+   * - `refusal` if any of the pre-LLM guards fires (empty question, no context,
+   *   context too large). The response mirrors the non-streaming refusal.
+   * - a series of `delta` events followed by a single `done` event carrying
+   *   the assembled answer and sources.
+   *
+   * `generation_failed` / `empty_llm_response` refusals produced by the LLM
+   * itself surface as a terminal `refusal` event too — no partial deltas are
+   * emitted in that case.
+   */
+  async *askQuestionStream(
+    input: ChatbotRagInput,
+  ): AsyncGenerator<ChatbotRagStreamEvent, void, void> {
+    const startedAt = Date.now();
+    const question = input.question.trim().slice(0, MAX_QUESTION_CHARS);
+    if (!question) {
+      yield {
+        type: 'refusal',
+        response: this.buildRefusal('empty_question', startedAt, {
+          retrievalMs: 0,
+          totalResults: 0,
+        }),
+      };
+      return;
+    }
+
+    const context = this.conversationalContext.build(input.history ?? []);
+    const rewriteStartedAt = Date.now();
+    const searchQuery = await this.queryRewriter.rewrite(question, context.historyMessages);
+    const rewriteMs = Date.now() - rewriteStartedAt;
+    const queryRewritten = searchQuery !== question ? 1 : 0;
+
+    const retrievalStartedAt = Date.now();
+    let results: KnowledgeSearchResultItem[];
+    try {
+      const searchResponse = await this.knowledgeSearch.search({
+        purpose: KnowledgeBasePurpose.QA_CHATBOT,
+        query: searchQuery,
+        limit: this.retrievalLimit,
+      });
+      results = searchResponse.results;
+    } catch (error) {
+      this.logger.error(
+        `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
+      );
+      yield {
+        type: 'refusal',
+        response: this.buildRefusal('retrieval_failed', startedAt, {
+          retrievalMs: Date.now() - retrievalStartedAt,
+          totalResults: 0,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        }),
+      };
+      return;
+    }
+    const retrievalMs = Date.now() - retrievalStartedAt;
+
+    const strongResults = results.filter((entry) => entry.score >= this.minRelevanceScore);
+    if (strongResults.length === 0) {
+      yield {
+        type: 'refusal',
+        response: this.buildRefusal(
+          results.length === 0 ? 'no_results' : 'below_threshold',
+          startedAt,
+          {
+            retrievalMs,
+            totalResults: results.length,
+            topScore: results[0]?.score,
+            rewriteMs,
+            queryRewritten,
+            usedHistoryCount: context.usedHistoryCount,
+          },
+        ),
+      };
+      return;
+    }
+
+    const contextResults = this.trimToBudget(strongResults, question);
+    if (contextResults.length === 0) {
+      yield {
+        type: 'refusal',
+        response: this.buildRefusal('context_too_large', startedAt, {
+          retrievalMs,
+          totalResults: results.length,
+          topScore: strongResults[0]?.score,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        }),
+      };
+      return;
+    }
+    const userContent = this.buildAugmentedPrompt(question, contextResults);
+
+    const generationStartedAt = Date.now();
+    let accumulated = '';
+    try {
+      const stream = this.llmProxy.chatStream({
+        agentId: AgentId.Chatbot,
+        task: LlmTask.Reason,
+        declaredDataClass: DataClass.NoPii,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...context.historyMessages,
+          { role: 'user', content: userContent },
+        ],
+      });
+      for await (const event of stream) {
+        if (event.type === 'delta') {
+          accumulated += event.content;
+          yield { type: 'delta', content: event.content };
+          continue;
+        }
+        // done — accumulated already holds the full content
+      }
+    } catch (error) {
+      this.logger.error(
+        `LLM streaming failed: ${(error as Error)?.message ?? String(error)}`,
+      );
+      yield {
+        type: 'refusal',
+        response: this.buildRefusal('generation_failed', startedAt, {
+          retrievalMs,
+          totalResults: results.length,
+          topScore: results[0]?.score,
+          contextChunks: contextResults.length,
+          generationMs: Date.now() - generationStartedAt,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        }),
+      };
+      return;
+    }
+    const generationMs = Date.now() - generationStartedAt;
+
+    const answer = accumulated.trim();
+    if (!answer) {
+      yield {
+        type: 'refusal',
+        response: this.buildRefusal('empty_llm_response', startedAt, {
+          retrievalMs,
+          totalResults: results.length,
+          contextChunks: contextResults.length,
+          generationMs,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        }),
+      };
+      return;
+    }
+
+    this.logSuccess({
+      totalMs: Date.now() - startedAt,
+      retrievalMs,
+      generationMs,
+      totalResults: results.length,
+      contextChunks: contextResults.length,
+      topScore: contextResults[0]?.score,
+      rewriteMs,
+      queryRewritten,
+      usedHistoryCount: context.usedHistoryCount,
+    });
+
+    yield {
+      type: 'done',
+      response: {
+        answer,
+        hasContext: true,
+        sources: contextResults.map((entry) => ({
+          documentId: entry.documentId,
+          documentTitle: entry.document.title,
+          chunkIndex: entry.chunkIndex,
+          score: entry.score,
+        })),
+      },
     };
   }
 
