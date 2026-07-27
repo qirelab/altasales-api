@@ -204,6 +204,73 @@ describe('OpenAICompatibleChatProviderAdapter', () => {
     expect((caught as AiError).code).toBe('AI_PROVIDER_UNAVAILABLE');
   });
 
+  it('streamChat skips malformed frames but keeps yielding valid ones', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse([
+        'data: not-json-oops\n\n',
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    );
+
+    const events: unknown[] = [];
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      events.push(event);
+    }
+
+    // The malformed frame is silently skipped; the valid one still lands.
+    expect(
+      events.filter((e) => (e as { type: string }).type === 'delta'),
+    ).toEqual([{ type: 'delta', content: 'ok' }]);
+  });
+
+  it('streamChat parses SSE frames delimited with CRLF (proxy-normalised)', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"a"}}]}\r\n\r\n',
+        'data: {"choices":[{"delta":{"content":"b"}}]}\r\n\r\n',
+        'data: [DONE]\r\n\r\n',
+      ]),
+    );
+
+    const deltas: string[] = [];
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      if (event.type === 'delta') deltas.push(event.content);
+    }
+
+    expect(deltas).toEqual(['a', 'b']);
+  });
+
+  it('streamChat cancels the upstream body reader on early exit', async () => {
+    const cancelSpy = jest.fn().mockResolvedValue(undefined);
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse(
+        [
+          'data: {"choices":[{"delta":{"content":"first"}}]}\n\n',
+          // Provider keeps generating — we break out before receiving [DONE].
+          'data: {"choices":[{"delta":{"content":"second"}}]}\n\n',
+        ],
+        cancelSpy,
+      ),
+    );
+
+    let count = 0;
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      if (event.type === 'delta') {
+        count += 1;
+        if (count === 1) break;
+      }
+    }
+
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
   it('streamChat surfaces safe HTTP errors from the upstream', async () => {
     fetchSpy.mockResolvedValueOnce(errorResponse(429));
 
@@ -238,7 +305,7 @@ describe('OpenAICompatibleChatProviderAdapter', () => {
     } as unknown as Response;
   }
 
-  function sseResponse(frames: string[]): Response {
+  function sseResponse(frames: string[], onCancel?: jest.Mock): Response {
     const encoder = new TextEncoder();
     const chunks = frames.map((frame) => encoder.encode(frame));
     let cursor = 0;
@@ -251,6 +318,7 @@ describe('OpenAICompatibleChatProviderAdapter', () => {
         controller.enqueue(chunks[cursor]);
         cursor += 1;
       },
+      cancel: onCancel,
     });
     return {
       ok: true,

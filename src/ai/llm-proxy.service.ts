@@ -1041,6 +1041,7 @@ export class LlmProxyService {
    */
   async *chatStream(
     request: LlmChatRequest,
+    signal?: AbortSignal,
   ): AsyncGenerator<LlmChatStreamEvent, void, void> {
     const flowStartedAt = Date.now();
     let currentStage = AiMonitoringStage.Validation;
@@ -1099,17 +1100,24 @@ export class LlmProxyService {
         latencyMs: 0,
       };
       let sawContent = false;
+      // The PII scanner must catch a pattern that straddles two deltas but
+      // it does not need to rescan the entire response on every chunk. Keep
+      // a sliding window equal to the longest recognised placeholder plus
+      // the new delta so worst-case work stays O(window) per event.
+      const piiWindowSize = 64;
+      let piiScanCursor = 0;
 
-      const stream = provider.streamChat(providerMessages);
+      const stream = provider.streamChat(providerMessages, { signal });
       for await (const event of stream as AsyncIterable<LlmProviderStreamEvent>) {
         if (event.type === 'delta') {
           if (!event.content) continue;
           accumulated += event.content;
-          // Guard PII on the accumulated buffer, not just this delta —
-          // placeholders can straddle chunk boundaries. If a match appears we
-          // stop the stream immediately with a policy error rather than
-          // continuing to leak the tail.
-          this.assertProviderResponsePolicy(accumulated, anonymizationMode);
+          const scanFrom = Math.max(0, piiScanCursor - piiWindowSize);
+          this.assertProviderResponsePolicy(
+            accumulated.slice(scanFrom),
+            anonymizationMode,
+          );
+          piiScanCursor = accumulated.length;
           sawContent = true;
           yield { type: 'delta', content: event.content };
           continue;

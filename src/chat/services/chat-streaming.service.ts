@@ -28,6 +28,12 @@ export type StreamPlatformMessageHooks = {
   onError: (_reason: string) => void;
 };
 
+export type ValidatedStreamContext = {
+  conversation: ChatConversation;
+  userId: string;
+  text: string;
+};
+
 /**
  * Streaming counterpart of `ChatService.sendPlatformMessage`.
  *
@@ -55,12 +61,19 @@ export class ChatStreamingService {
     private readonly aiOrchestrator: AiChatOrchestratorService,
   ) {}
 
-  async streamPlatformMessage(
+  /**
+   * Pre-flight validation. Runs the same guards as `sendPlatformMessage` and
+   * throws NotFound / Forbidden / BadRequest so Nest can serialise them as
+   * real HTTP responses BEFORE the caller flushes SSE headers. Once the SSE
+   * body has started, any error there has to be reported as `event: error`
+   * with HTTP 200 — which prevents the client from telling permission
+   * problems from generation failures at the network layer.
+   */
+  async validate(
     userId: string,
     conversationId: string,
     dto: SendPlatformMessageDto,
-    hooks: StreamPlatformMessageHooks,
-  ): Promise<void> {
+  ): Promise<ValidatedStreamContext> {
     const conversation = await this.conversationRepository.findOne({
       where: { id: conversationId },
     });
@@ -89,38 +102,71 @@ export class ChatStreamingService {
       );
     }
 
-    const clientMessage = this.messageRepository.create({
-      conversationId: conversation.id,
-      senderId: userId,
-      text: dto.text,
-    });
-    const savedClientMessage = await this.messageRepository.save(clientMessage);
+    return { conversation, userId, text: dto.text };
+  }
 
-    const now = new Date();
-    await this.conversationRepository.update(conversation.id, {
-      updatedAt: now,
-    });
+  /**
+   * Runs after `validate` succeeded. Persists the client message, broadcasts
+   * it, and delegates the AI reply to the orchestrator. The optional
+   * `signal` is threaded down to `provider.streamChat` so a client disconnect
+   * (or a mid-stream policy violation) cancels the upstream LLM request
+   * instead of letting it keep burning tokens.
+   *
+   * Never throws — all errors travel through `hooks.onError`.
+   */
+  async runStream(
+    context: ValidatedStreamContext,
+    hooks: StreamPlatformMessageHooks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const { conversation, userId, text } = context;
+    let savedClientMessage: ChatMessage;
+    try {
+      const clientMessage = this.messageRepository.create({
+        conversationId: conversation.id,
+        senderId: userId,
+        text,
+      });
+      savedClientMessage = await this.messageRepository.save(clientMessage);
 
-    const otherParticipants = await this.resolveOtherParticipantIds(
-      conversation,
-      userId,
-    );
-    const clientMessagePayload = {
-      message: { ...savedClientMessage, files: [] },
-      conversation: { id: conversation.id, updatedAt: now },
-    };
-    // Broadcast the client's message to every other participant AND to a
-    // duplicate socket the same user might have open elsewhere. The active
-    // SSE connection gets its own inline event via onClientMessage.
-    this.wsGateway.emitToUser(userId, 'chat:new_message', clientMessagePayload);
-    for (const recipientId of otherParticipants) {
+      const now = new Date();
+      await this.conversationRepository.update(conversation.id, {
+        updatedAt: now,
+      });
+
+      const otherParticipants = await this.resolveOtherParticipantIds(
+        conversation,
+        userId,
+      );
+      const clientMessagePayload = {
+        message: { ...savedClientMessage, files: [] },
+        conversation: { id: conversation.id, updatedAt: now },
+      };
+      // Broadcast the client's message to every other participant AND to a
+      // duplicate socket the same user might have open elsewhere. The active
+      // SSE connection gets its own inline event via onClientMessage.
       this.wsGateway.emitToUser(
-        recipientId,
+        userId,
         'chat:new_message',
         clientMessagePayload,
       );
+      for (const recipientId of otherParticipants) {
+        this.wsGateway.emitToUser(
+          recipientId,
+          'chat:new_message',
+          clientMessagePayload,
+        );
+      }
+      hooks.onClientMessage(savedClientMessage);
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist streaming client message for conversation ${conversation.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      hooks.onError('client_message_persist_failed');
+      return;
     }
-    hooks.onClientMessage(savedClientMessage);
 
     const orchestratorHooks: StreamReplyHooks = {
       onDelta: hooks.onDelta,
@@ -139,9 +185,10 @@ export class ChatStreamingService {
         conversation,
         clientUserId: userId,
         clientMessageId: savedClientMessage.id,
-        question: dto.text,
+        question: text,
       },
       orchestratorHooks,
+      signal,
     );
   }
 

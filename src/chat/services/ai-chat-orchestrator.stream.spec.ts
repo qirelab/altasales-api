@@ -40,7 +40,7 @@ function buildOrchestrator(
       .mockResolvedValue(
         opts.currentMessage === null
           ? null
-          : opts.currentMessage ?? makeMessage({ id: 'client-msg-1' }),
+          : (opts.currentMessage ?? makeMessage({ id: 'client-msg-1' })),
       ),
     createQueryBuilder: jest.fn().mockReturnValue(qb),
     create: jest.fn((entity) => ({ ...entity, id: 'ai-msg-1' })),
@@ -50,38 +50,30 @@ function buildOrchestrator(
     update: jest.fn().mockResolvedValue(undefined),
   };
   const participantRepository = {
-    find: jest.fn().mockResolvedValue(
-      opts.participants ?? [
-        { userId: 'client-1' },
-        { userId: 'expert-1' },
-        { userId: AI_SYSTEM_USER_ID },
-      ],
-    ),
+    find: jest
+      .fn()
+      .mockResolvedValue(
+        opts.participants ?? [
+          { userId: 'client-1' },
+          { userId: 'expert-1' },
+          { userId: AI_SYSTEM_USER_ID },
+        ],
+      ),
   };
+  const defaultRagEvents = [
+    { type: 'delta', content: 'Пр' },
+    { type: 'delta', content: 'ивет' },
+    {
+      type: 'done',
+      response: { answer: 'Привет', hasContext: true, sources: [] },
+    },
+  ];
+  const askQuestionStream = opts.ragThrows
+    ? makeThrowingRagStream(opts.ragThrows)
+    : makeYieldingRagStream(opts.ragEvents ?? defaultRagEvents);
   const ragService = {
     askQuestion: jest.fn(),
-    askQuestionStream: opts.ragThrows
-      ? jest.fn(() => {
-        throw opts.ragThrows as Error;
-      })
-      : jest.fn(() =>
-        (async function *() {
-          for (const event of opts.ragEvents ?? [
-            { type: 'delta', content: 'Пр' },
-            { type: 'delta', content: 'ивет' },
-            {
-              type: 'done',
-              response: {
-                answer: 'Привет',
-                hasContext: true,
-                sources: [],
-              },
-            },
-          ]) {
-            yield event;
-          }
-        })(),
-      ),
+    askQuestionStream,
   };
   const wsGateway = {
     emitToUser: jest.fn(),
@@ -104,6 +96,20 @@ function buildOrchestrator(
   };
 }
 
+function makeThrowingRagStream(error: Error) {
+  return jest.fn(() => {
+    throw error;
+  });
+}
+
+function makeYieldingRagStream(events: unknown[]) {
+  return jest.fn(() =>
+    (async function* () {
+      for (const event of events) yield event;
+    })(),
+  );
+}
+
 const conversation = {
   id: 'conv-1',
   type: ChatConversationType.Platform,
@@ -111,18 +117,28 @@ const conversation = {
   participantTwoId: AI_SYSTEM_USER_ID,
 } as never;
 
+type HookCalls = {
+  deltas: string[];
+  done: string[];
+  refusal: string[];
+  error: string[];
+};
+
 describe('AiChatOrchestratorService.streamReply', () => {
-  function makeHooks(): {
-    hooks: StreamReplyHooks;
-    calls: { deltas: string[]; done: string[]; refusal: string[]; error: string[] };
-    } {
-    const calls = { deltas: [] as string[], done: [] as string[], refusal: [] as string[], error: [] as string[] };
+  function makeHooks(): { hooks: StreamReplyHooks; calls: HookCalls } {
+    const calls = {
+      deltas: [] as string[],
+      done: [] as string[],
+      refusal: [] as string[],
+      error: [] as string[],
+    };
     return {
       calls,
       hooks: {
         onDelta: (content) => calls.deltas.push(content),
         onDone: (message) => calls.done.push(message.id),
-        onRefusal: (message, reason) => calls.refusal.push(`${message.id}:${reason}`),
+        onRefusal: (message, reason) =>
+          calls.refusal.push(`${message.id}:${reason}`),
         onError: (reason) => calls.error.push(reason),
       },
     };

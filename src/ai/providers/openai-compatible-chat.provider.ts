@@ -142,16 +142,19 @@ export class OpenAICompatibleChatProviderAdapter implements LlmProviderAdapter {
     const decoder = new TextDecoder();
     const reader = body.getReader();
     let buffer = '';
+    // Reverse proxies (nginx, Cloudflare) sometimes normalise CRLF, so match
+    // both `\n\n` and `\r\n\r\n` as SSE frame separators.
+    const separatorRegex = /\r?\n\r?\n/;
     try {
-
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        let separatorIndex = buffer.indexOf('\n\n');
-        while (separatorIndex !== -1) {
+        let match = buffer.match(separatorRegex);
+        while (match) {
+          const separatorIndex = match.index ?? 0;
           const frame = buffer.slice(0, separatorIndex);
-          buffer = buffer.slice(separatorIndex + 2);
+          buffer = buffer.slice(separatorIndex + match[0].length);
           const parsed = this.parseFrame(frame);
           if (parsed === 'DONE') {
             // Upstream sent the terminal marker; stop reading further.
@@ -164,19 +167,29 @@ export class OpenAICompatibleChatProviderAdapter implements LlmProviderAdapter {
               anyContent = true;
               yield { type: 'delta', content };
             }
-            tokensIn = this.safeNumber(parsed.usage?.prompt_tokens) || tokensIn;
-            tokensOut =
-              this.safeNumber(parsed.usage?.completion_tokens) || tokensOut;
+            const parsedIn = this.safeNumber(parsed.usage?.prompt_tokens);
+            const parsedOut = this.safeNumber(parsed.usage?.completion_tokens);
+            if (parsed.usage?.prompt_tokens !== undefined) tokensIn = parsedIn;
+            if (parsed.usage?.completion_tokens !== undefined)
+              tokensOut = parsedOut;
           }
-          separatorIndex = buffer.indexOf('\n\n');
+          match = buffer.match(separatorRegex);
         }
       }
     } finally {
-      // Free the underlying stream even if the consumer aborts mid-loop.
+      // Actively cancel the upstream body so the provider closes the
+      // connection immediately on client disconnect / mid-stream error.
+      // Without this the browser abort would just release the lock while
+      // the underlying fetch keeps draining tokens.
+      try {
+        await reader.cancel();
+      } catch {
+        // Ignore — the reader may already be closed.
+      }
       try {
         reader.releaseLock();
       } catch {
-        // Ignore release errors — the reader may already be closed.
+        // Ignore release errors — already released above.
       }
     }
 
@@ -195,7 +208,9 @@ export class OpenAICompatibleChatProviderAdapter implements LlmProviderAdapter {
     };
   }
 
-  private parseFrame(frame: string): OpenAICompatibleStreamChunk | 'DONE' | undefined {
+  private parseFrame(
+    frame: string,
+  ): OpenAICompatibleStreamChunk | 'DONE' | undefined {
     // SSE frame contains `data: <payload>` lines (plus optional event/id/retry).
     // We only care about the joined data payload.
     const dataLines: string[] = [];

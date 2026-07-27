@@ -171,6 +171,7 @@ export class AiChatOrchestratorService {
   async streamReply(
     input: RespondInput,
     hooks: StreamReplyHooks,
+    signal?: AbortSignal,
   ): Promise<void> {
     const startedAt = Date.now();
 
@@ -205,10 +206,13 @@ export class AiChatOrchestratorService {
     } | null = null;
 
     try {
-      const stream = this.ragService.askQuestionStream({
-        question: input.question,
-        history,
-      });
+      const stream = this.ragService.askQuestionStream(
+        {
+          question: input.question,
+          history,
+        },
+        signal,
+      );
       for await (const event of stream) {
         if (event.type === 'delta') {
           accumulated += event.content;
@@ -231,7 +235,7 @@ export class AiChatOrchestratorService {
         }`,
         error instanceof Error ? error.stack : undefined,
       );
-      hooks.onError('stream_failed');
+      hooks.onError(signal?.aborted ? 'client_disconnected' : 'stream_failed');
       return;
     }
 
@@ -244,33 +248,47 @@ export class AiChatOrchestratorService {
       return;
     }
 
-    const answerMessage = this.messageRepository.create({
-      conversationId: input.conversation.id,
-      senderId: AI_SYSTEM_USER_ID,
-      text: answerText,
-      isAiGenerated: true,
-    });
-    const savedAnswer = await this.messageRepository.save(answerMessage);
+    // Persist the AI message + broadcast to other participants. If the
+    // conversation was deleted mid-stream (FK cascade), we surface a
+    // conversation_gone error to the caller rather than a generic crash.
+    let savedAnswer: ChatMessage;
+    try {
+      const answerMessage = this.messageRepository.create({
+        conversationId: input.conversation.id,
+        senderId: AI_SYSTEM_USER_ID,
+        text: answerText,
+        isAiGenerated: true,
+      });
+      savedAnswer = await this.messageRepository.save(answerMessage);
 
-    const now = new Date();
-    await this.conversationRepository.update(input.conversation.id, {
-      updatedAt: now,
-    });
-
-    const recipientIds = await this.resolveRecipientIds(input.conversation);
-    const payload = {
-      message: { ...savedAnswer, files: [] },
-      conversation: {
-        id: input.conversation.id,
+      const now = new Date();
+      await this.conversationRepository.update(input.conversation.id, {
         updatedAt: now,
-      },
-    };
-    for (const recipientId of recipientIds) {
-      // The streaming client saw the answer via SSE; skip echoing it back on
-      // WS or the UI will render duplicates. Other participants (experts,
-      // operators) still receive the standard chat:new_message event.
-      if (recipientId === input.clientUserId) continue;
-      this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+      });
+
+      const recipientIds = await this.resolveRecipientIds(input.conversation);
+      const payload = {
+        message: { ...savedAnswer, files: [] },
+        conversation: {
+          id: input.conversation.id,
+          updatedAt: now,
+        },
+      };
+      for (const recipientId of recipientIds) {
+        // The streaming client saw the answer via SSE; skip echoing it back
+        // on WS or the UI will render duplicates. Other participants
+        // (experts, operators) still receive the standard chat:new_message.
+        if (recipientId === input.clientUserId) continue;
+        this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist AI answer for conversation ${input.conversation.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      hooks.onError('conversation_gone');
+      return;
     }
 
     if (terminalResponse?.refusalReason) {

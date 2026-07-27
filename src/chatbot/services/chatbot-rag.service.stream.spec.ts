@@ -32,7 +32,7 @@ function buildResultItem(
   };
 }
 
-async function *streamOf(chunks: string[]) {
+async function* streamOf(chunks: string[]) {
   for (const content of chunks) {
     yield { type: 'delta' as const, content };
   }
@@ -48,22 +48,23 @@ async function *streamOf(chunks: string[]) {
   };
 }
 
-function buildService(overrides: {
-  searchResults?: ReturnType<typeof buildResultItem>[];
-  streamChunks?: string[];
-  streamError?: Error;
-} = {}) {
+function buildService(
+  overrides: {
+    searchResults?: ReturnType<typeof buildResultItem>[];
+    streamChunks?: string[];
+    streamError?: Error;
+  } = {},
+) {
   const knowledgeSearch = {
     search: jest.fn().mockResolvedValue({
       results: overrides.searchResults ?? [buildResultItem()],
     }),
   };
+  const chatStream = overrides.streamError
+    ? makeThrowingStream(overrides.streamError)
+    : makeChunkedStream(overrides.streamChunks ?? ['Готовый ', 'ответ.']);
   const llmProxy = {
-    chatStream: overrides.streamError
-      ? jest.fn(() => {
-        throw overrides.streamError as Error;
-      })
-      : jest.fn(() => streamOf(overrides.streamChunks ?? ['Готовый ', 'ответ.'])),
+    chatStream,
     chat: jest.fn(),
   };
   const conversationalContext = {
@@ -83,6 +84,16 @@ function buildService(overrides: {
     undefined,
   );
   return { service, knowledgeSearch, llmProxy };
+}
+
+function makeThrowingStream(error: Error) {
+  return jest.fn(() => {
+    throw error;
+  });
+}
+
+function makeChunkedStream(chunks: string[]) {
+  return jest.fn(() => streamOf(chunks));
 }
 
 async function collect(
@@ -123,7 +134,9 @@ describe('ChatbotRagService.askQuestionStream', () => {
   it('yields a single refusal event when the question is empty', async () => {
     const { service } = buildService();
 
-    const events = await collect(service.askQuestionStream({ question: '   ' }));
+    const events = await collect(
+      service.askQuestionStream({ question: '   ' }),
+    );
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({

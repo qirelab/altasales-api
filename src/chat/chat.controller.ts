@@ -3,18 +3,18 @@ import {
   Controller,
   Get,
   HttpCode,
-  HttpException,
   HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { SessionGuard } from '../auth/guards/session.guard';
 import {
   CurrentUser,
@@ -122,8 +122,16 @@ export class ChatController {
     @CurrentUser() user: CurrentUserData,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SendPlatformMessageDto,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    // Validate BEFORE flushing SSE headers. Once the SSE body has started
+    // Nest can no longer produce a real 404/403/400 response, so any auth
+    // failure here has to come out as HTTP 200 + `event: error`, which the
+    // client cannot distinguish from generation failures via HTTP status.
+    // Nest serialises any exception thrown here as a normal error response.
+    const context = await this.chatStreamingService.validate(user.id, id, dto);
+
     res.status(HttpStatus.OK);
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -131,63 +139,47 @@ export class ChatController {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
+    // Cancel the upstream LLM request when the client disconnects — without
+    // this the fetch keeps draining tokens from the provider even though no
+    // one is reading the deltas.
+    const abortController = new AbortController();
+    const abort = () => abortController.abort();
+    req.on('close', abort);
+    req.on('aborted', abort);
+
     const writeEvent = (payload: Record<string, unknown>, event?: string) => {
       if (res.writableEnded) return;
       if (event) res.write(`event: ${event}\n`);
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
 
-    let hasSentTerminal = false;
-    const markTerminal = () => {
-      hasSentTerminal = true;
-    };
-
     try {
-      await this.chatStreamingService.streamPlatformMessage(user.id, id, dto, {
-        onClientMessage: () => {
-          // No client-facing event — the SSE stream carries only the AI reply.
-          // The persisted client message is delivered to the sender's other
-          // sockets (if any) via the standard `chat:new_message` WS event.
+      await this.chatStreamingService.runStream(
+        context,
+        {
+          onClientMessage: () => {
+            // No client-facing event — the SSE stream carries only the AI
+            // reply. The persisted client message is delivered to the
+            // sender's other sockets (if any) via the standard
+            // `chat:new_message` WS event.
+          },
+          onDelta: (content) => writeEvent({ delta: content }),
+          onDone: (aiMessage) =>
+            writeEvent({ done: true, messageId: aiMessage.id }),
+          onRefusal: (aiMessage, reason) =>
+            writeEvent({
+              refusal: true,
+              messageId: aiMessage.id,
+              reason,
+            }),
+          onError: (reason) => writeEvent({ reason }, 'error'),
         },
-        onDelta: (content) => writeEvent({ delta: content }),
-        onDone: (aiMessage) => {
-          markTerminal();
-          writeEvent({ done: true, messageId: aiMessage.id });
-        },
-        onRefusal: (aiMessage, reason) => {
-          markTerminal();
-          writeEvent({
-            refusal: true,
-            messageId: aiMessage.id,
-            reason,
-          });
-        },
-        onError: (reason) => {
-          markTerminal();
-          writeEvent({ reason }, 'error');
-        },
-      });
-    } catch (error) {
-      if (!hasSentTerminal) {
-        const reason =
-          error instanceof HttpException
-            ? this.pickReason(error)
-            : 'stream_failed';
-        writeEvent({ reason }, 'error');
-      }
+        abortController.signal,
+      );
     } finally {
+      req.off('close', abort);
+      req.off('aborted', abort);
       if (!res.writableEnded) res.end();
     }
-  }
-
-  private pickReason(error: HttpException): string {
-    // Map known guard rejections to stable machine-readable strings so the
-    // frontend can distinguish permission errors from generation failures
-    // without depending on translated messages.
-    const status = error.getStatus();
-    if (status === HttpStatus.NOT_FOUND) return 'conversation_not_found';
-    if (status === HttpStatus.FORBIDDEN) return 'not_a_participant';
-    if (status === HttpStatus.BAD_REQUEST) return 'bad_request';
-    return 'stream_failed';
   }
 }

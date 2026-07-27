@@ -136,7 +136,10 @@ describe('LlmProxyService.chatStream', () => {
       asyncIterable<LlmProviderStreamEvent>([
         { type: 'delta', content: 'Пришлите на почту test' },
         { type: 'delta', content: '@example.com пожалуйста' },
-        { type: 'done', usage: { tokensIn: 1, tokensOut: 1, costRub: 0, latencyMs: 1 } },
+        {
+          type: 'done',
+          usage: { tokensIn: 1, tokensOut: 1, costRub: 0, latencyMs: 1 },
+        },
       ]),
     );
 
@@ -151,20 +154,20 @@ describe('LlmProxyService.chatStream', () => {
     }
     expect(caught).toBeDefined();
     // At most the first (PII-clean) delta reached the caller.
-    expect(emitted.filter((event) => event.type === 'delta').length).toBeLessThanOrEqual(1);
+    expect(
+      emitted.filter((event) => event.type === 'delta').length,
+    ).toBeLessThanOrEqual(1);
   });
 });
 
-async function *asyncIterable<T>(items: T[]): AsyncGenerator<T> {
+async function* asyncIterable<T>(items: T[]): AsyncGenerator<T> {
   for (const item of items) {
     yield item;
   }
 }
 
 function snapshotEnv(): Record<string, string | undefined> {
-  const keys = Object.keys(process.env).filter((key) =>
-    key.startsWith('LLM_'),
-  );
+  const keys = Object.keys(process.env).filter((key) => key.startsWith('LLM_'));
   const snapshot: Record<string, string | undefined> = {};
   for (const key of keys) snapshot[key] = process.env[key];
   return snapshot;

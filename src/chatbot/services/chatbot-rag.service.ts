@@ -88,12 +88,13 @@ export type ChatbotRagRefusalReason =
   | 'generation_failed'
   | 'context_too_large';
 
-const INFRA_REFUSAL_REASONS: ReadonlySet<ChatbotRagRefusalReason> = new Set<ChatbotRagRefusalReason>([
-  'retrieval_failed',
-  'generation_failed',
-  'empty_llm_response',
-  'context_too_large',
-]);
+const INFRA_REFUSAL_REASONS: ReadonlySet<ChatbotRagRefusalReason> =
+  new Set<ChatbotRagRefusalReason>([
+    'retrieval_failed',
+    'generation_failed',
+    'empty_llm_response',
+    'context_too_large',
+  ]);
 
 export type ChatbotRagResponse = {
   answer: string;
@@ -125,18 +126,33 @@ export class ChatbotRagService {
     @Optional()
     private readonly configService?: ConfigService,
   ) {
-    this.retrievalLimit = this.readPositiveInt('CHATBOT_RAG_RETRIEVAL_LIMIT', DEFAULT_RETRIEVAL_LIMIT);
+    this.retrievalLimit = this.readPositiveInt(
+      'CHATBOT_RAG_RETRIEVAL_LIMIT',
+      DEFAULT_RETRIEVAL_LIMIT,
+    );
     // MIN_SCORE=0 explicitly disables the threshold; any negative value falls back to the default.
-    this.minRelevanceScore = this.readNonNegativeFloat('CHATBOT_RAG_MIN_SCORE', DEFAULT_MIN_RELEVANCE_SCORE);
-    this.cacheTtlMs = this.readPositiveInt('CHATBOT_RAG_CACHE_TTL_MS', DEFAULT_CACHE_TTL_MS);
-    this.maxContextChars = this.readPositiveInt('CHATBOT_RAG_MAX_CONTEXT_CHARS', DEFAULT_MAX_CONTEXT_CHARS);
+    this.minRelevanceScore = this.readNonNegativeFloat(
+      'CHATBOT_RAG_MIN_SCORE',
+      DEFAULT_MIN_RELEVANCE_SCORE,
+    );
+    this.cacheTtlMs = this.readPositiveInt(
+      'CHATBOT_RAG_CACHE_TTL_MS',
+      DEFAULT_CACHE_TTL_MS,
+    );
+    this.maxContextChars = this.readPositiveInt(
+      'CHATBOT_RAG_MAX_CONTEXT_CHARS',
+      DEFAULT_MAX_CONTEXT_CHARS,
+    );
   }
 
   async askQuestion(input: ChatbotRagInput): Promise<ChatbotRagResponse> {
     const startedAt = Date.now();
     const question = input.question.trim().slice(0, MAX_QUESTION_CHARS);
     if (!question) {
-      return this.buildRefusal('empty_question', startedAt, { retrievalMs: 0, totalResults: 0 });
+      return this.buildRefusal('empty_question', startedAt, {
+        retrievalMs: 0,
+        totalResults: 0,
+      });
     }
 
     // Memory pipeline: slice history → rewrite follow-up query → retrieve → LLM.
@@ -144,7 +160,10 @@ export class ChatbotRagService {
     // vector retrieval matches the right chunks even for terse follow-ups.
     const context = this.conversationalContext.build(input.history ?? []);
     const rewriteStartedAt = Date.now();
-    const searchQuery = await this.queryRewriter.rewrite(question, context.historyMessages);
+    const searchQuery = await this.queryRewriter.rewrite(
+      question,
+      context.historyMessages,
+    );
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
@@ -171,7 +190,9 @@ export class ChatbotRagService {
     }
     const retrievalMs = Date.now() - retrievalStartedAt;
 
-    const strongResults = results.filter((entry) => entry.score >= this.minRelevanceScore);
+    const strongResults = results.filter(
+      (entry) => entry.score >= this.minRelevanceScore,
+    );
     if (strongResults.length === 0) {
       return this.buildRefusal(
         results.length === 0 ? 'no_results' : 'below_threshold',
@@ -287,6 +308,7 @@ export class ChatbotRagService {
    */
   async *askQuestionStream(
     input: ChatbotRagInput,
+    signal?: AbortSignal,
   ): AsyncGenerator<ChatbotRagStreamEvent, void, void> {
     const startedAt = Date.now();
     const question = input.question.trim().slice(0, MAX_QUESTION_CHARS);
@@ -303,7 +325,10 @@ export class ChatbotRagService {
 
     const context = this.conversationalContext.build(input.history ?? []);
     const rewriteStartedAt = Date.now();
-    const searchQuery = await this.queryRewriter.rewrite(question, context.historyMessages);
+    const searchQuery = await this.queryRewriter.rewrite(
+      question,
+      context.historyMessages,
+    );
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
@@ -334,7 +359,9 @@ export class ChatbotRagService {
     }
     const retrievalMs = Date.now() - retrievalStartedAt;
 
-    const strongResults = results.filter((entry) => entry.score >= this.minRelevanceScore);
+    const strongResults = results.filter(
+      (entry) => entry.score >= this.minRelevanceScore,
+    );
     if (strongResults.length === 0) {
       yield {
         type: 'refusal',
@@ -374,16 +401,19 @@ export class ChatbotRagService {
     const generationStartedAt = Date.now();
     let accumulated = '';
     try {
-      const stream = this.llmProxy.chatStream({
-        agentId: AgentId.Chatbot,
-        task: LlmTask.Reason,
-        declaredDataClass: DataClass.NoPii,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...context.historyMessages,
-          { role: 'user', content: userContent },
-        ],
-      });
+      const stream = this.llmProxy.chatStream(
+        {
+          agentId: AgentId.Chatbot,
+          task: LlmTask.Reason,
+          declaredDataClass: DataClass.NoPii,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...context.historyMessages,
+            { role: 'user', content: userContent },
+          ],
+        },
+        signal,
+      );
       for await (const event of stream) {
         if (event.type === 'delta') {
           accumulated += event.content;
@@ -533,7 +563,9 @@ export class ChatbotRagService {
   private readPositiveInt(key: string, fallback: number): number {
     const raw = this.configService?.get<string | number>(key);
     const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.floor(parsed)
+      : fallback;
   }
 
   private readNonNegativeFloat(key: string, fallback: number): number {

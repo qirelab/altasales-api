@@ -1,41 +1,62 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { AI_SYSTEM_USER_ID } from '../chat.constants';
 import { ChatConversationType } from '../entities/chat-conversation-type.enum';
 import { ChatParticipantRole } from '../entities/chat-participant-role.enum';
 import { ChatStreamingService } from './chat-streaming.service';
 
-function buildService(overrides: {
-  conversation?: unknown;
-  membership?: unknown;
-  orchestratorStream?: jest.Mock;
-} = {}) {
+function buildService(
+  overrides: {
+    conversation?: unknown;
+    membership?: unknown;
+    participants?: { userId: string }[];
+    orchestratorStream?: jest.Mock;
+  } = {},
+) {
   const conversationRepository = {
-    findOne: jest.fn().mockResolvedValue(
-      overrides.conversation === undefined
-        ? { id: 'conv-1', type: ChatConversationType.Platform }
-        : overrides.conversation,
-    ),
+    findOne: jest
+      .fn()
+      .mockResolvedValue(
+        overrides.conversation === undefined
+          ? { id: 'conv-1', type: ChatConversationType.Platform }
+          : overrides.conversation,
+      ),
     update: jest.fn().mockResolvedValue(undefined),
   };
   const messageRepository = {
     create: jest.fn((entity) => ({ ...entity, id: 'client-msg-1' })),
     save: jest.fn(async (entity) => ({ ...entity })),
   };
+  const defaultMembership = {
+    conversationId: 'conv-1',
+    userId: 'client-1',
+    role: ChatParticipantRole.Client,
+  };
+  const membership =
+    overrides.membership === undefined
+      ? defaultMembership
+      : overrides.membership;
   const participantRepository = {
-    findOne: jest.fn().mockResolvedValue(
-      overrides.membership === undefined
-        ? { conversationId: 'conv-1', userId: 'client-1', role: ChatParticipantRole.Client }
-        : overrides.membership,
-    ),
-    find: jest.fn().mockResolvedValue([
-      { userId: 'client-1' },
-      { userId: 'expert-1' },
-    ]),
+    findOne: jest.fn().mockResolvedValue(membership),
+    find: jest
+      .fn()
+      .mockResolvedValue(
+        overrides.participants ?? [
+          { userId: 'client-1' },
+          { userId: 'expert-1' },
+          { userId: AI_SYSTEM_USER_ID },
+        ],
+      ),
   };
   const wsGateway = {
     emitToUser: jest.fn(),
   };
   const aiOrchestrator = {
-    streamReply: overrides.orchestratorStream ?? jest.fn().mockResolvedValue(undefined),
+    streamReply:
+      overrides.orchestratorStream ?? jest.fn().mockResolvedValue(undefined),
   };
   const service = new ChatStreamingService(
     conversationRepository as never,
@@ -44,7 +65,14 @@ function buildService(overrides: {
     wsGateway as never,
     aiOrchestrator as never,
   );
-  return { service, conversationRepository, messageRepository, participantRepository, wsGateway, aiOrchestrator };
+  return {
+    service,
+    conversationRepository,
+    messageRepository,
+    participantRepository,
+    wsGateway,
+    aiOrchestrator,
+  };
 }
 
 const hooks = {
@@ -55,60 +83,109 @@ const hooks = {
   onError: jest.fn(),
 };
 
-describe('ChatStreamingService.streamPlatformMessage', () => {
-  beforeEach(() => {
-    for (const value of Object.values(hooks)) value.mockReset();
+describe('ChatStreamingService.validate', () => {
+  it('returns a validated context for a Client-role participant of a platform conversation', async () => {
+    const { service } = buildService();
+
+    const context = await service.validate('client-1', 'conv-1', {
+      text: 'Hi',
+    });
+
+    expect(context).toMatchObject({
+      conversation: expect.objectContaining({ id: 'conv-1' }),
+      userId: 'client-1',
+      text: 'Hi',
+    });
   });
 
-  it('persists the client message, echoes it via WS to other participants, and delegates to the orchestrator', async () => {
-    const { service, messageRepository, wsGateway, aiOrchestrator } = buildService();
-
-    await service.streamPlatformMessage('client-1', 'conv-1', { text: 'Привет' }, hooks);
-
-    expect(messageRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'Привет', senderId: 'client-1' }),
-    );
-    // Expert receives the client message via WS, AI system user does NOT.
-    const targets = wsGateway.emitToUser.mock.calls.map((call) => call[0]);
-    expect(targets).toContain('expert-1');
-    expect(targets).toContain('client-1'); // own other tabs
-    expect(hooks.onClientMessage).toHaveBeenCalledTimes(1);
-    expect(aiOrchestrator.streamReply).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects a request when the conversation does not exist', async () => {
+  it('rejects with NotFound when the conversation does not exist', async () => {
     const { service } = buildService({ conversation: null });
 
     await expect(
-      service.streamPlatformMessage('client-1', 'conv-1', { text: 'Hi' }, hooks),
+      service.validate('client-1', 'conv-1', { text: 'Hi' }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('rejects a request for a non-platform conversation', async () => {
+  it('rejects with BadRequest for a non-platform conversation', async () => {
     const { service } = buildService({
       conversation: { id: 'conv-1', type: ChatConversationType.Expert },
     });
 
     await expect(
-      service.streamPlatformMessage('client-1', 'conv-1', { text: 'Hi' }, hooks),
+      service.validate('client-1', 'conv-1', { text: 'Hi' }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('rejects a caller that is not a participant', async () => {
+  it('rejects with Forbidden when the caller is not a participant', async () => {
     const { service } = buildService({ membership: null });
 
     await expect(
-      service.streamPlatformMessage('stranger', 'conv-1', { text: 'Hi' }, hooks),
+      service.validate('stranger', 'conv-1', { text: 'Hi' }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('rejects a caller whose role is not Client (expert/operator cannot use SSE)', async () => {
+  it('rejects with BadRequest when the caller is not a Client', async () => {
     const { service } = buildService({
-      membership: { conversationId: 'conv-1', userId: 'expert-1', role: ChatParticipantRole.Expert },
+      membership: {
+        conversationId: 'conv-1',
+        userId: 'expert-1',
+        role: ChatParticipantRole.Expert,
+      },
     });
 
     await expect(
-      service.streamPlatformMessage('expert-1', 'conv-1', { text: 'Hi' }, hooks),
+      service.validate('expert-1', 'conv-1', { text: 'Hi' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('ChatStreamingService.runStream', () => {
+  beforeEach(() => {
+    for (const value of Object.values(hooks)) value.mockReset();
+  });
+
+  it('persists the client message and delegates to the orchestrator (signal forwarded)', async () => {
+    const {
+      service,
+      messageRepository,
+      wsGateway,
+      aiOrchestrator,
+      conversationRepository,
+    } = buildService();
+    const context = await service.validate('client-1', 'conv-1', {
+      text: 'Hi',
+    });
+    const controller = new AbortController();
+
+    await service.runStream(context, hooks, controller.signal);
+
+    expect(messageRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Hi', senderId: 'client-1' }),
+    );
+    expect(conversationRepository.update).toHaveBeenCalled();
+    expect(hooks.onClientMessage).toHaveBeenCalledTimes(1);
+    expect(aiOrchestrator.streamReply).toHaveBeenCalledWith(
+      expect.objectContaining({ clientUserId: 'client-1' }),
+      expect.any(Object),
+      controller.signal,
+    );
+    // WS emit target set: streaming client (own other tabs) + expert, but
+    // never the system AI user.
+    const targets = wsGateway.emitToUser.mock.calls.map((call) => call[0]);
+    expect(targets.sort()).toEqual(['client-1', 'expert-1'].sort());
+    expect(targets).not.toContain(AI_SYSTEM_USER_ID);
+  });
+
+  it('reports client_message_persist_failed when saving the client message throws', async () => {
+    const { service, messageRepository, aiOrchestrator } = buildService();
+    messageRepository.save.mockRejectedValueOnce(new Error('db down'));
+    const context = await service.validate('client-1', 'conv-1', {
+      text: 'Hi',
+    });
+
+    await service.runStream(context, hooks);
+
+    expect(hooks.onError).toHaveBeenCalledWith('client_message_persist_failed');
+    expect(aiOrchestrator.streamReply).not.toHaveBeenCalled();
   });
 });
