@@ -86,21 +86,21 @@ function buildService(
     transaction: opts.transactionThrows
       ? jest.fn().mockRejectedValue(opts.transactionThrows)
       : jest.fn(async (fn) => {
-          const manager = {
-            getRepository: (entity: unknown) => {
-              const name =
+        const manager = {
+          getRepository: (entity: unknown) => {
+            const name =
                 (entity as { name?: string })?.name ??
                 (entity as { constructor?: { name?: string } })?.constructor
                   ?.name;
-              if (name === 'ChatConversation') return conversationRepository;
-              if (name === 'ChatMessage') return messageRepository;
-              if (name === 'ChatConversationParticipant')
-                return participantRepository;
-              return { create: jest.fn(), save: jest.fn() };
-            },
-          };
-          return fn(manager);
-        }),
+            if (name === 'ChatConversation') return conversationRepository;
+            if (name === 'ChatMessage') return messageRepository;
+            if (name === 'ChatConversationParticipant')
+              return participantRepository;
+            return { create: jest.fn(), save: jest.fn() };
+          },
+        };
+        return fn(manager);
+      }),
   };
 
   const service = new ChatService(

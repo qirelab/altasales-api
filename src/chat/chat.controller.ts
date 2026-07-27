@@ -81,7 +81,7 @@ export class ChatController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      "Open or return the client's single platform chat with AI-консультант AltaSales",
+      'Open or return the client\'s single platform chat with AI-консультант AltaSales',
   })
   openPlatformConversation(@CurrentUser() user: CurrentUserData) {
     return this.chatService.openPlatformConversation(user.id);

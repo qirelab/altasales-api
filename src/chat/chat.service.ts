@@ -92,20 +92,20 @@ export class ChatService {
           orderId: conv.orderId,
           participant: otherUser
             ? {
-                id: otherUser.id,
-                name: otherUser.name,
-                lastName: otherUser.lastName,
-                email: otherUser.email,
-              }
+              id: otherUser.id,
+              name: otherUser.name,
+              lastName: otherUser.lastName,
+              email: otherUser.email,
+            }
             : null,
           lastMessage: lastMessage
             ? {
-                id: lastMessage.id,
-                text: lastMessage.text,
-                senderId: lastMessage.senderId,
-                isAiGenerated: lastMessage.isAiGenerated,
-                createdAt: lastMessage.createdAt,
-              }
+              id: lastMessage.id,
+              text: lastMessage.text,
+              senderId: lastMessage.senderId,
+              isAiGenerated: lastMessage.isAiGenerated,
+              createdAt: lastMessage.createdAt,
+            }
             : null,
           unreadCount,
           updatedAt: conv.updatedAt,
@@ -298,20 +298,20 @@ export class ChatService {
       type: conversation.type,
       participant: aiUser
         ? {
-            id: aiUser.id,
-            name: aiUser.name,
-            lastName: aiUser.lastName,
-            email: aiUser.email,
-          }
+          id: aiUser.id,
+          name: aiUser.name,
+          lastName: aiUser.lastName,
+          email: aiUser.email,
+        }
         : null,
       lastMessage: lastMessage
         ? {
-            id: lastMessage.id,
-            text: lastMessage.text,
-            senderId: lastMessage.senderId,
-            isAiGenerated: lastMessage.isAiGenerated,
-            createdAt: lastMessage.createdAt,
-          }
+          id: lastMessage.id,
+          text: lastMessage.text,
+          senderId: lastMessage.senderId,
+          isAiGenerated: lastMessage.isAiGenerated,
+          createdAt: lastMessage.createdAt,
+        }
         : null,
       unreadCount,
       orderId: conversation.orderId,
