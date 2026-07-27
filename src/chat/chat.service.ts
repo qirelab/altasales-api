@@ -728,10 +728,22 @@ export class ChatService {
         effectiveCursor = latest?.createdAt ?? null;
       }
       if (!effectiveCursor) return;
-      await this.participantRepository.update(
-        { conversationId: conversation.id, userId },
-        { lastReadAt: effectiveCursor },
-      );
+      // `lastReadAt` must be monotonic — paging BACK (older messages) would
+      // otherwise rewind the cursor to an older timestamp and resurrect
+      // already-read messages as unread. GREATEST(current, new) keeps the
+      // marker moving strictly forward.
+      await this.participantRepository
+        .createQueryBuilder()
+        .update(ChatConversationParticipant)
+        .set({
+          lastReadAt: () => 'GREATEST(COALESCE("lastReadAt", :cursor), :cursor)',
+        })
+        .where('"conversationId" = :conversationId', {
+          conversationId: conversation.id,
+        })
+        .andWhere('"userId" = :userId', { userId })
+        .setParameter('cursor', effectiveCursor)
+        .execute();
       return;
     }
     await this.messageRepository

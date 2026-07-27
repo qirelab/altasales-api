@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+import { OrderStatus } from './entities/order-status.enum';
 import { OrdersService } from './orders.service';
 
 /**
@@ -64,13 +66,22 @@ function makeService(
   //  15  chatService                    ← real
   //  16  recommendationUserLockService
   const stub = {} as never;
-  // Minimal dataSource stub: `transaction(fn)` just runs `fn` with a fake
-  // manager that has a no-op `query`. The advisory-lock SQL is not executed
-  // by jest; we only need `withClientExpertLock` to not blow up.
+  // Minimal dataSource stub. `transaction(fn)` runs `fn` with a fake
+  // EntityManager: `.query` is a no-op (advisory-lock SQL not executed under
+  // jest), and `.getRepository(Order)` proxies to the outer orderRepository
+  // so `hasOtherActiveContractorChatGrant` + `Order.save` inside the lock
+  // hit the same mocked repository the tests set up.
   const dataSource = {
     transaction: (
-      fn: (manager: { query: () => Promise<unknown> }) => unknown,
-    ) => fn({ query: () => Promise.resolve(undefined) }),
+      fn: (manager: {
+        query: () => Promise<unknown>;
+        getRepository: () => typeof orderRepository;
+      }) => unknown,
+    ) =>
+      fn({
+        query: () => Promise.resolve(undefined),
+        getRepository: () => orderRepository,
+      }),
   } as never;
   const service = new OrdersService(
     orderRepository as never,
@@ -262,5 +273,111 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     } as never);
 
     expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects a fresh grant on a cancelled order (fix #C)', async () => {
+    const { service, orderRepository, chatService } = makeService({
+      order: baseOrder({ status: OrderStatus.Cancelled }),
+    });
+
+    await expect(
+      service.updateContractorChatAccessForAdmin('order-1', {
+        contractorChatAccess: true,
+      } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+    expect(orderRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a repeat grant on a cancelled order (post-audit hardening)', async () => {
+    // A prior partial run could leave contractorChatAccess=true on a
+    // now-cancelled order; toggling the flag ON via UI would otherwise
+    // silently re-attach the expert. The status guard blocks all grants
+    // on cancelled rows, not just fresh ones.
+    const { service, orderRepository, chatService } = makeService({
+      order: baseOrder({
+        status: OrderStatus.Cancelled,
+        contractorChatAccess: true,
+      }),
+    });
+
+    await expect(
+      service.updateContractorChatAccessForAdmin('order-1', {
+        contractorChatAccess: true,
+      } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+    expect(orderRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('attaches the expert INSIDE the advisory-lock transaction (grant race fix)', async () => {
+    // Regression: earlier grant path called addExpertToClientPlatformChat
+    // BEFORE taking the (client, expert) advisory lock. A concurrent revoke
+    // on a sibling order could slip between attach and save, see hasOther
+    // still false (this save had not landed), and remove the expert we
+    // just added. Now the attach runs inside the lock so a concurrent
+    // revoke queues behind us and sees the committed flag on its hasOther.
+    const { service, orderRepository, chatService } = makeService({
+      order: baseOrder(),
+    });
+
+    await service.updateContractorChatAccessForAdmin('order-1', {
+      contractorChatAccess: true,
+    } as never);
+
+    // The mock manager proxies save to orderRepository, so we assert the
+    // attach and save both fired and the attach preceded the save.
+    const attachOrder =
+      chatService.addExpertToClientPlatformChat.mock.invocationCallOrder[0];
+    const saveOrder = orderRepository.save.mock.invocationCallOrder[0];
+    expect(attachOrder).toBeDefined();
+    expect(saveOrder).toBeDefined();
+    expect(attachOrder).toBeLessThan(saveOrder);
+  });
+
+  it('still allows toggling contractorChatAccess=false on a cancelled order (cleanup path)', async () => {
+    const { service, chatService } = makeService({
+      order: baseOrder({
+        status: OrderStatus.Cancelled,
+        contractorChatAccess: true,
+      }),
+      hasOtherGrant: false,
+    });
+
+    await service.updateContractorChatAccessForAdmin('order-1', {
+      contractorChatAccess: false,
+    } as never);
+
+    expect(chatService.removeExpertFromClientPlatformChat).toHaveBeenCalledWith(
+      'client-1',
+      'expert-1',
+    );
+  });
+
+  it('persists contractorChatAccess=false via the manager INSIDE the advisory-lock transaction (fix #A)', async () => {
+    // The regression: previously the flag save happened AFTER the lock
+    // released, so a concurrent revoke's hasOther check still saw the
+    // stale contractorChatAccess=true. Now the save runs on the
+    // manager returned from `dataSource.transaction`, and the mock proxies
+    // it back to the outer orderRepository — so `save` still fires exactly
+    // once, but its ordering vs `hasOther` (which we assert via the mock
+    // sequence) reflects the in-lock happens-before we care about.
+    const { service, orderRepository, chatService } = makeService({
+      order: baseOrder({ contractorChatAccess: true }),
+      hasOtherGrant: false,
+    });
+
+    await service.updateContractorChatAccessForAdmin('order-1', {
+      contractorChatAccess: false,
+    } as never);
+
+    const saveOrder = orderRepository.save.mock.invocationCallOrder[0];
+    const removeOrder =
+      chatService.removeExpertFromClientPlatformChat.mock
+        .invocationCallOrder[0];
+    // save runs BEFORE participant remove so another concurrent revoke
+    // acquiring the lock next sees the committed contractorChatAccess=false
+    // on its own hasOther re-check.
+    expect(saveOrder).toBeLessThan(removeOrder);
   });
 });
