@@ -170,6 +170,45 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     );
   });
 
+  it('rolls the participant back when the flag save fails after grant (fix #3 compensation)', async () => {
+    const { service, orderRepository, chatService } = makeService({
+      order: baseOrder(),
+      hasOtherGrant: false,
+    });
+    orderRepository.save.mockRejectedValueOnce(new Error('DB down'));
+
+    await expect(
+      service.updateContractorChatAccessForAdmin('order-1', {
+        contractorChatAccess: true,
+      } as never),
+    ).rejects.toThrow('DB down');
+
+    // Grant fired, save failed, compensation must roll the expert back so
+    // there's no orphan participant with `contractorChatAccess=false`.
+    expect(chatService.addExpertToClientPlatformChat).toHaveBeenCalledWith(
+      'client-1', 'expert-1',
+    );
+    expect(chatService.removeExpertFromClientPlatformChat).toHaveBeenCalledWith(
+      'client-1', 'expert-1',
+    );
+  });
+
+  it('does not roll the participant back on save failure if another grant keeps them entitled', async () => {
+    const { service, orderRepository, chatService } = makeService({
+      order: baseOrder(),
+      hasOtherGrant: true,
+    });
+    orderRepository.save.mockRejectedValueOnce(new Error('DB down'));
+
+    await expect(
+      service.updateContractorChatAccessForAdmin('order-1', {
+        contractorChatAccess: true,
+      } as never),
+    ).rejects.toThrow('DB down');
+
+    expect(chatService.removeExpertFromClientPlatformChat).not.toHaveBeenCalled();
+  });
+
   it('does not touch chat when the resolved expert equals the client', async () => {
     const { service, chatService } = makeService({
       order: baseOrder({

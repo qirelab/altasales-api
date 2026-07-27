@@ -82,19 +82,19 @@ export class AiChatOrchestratorService {
       return;
     }
 
-    // Only load messages that existed at or before the current turn. This
-    // prevents a fast-typing client from injecting a future message into the
-    // "history" the LLM sees for the current turn. Postgres `timestamptz`
-    // is high-resolution but two inserts from the same request loop can
-    // collide, so we also exclude the current message by id — a same-tick
-    // m4 must never leak into m3's history.
+    // Only load messages that STRICTLY predate the current turn. Postgres
+    // `timestamptz` collisions from the same request loop are possible, so
+    // `createdAt <` (strict) is the only race-safe choice: any message that
+    // shares the current tick — including a same-tick fast-typing sibling —
+    // is excluded from history. Trade-off: a legitimate prior message that
+    // shares the tick with the current one is also dropped, which is rare
+    // and preferable to leaking a future message into the LLM context.
     const recentMessages = await this.messageRepository
       .createQueryBuilder('m')
       .where('m."conversationId" = :conversationId', {
         conversationId: input.conversation.id,
       })
-      .andWhere('m."createdAt" <= :cutoff', { cutoff: currentMessage.createdAt })
-      .andWhere('m."id" != :currentId', { currentId: input.clientMessageId })
+      .andWhere('m."createdAt" < :cutoff', { cutoff: currentMessage.createdAt })
       .orderBy('m."createdAt"', 'DESC')
       .addOrderBy('m."id"', 'DESC')
       .take(HISTORY_FETCH_LIMIT)

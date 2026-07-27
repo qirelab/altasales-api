@@ -30,7 +30,7 @@ describe('AiChatOrchestratorService', () => {
     // sets and applies them against `historyRows` on `getMany()`. Only the
     // clauses actually used by the code (createdAt cutoff + id exclude) are
     // interpreted; unknown clauses are recorded but do not filter.
-    const qbState: { cutoff?: Date; excludeId?: string } = {};
+    const qbState: { cutoff?: Date } = {};
     const qb: {
       where: jest.Mock; andWhere: jest.Mock;
       orderBy: jest.Mock; addOrderBy: jest.Mock;
@@ -38,11 +38,8 @@ describe('AiChatOrchestratorService', () => {
     } = {
       where: jest.fn().mockImplementation(() => qb),
       andWhere: jest.fn().mockImplementation((sql: string, params?: Record<string, unknown>) => {
-        if (sql.includes('createdAt') && sql.includes('<=') && params?.cutoff instanceof Date) {
+        if (sql.includes('createdAt') && sql.includes('<') && params?.cutoff instanceof Date) {
           qbState.cutoff = params.cutoff;
-        }
-        if (sql.includes('"id"') && sql.includes('!=') && typeof params?.currentId === 'string') {
-          qbState.excludeId = params.currentId;
         }
         return qb;
       }),
@@ -52,8 +49,9 @@ describe('AiChatOrchestratorService', () => {
       getMany: jest.fn().mockImplementation(() => {
         const rows = opts.historyRows ?? [];
         const filtered = rows.filter((m) => {
-          if (qbState.cutoff && (m.createdAt as Date) > qbState.cutoff) return false;
-          if (qbState.excludeId && m.id === qbState.excludeId) return false;
+          // Strict `<` — same-tick messages (including the current turn
+          // itself and any fast-typing sibling) are excluded.
+          if (qbState.cutoff && (m.createdAt as Date) >= qbState.cutoff) return false;
           return true;
         });
         // Emulate ORDER BY createdAt DESC + take(HISTORY_FETCH_LIMIT).
@@ -124,13 +122,20 @@ describe('AiChatOrchestratorService', () => {
   const clientUserId = 'client-1';
 
   it('generates AI reply, persists as isAiGenerated message from AI_SYSTEM_USER_ID, and emits WS', async () => {
-    const m3 = makeMessage({ id: 'm3', senderId: clientUserId, text: 'question now' });
+    const t0 = new Date('2026-01-01T10:00:00.000Z');
+    const t1 = new Date('2026-01-01T10:00:01.000Z');
+    const t2 = new Date('2026-01-01T10:00:02.000Z');
+    const m3 = makeMessage({
+      id: 'm3', senderId: clientUserId, text: 'question now', createdAt: t2,
+    });
     const {
       orchestrator, messageRepository, conversationRepository, ragService, wsGateway,
     } = buildOrchestrator({
       historyRows: [
-        makeMessage({ id: 'm1', senderId: clientUserId, text: 'first' }),
-        makeMessage({ id: 'm2', senderId: 'ai', isAiGenerated: true, text: 'a1' }),
+        makeMessage({ id: 'm1', senderId: clientUserId, text: 'first', createdAt: t0 }),
+        makeMessage({
+          id: 'm2', senderId: 'ai', isAiGenerated: true, text: 'a1', createdAt: t1,
+        }),
         m3,
       ],
       currentMessage: m3,
@@ -258,13 +263,25 @@ describe('AiChatOrchestratorService', () => {
     ]);
   });
 
-  it('excludes the current message id from history via andWhere("m.id != :currentId")', async () => {
-    // Belt-and-suspenders check: even if createdAt matches exactly, the
-    // orchestrator adds an id-exclude clause so the current turn itself is
-    // never mirrored back into `history`. Verify the clause is applied.
-    const { orchestrator, messageRepository } = buildOrchestrator({
-      historyRows: [makeMessage({ id: 'm1', senderId: clientUserId })],
-      currentMessage: makeMessage({ id: 'm1', senderId: clientUserId }),
+  it('excludes a same-tick sibling from history (strict createdAt <)', async () => {
+    // Fast-typing race: m3 and m4 land on the SAME timestamp tick. Neither
+    // should see the other in its history. Strict `createdAt <` cutoff
+    // guarantees that: for m3's task, m4 (same tick) fails the `< cutoff`
+    // check and is dropped even though m4 has a different id.
+    const sameTick = new Date('2026-01-01T10:00:02.000Z');
+    const before = new Date('2026-01-01T10:00:01.000Z');
+    const m1 = makeMessage({
+      id: 'm1', senderId: clientUserId, text: 'earlier', createdAt: before,
+    });
+    const m3 = makeMessage({
+      id: 'm3', senderId: clientUserId, text: 'q now', createdAt: sameTick,
+    });
+    const m4Same = makeMessage({
+      id: 'm4', senderId: clientUserId, text: 'q sibling', createdAt: sameTick,
+    });
+    const { orchestrator, ragService } = buildOrchestrator({
+      historyRows: [m1, m3, m4Same],
+      currentMessage: m3,
     });
 
     await (orchestrator as unknown as {
@@ -272,15 +289,15 @@ describe('AiChatOrchestratorService', () => {
     }).respondToClientMessage({
       conversation,
       clientUserId,
-      clientMessageId: 'm1',
-      question: 'q',
+      clientMessageId: 'm3',
+      question: 'q now',
     });
 
-    const qb = messageRepository.createQueryBuilder.mock.results[0].value as {
-      andWhere: jest.Mock;
-    };
-    const clauses = qb.andWhere.mock.calls.map((c: unknown[]) => c[0] as string);
-    expect(clauses.some((c) => c.includes('"id"') && c.includes('!='))).toBe(true);
+    const ragCall = ragService.askQuestion.mock.calls[0][0];
+    // Only strictly-past m1 remains. m3 (self) and m4 (same tick) are dropped.
+    expect(ragCall.history).toEqual([
+      { role: 'user', content: 'earlier' },
+    ]);
   });
 
   it('skips silently when the client message no longer exists', async () => {
