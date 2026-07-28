@@ -308,8 +308,12 @@ describe('AiChatOrchestratorService.streamReply', () => {
   });
 
   it('short-circuits RAG and marks handoff on an explicit user request', async () => {
-    const { orchestrator, messageRepository, conversationRepository, wsGateway } =
-      buildOrchestrator();
+    const {
+      orchestrator,
+      messageRepository,
+      conversationRepository,
+      wsGateway,
+    } = buildOrchestrator();
     const askQuestionStream = jest.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (orchestrator as any).ragService = { askQuestionStream };
@@ -349,19 +353,20 @@ describe('AiChatOrchestratorService.streamReply', () => {
   });
 
   it('marks rag_no_context handoff after a streamed no_results refusal', async () => {
-    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
-      ragEvents: [
-        {
-          type: 'refusal',
-          response: {
-            answer: 'Я не нашёл информации по этому вопросу.',
-            hasContext: false,
-            sources: [],
-            refusalReason: 'no_results',
+    const { orchestrator, conversationRepository, wsGateway } =
+      buildOrchestrator({
+        ragEvents: [
+          {
+            type: 'refusal',
+            response: {
+              answer: 'Я не нашёл информации по этому вопросу.',
+              hasContext: false,
+              sources: [],
+              refusalReason: 'no_results',
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
     const { hooks } = makeHooks();
 
     await orchestrator.streamReply(
@@ -387,7 +392,8 @@ describe('AiChatOrchestratorService.streamReply', () => {
   });
 
   it('does not flag handoff on a normal streamed answer', async () => {
-    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator();
+    const { orchestrator, conversationRepository, wsGateway } =
+      buildOrchestrator();
     const { hooks } = makeHooks();
 
     await orchestrator.streamReply(

@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ChatbotRagService } from '../../chatbot/services/chatbot-rag.service';
+import {
+  ChatbotRagRefusalReason,
+  ChatbotRagService,
+} from '../../chatbot/services/chatbot-rag.service';
 import {
   HandoffDetection,
   HandoffTriggerService,
@@ -318,7 +321,7 @@ export class AiChatOrchestratorService {
     let accumulated = '';
     let terminalResponse: {
       answer: string;
-      refusalReason?: string;
+      refusalReason?: ChatbotRagRefusalReason;
     } | null = null;
 
     try {
@@ -376,7 +379,7 @@ export class AiChatOrchestratorService {
         answer: terminalResponse?.answer ?? accumulated,
         hasContext: !terminalResponse?.refusalReason,
         sources: [],
-        refusalReason: terminalResponse?.refusalReason as never,
+        refusalReason: terminalResponse?.refusalReason,
       },
     });
 
