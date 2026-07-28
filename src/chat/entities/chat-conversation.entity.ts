@@ -12,6 +12,8 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { Order } from '../../orders/entities/order.entity';
+import { ChatConversationType } from './chat-conversation-type.enum';
+import { ChatConversationParticipant } from './chat-conversation-participant.entity';
 import { ChatMessage } from './chat-message.entity';
 
 @Entity()
@@ -20,6 +22,19 @@ export class ChatConversation {
   @ApiProperty({ description: 'Conversation ID (UUID)' })
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @ApiProperty({
+    enum: ChatConversationType,
+    description:
+      'Conversation type. `expert` is the legacy client-expert-per-order chat. ' +
+      '`platform` is the single AI-consultant chat between the client and the platform.',
+  })
+  @Column({
+    type: 'enum',
+    enum: ChatConversationType,
+    default: ChatConversationType.Expert,
+  })
+  type: ChatConversationType;
 
   @ApiProperty({ description: 'First participant ID (smaller UUID)' })
   @Column({ type: 'uuid' })
@@ -59,4 +74,10 @@ export class ChatConversation {
 
   @OneToMany(() => ChatMessage, (message) => message.conversation)
   messages: ChatMessage[];
+
+  @OneToMany(
+    () => ChatConversationParticipant,
+    (participant) => participant.conversation,
+  )
+  participants: ChatConversationParticipant[];
 }
