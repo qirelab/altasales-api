@@ -31,6 +31,11 @@ export type GeneratedRecommendationItem = {
   recommendation?: Recommendation;
 };
 
+export type GeneratedRecommendationsResult = {
+  summary: string;
+  recommendations: GeneratedRecommendationItem[];
+};
+
 type AiRecommendationCandidate = {
   serviceId: string;
   priority?: RecommendationPriority | string;
@@ -38,10 +43,77 @@ type AiRecommendationCandidate = {
   diagnosticSignals?: string[];
 };
 
+type AiRecommendationResponse = {
+  summary?: string;
+  recommendations: AiRecommendationCandidate[];
+};
+
 const MAX_CATALOG_FOR_LLM = 500;
 const AI_RECOMMENDATION_CACHE_TTL_MS = 60 * 60 * 1000;
 const AI_SEMANTIC_RECOMMENDATION_SCORE = 6;
 const MIN_AI_EVIDENCE_TOKEN_LENGTH = 4;
+const MIN_RUSSIAN_SUMMARY_WORDS = 5;
+const MAX_RECOMMENDATION_SUMMARY_LENGTH = 1000;
+const SUMMARY_PRIORITY_LANGUAGE_PATTERN =
+  /\bpriority\b|приоритет\p{L}*|срочн\p{L}*|первоочередн\p{L}*|важн\p{L}*|главн\p{L}*|в\s+первую\s+очередь|раньше\s+остальн\p{L}*/iu;
+const AI_RECOMMENDATIONS_RESPONSE_EXAMPLE =
+  '{"summary":"общий вводный текст","recommendations":[' +
+  '{"serviceId":"...","priority":"urgent|medium|low",' +
+  '"rationale":"короткое обоснование на русском",' +
+  '"diagnosticSignals":["signal"]}]}';
+const NEW_SALES_DEPARTMENT_PREAMBLE = [
+  'На основании заполненной анкеты AI сформировал проект вашего отдела продаж.',
+  'В него вошли инструменты, документы, специалисты и AI-модули,',
+  'которые необходимы для достижения ваших целей.',
+  'Каждая рекомендация основана на параметрах вашего бизнеса',
+  'и может быть подключена прямо из платформы.',
+].join(' ');
+const EXISTING_SALES_DEPARTMENT_PREAMBLE = [
+  'На основании ваших ответов AI проанализировал текущую организацию отдела продаж',
+  'и определил, какие изменения помогут повысить его эффективность.',
+  'Ниже представлены решения, которые рекомендуется внедрить именно вашей компании.',
+  'Каждая рекомендация направлена на устранение выявленных ограничений,',
+  'автоматизацию процессов и достижение поставленных бизнес-целей.',
+].join(' ');
+const AI_RECOMMENDATIONS_SYSTEM_PROMPT = [
+  'Ты AI-движок рекомендаций AltaSales.',
+  'Выбирай только релевантные serviceId из каталога, не возвращай весь каталог.',
+  'Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава,',
+  'рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией.',
+  'Не придумывай диагнозы, метрики, цифры или проблемы,',
+  'которых нет в clientProfile или diagnostics.',
+  'Обоснования и общее описание пиши на русском.',
+  'Общее описание должно соответствовать тому же набору рекомендаций',
+  'и не упоминать инструменты, которых нет в recommendations.',
+  'Не говори в общем описании о priority, приоритетности или срочности позиций.',
+  'Если передан summaryPreamble, верни его в поле summary дословно и не дополняй.',
+  'Верни только валидный JSON.',
+].join(' ');
+const AI_RECOMMENDATIONS_INSTRUCTION = [
+  `Верни ${AI_RECOMMENDATIONS_RESPONSE_EXAMPLE}.`,
+  'summary — один связный абзац на русском из 2–4 предложений',
+  'без Markdown, списков и заголовков.',
+  'Объясни, какие инструменты рекомендуются и почему,',
+  'опираясь только на clientProfile и diagnostics.',
+  'Тон: «В соответствии с предоставленной вами информацией',
+  'специализированный AI-ассистент считает...».',
+  'Не упоминай в summary поле priority, уровни приоритета, срочность,',
+  'очередность или то, что какая-либо позиция важнее другой.',
+  'Если данных мало, прямо опирайся на доступные ответы',
+  'и не придумывай конкретные показатели, цифры или факты.',
+  'summary должен описывать только позиции из recommendations и не противоречить им.',
+  'Возвращай только реально релевантные рекомендации.',
+  'Для productStage=existing поле components описывает, что уже есть,',
+  'а componentsToAdd — что нужно добавить.',
+  'Не предлагай стартовое внедрение того, что уже есть.',
+  'Для productStage=new поле components описывает желаемый новый ОП;',
+  'пакет «Отдел продаж с нуля» обязателен.',
+  'Для productStage=existing пакет «Отдел продаж с нуля» запрещён.',
+  'Не возвращай отдельные услуги, если выбранный пакет уже содержит',
+  'или логически покрывает их результат.',
+  'Если передан summaryPreamble, поле summary должно дословно совпадать с ним.',
+  'Не переписывай, не сокращай и не дополняй summaryPreamble.',
+].join(' ');
 const AI_EVIDENCE_STOP_WORDS = new Set([
   'услуга',
   'услуги',
@@ -115,8 +187,14 @@ export class RecommendationScoringService {
     dto: GenerateRecommendationsDto,
     services: ServiceCandidate[],
     context: string,
-  ): Promise<GeneratedRecommendationItem[]> {
-    if (!context) return [];
+  ): Promise<GeneratedRecommendationsResult> {
+    const summaryPreamble = this.resolveSummaryPreamble(dto);
+    if (!context) {
+      return {
+        summary: this.buildFallbackSummary([], summaryPreamble),
+        recommendations: [],
+      };
+    }
 
     try {
       const catalogSlice = this.selectCatalogForLlm(services, context);
@@ -130,27 +208,13 @@ export class RecommendationScoringService {
         messages: [
           {
             role: 'system',
-            content: [
-              'Ты AI-движок рекомендаций AltaSales. Выбирай только релевантные serviceId из каталога, не возвращай весь каталог.',
-              'Если релевантный пакет уже покрывает отдельную услугу или документ из своего состава,',
-              'рекомендуй пакет и не дублируй вложенную сущность отдельной рекомендацией.',
-              'Не придумывай диагнозы, метрики или проблемы, которых нет в clientProfile или diagnostics.',
-              'Обоснование пиши на русском. Верни только валидный JSON.',
-            ].join(' '),
+            content: AI_RECOMMENDATIONS_SYSTEM_PROMPT,
           },
           {
             role: 'user',
             content: JSON.stringify({
-              instruction: [
-                'Верни {"recommendations":[{"serviceId":"...","priority":"urgent|medium|low",',
-                '"rationale":"короткое обоснование на русском","diagnosticSignals":["signal"]}]}',
-                'Возвращай только реально релевантные рекомендации.',
-                'Для productStage=existing поле components описывает, что уже есть,',
-                'а componentsToAdd — что нужно добавить; не предлагай стартовое внедрение того, что уже есть.',
-                'Для productStage=new поле components описывает желаемый новый ОП; пакет «Отдел продаж с нуля» обязателен.',
-                'Для productStage=existing пакет «Отдел продаж с нуля» запрещён.',
-                'Не возвращай отдельные услуги, если выбранный пакет уже содержит или логически покрывает их результат.',
-              ].join(' '),
+              instruction: AI_RECOMMENDATIONS_INSTRUCTION,
+              summaryPreamble: summaryPreamble ?? null,
               clientProfile: dto.clientProfile ?? {},
               diagnostics: dto.diagnostics ?? [],
               catalog: catalogSlice.map((service) => ({
@@ -176,7 +240,7 @@ export class RecommendationScoringService {
       const result: GeneratedRecommendationItem[] = [];
       const usedTargetIds = new Set<string>();
 
-      for (const item of parsed) {
+      for (const item of parsed.recommendations) {
         const service = servicesById.get(item.serviceId);
         const targetId = service ? this.getCandidateTargetId(service) : null;
         if (!service || !targetId || usedTargetIds.has(targetId)) continue;
@@ -221,25 +285,42 @@ export class RecommendationScoringService {
         });
       }
 
-      return result.sort(
+      const recommendations = result.sort(
         (a, b) =>
           b.score - a.score ||
           this.scorePriority(b.priority) - this.scorePriority(a.priority),
       );
+
+      return {
+        summary: this.normalizeSummary(
+          parsed.summary,
+          recommendations,
+          context,
+          summaryPreamble,
+        ),
+        recommendations,
+      };
     } catch (error) {
       this.logger.warn({
         eventName: 'AI_RECOMMENDATION_GENERATION_FAILED',
         error: error instanceof Error ? error.message : 'Unknown error',
       });
-      return [];
+      return {
+        summary: this.buildFallbackSummary([], summaryPreamble),
+        recommendations: [],
+      };
     }
   }
 
-  parseAiRecommendationResponse(content: string): AiRecommendationCandidate[] {
-    let parsed: { recommendations?: AiRecommendationCandidate[] };
+  parseAiRecommendationResponse(content: string): AiRecommendationResponse {
+    let parsed: {
+      summary?: unknown;
+      recommendations?: AiRecommendationCandidate[];
+    };
 
     try {
       parsed = JSON.parse(this.extractJson(content)) as {
+        summary?: unknown;
         recommendations?: AiRecommendationCandidate[];
       };
     } catch (error) {
@@ -250,19 +331,17 @@ export class RecommendationScoringService {
       );
     }
 
-    if (!Array.isArray(parsed.recommendations)) return [];
-    return parsed.recommendations.filter(
-      (item) =>
-        item &&
-        typeof item.serviceId === 'string' &&
-        (item.priority === undefined || typeof item.priority === 'string') &&
-        (item.rationale === undefined || typeof item.rationale === 'string') &&
-        (item.diagnosticSignals === undefined ||
-          (Array.isArray(item.diagnosticSignals) &&
-            item.diagnosticSignals.every(
-              (signal) => typeof signal === 'string',
-            ))),
-    );
+    let recommendations: AiRecommendationCandidate[] = [];
+    if (Array.isArray(parsed.recommendations)) {
+      recommendations = parsed.recommendations.filter((item) =>
+        this.isValidAiRecommendationCandidate(item),
+      );
+    }
+
+    return {
+      summary: typeof parsed.summary === 'string' ? parsed.summary : undefined,
+      recommendations,
+    };
   }
 
   resolvePriority(
@@ -307,6 +386,242 @@ export class RecommendationScoringService {
           .filter((s) => s.length > 0),
       ),
     );
+  }
+
+  finalizeRecommendationSummary(
+    dto: GenerateRecommendationsDto,
+    generated: GeneratedRecommendationsResult,
+    recommendations: GeneratedRecommendationItem[],
+    context: string,
+  ): string {
+    const summaryPreamble = this.resolveSummaryPreamble(dto);
+    const summary = this.haveSameRecommendationTargets(
+      generated.recommendations,
+      recommendations,
+    )
+      ? generated.summary
+      : undefined;
+
+    return this.normalizeSummary(
+      summary,
+      recommendations,
+      context,
+      summaryPreamble,
+    );
+  }
+
+  private isValidAiRecommendationCandidate(
+    item: AiRecommendationCandidate,
+  ): boolean {
+    return Boolean(
+      item &&
+      typeof item.serviceId === 'string' &&
+      (item.priority === undefined || typeof item.priority === 'string') &&
+      (item.rationale === undefined || typeof item.rationale === 'string') &&
+      (item.diagnosticSignals === undefined ||
+        (Array.isArray(item.diagnosticSignals) &&
+          item.diagnosticSignals.every(
+            (signal) => typeof signal === 'string',
+          ))),
+    );
+  }
+
+  private normalizeSummary(
+    summary: string | undefined,
+    recommendations: GeneratedRecommendationItem[],
+    context: string,
+    summaryPreamble?: string,
+  ): string {
+    const fallback = this.buildFallbackSummary(
+      recommendations,
+      summaryPreamble,
+    );
+    if (recommendations.length === 0) return fallback;
+    if (summaryPreamble) return summaryPreamble;
+    if (!summary?.trim()) return fallback;
+
+    const normalized = summary
+      .replace(/```(?:\w+)?/g, ' ')
+      .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/^\s{0,3}(?:#{1,6}|[-+])\s+/gm, '')
+      .replace(/[*_`~]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const sentences = normalized
+      .split(/(?<=[.!?])\s+(?=[А-ЯЁA-Z«])/u)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean);
+    if (
+      normalized.length > MAX_RECOMMENDATION_SUMMARY_LENGTH ||
+      sentences.length < 2 ||
+      sentences.length > 4 ||
+      !this.isValidRussianSummary(normalized, recommendations, context) ||
+      SUMMARY_PRIORITY_LANGUAGE_PATTERN.test(normalized) ||
+      this.hasUnsupportedSummaryNumbers(normalized, recommendations, context)
+    ) {
+      return fallback;
+    }
+
+    const plainText = sentences.join(' ');
+    return /[.!?]$/.test(plainText) ? plainText : `${plainText}.`;
+  }
+
+  private hasUnsupportedSummaryNumbers(
+    summary: string,
+    recommendations: GeneratedRecommendationItem[],
+    context: string,
+  ): boolean {
+    const supportedNumbers = new Set(
+      [
+        context,
+        ...recommendations.map((recommendation) => recommendation.serviceName),
+      ]
+        .join(' ')
+        .match(/\d+/g) ?? [],
+    );
+    const summaryNumbers = summary.match(/\d+/g) ?? [];
+    return summaryNumbers.some((number) => !supportedNumbers.has(number));
+  }
+
+  private buildFallbackSummary(
+    recommendations: GeneratedRecommendationItem[],
+    summaryPreamble?: string,
+  ): string {
+    if (summaryPreamble && recommendations.length > 0) return summaryPreamble;
+
+    const recommendationNames = recommendations
+      .slice(0, 4)
+      .map((recommendation) =>
+        recommendation.serviceName
+          .replace(/[\r\n.!?*_`~]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 100),
+      )
+      .filter(Boolean)
+      .map((name) => `«${name}»`);
+
+    if (recommendationNames.length === 0) {
+      return [
+        'В соответствии с предоставленной вами информацией',
+        'специализированный AI-ассистент оценил доступные ответы анкеты,',
+        'чтобы подобрать подходящие инструменты для отдела продаж.',
+        'Данных пока недостаточно для конкретных выводов,',
+        'поэтому по мере уточнения задач и процессов',
+        'набор рекомендаций может быть дополнен.',
+      ].join(' ');
+    }
+
+    const lastName = recommendationNames.at(-1);
+    const formattedNames =
+      recommendationNames.length === 1
+        ? recommendationNames[0]
+        : `${recommendationNames.slice(0, -1).join(', ')} и ${lastName}`;
+
+    const introduction = [
+      'В соответствии с предоставленной вами информацией',
+      'специализированный AI-ассистент рекомендует обратить внимание на',
+      formattedNames,
+    ].join(' ');
+    return [
+      `${introduction}.`,
+      'Эти инструменты подобраны с учётом указанных в анкете задач',
+      'и текущего состояния процессов продаж,',
+      'без предположений о данных, которых вы не предоставляли.',
+    ].join(' ');
+  }
+
+  private resolveSummaryPreamble(
+    dto: GenerateRecommendationsDto,
+  ): string | undefined {
+    const clientProfile = dto.clientProfile ?? {};
+    const productStage = this.normalizeText(
+      String(clientProfile.productStage ?? ''),
+    );
+    const profileText = this.normalizeText(JSON.stringify(clientProfile));
+    const explicitlyNeedsDepartmentFromZero = [
+      'отдел продаж с нуля',
+      'отсутствует отдел продаж',
+      'нет отдела продаж',
+      'построить отдел продаж',
+    ].some((marker) => profileText.includes(marker));
+
+    if (productStage === 'new' || productStage.includes('новый')) {
+      return NEW_SALES_DEPARTMENT_PREAMBLE;
+    }
+
+    if (
+      productStage === 'existing' ||
+      productStage.includes('уже продаю') ||
+      productStage.includes('существующ')
+    ) {
+      return EXISTING_SALES_DEPARTMENT_PREAMBLE;
+    }
+
+    if (explicitlyNeedsDepartmentFromZero) {
+      return NEW_SALES_DEPARTMENT_PREAMBLE;
+    }
+
+    return undefined;
+  }
+
+  private haveSameRecommendationTargets(
+    generated: GeneratedRecommendationItem[],
+    final: GeneratedRecommendationItem[],
+  ): boolean {
+    const generatedTargets = new Set(
+      generated.map((item) => this.getRecommendationTargetKey(item)),
+    );
+    const finalTargets = new Set(
+      final.map((item) => this.getRecommendationTargetKey(item)),
+    );
+    return (
+      generatedTargets.size === finalTargets.size &&
+      [...generatedTargets].every((target) => finalTargets.has(target))
+    );
+  }
+
+  private getRecommendationTargetKey(
+    recommendation: GeneratedRecommendationItem,
+  ): string {
+    return recommendation.packageId
+      ? `package:${recommendation.packageId}`
+      : `service:${recommendation.serviceId ?? ''}`;
+  }
+
+  private isValidRussianSummary(
+    summary: string,
+    recommendations: GeneratedRecommendationItem[],
+    context: string,
+  ): boolean {
+    const russianWords = summary.match(/[а-яё]+/giu) ?? [];
+    const latinWords = (summary.match(/[a-z0-9]*[a-z][a-z0-9]*/giu) ?? []).map(
+      (word) => word.toLowerCase(),
+    );
+    if (
+      russianWords.length < MIN_RUSSIAN_SUMMARY_WORDS ||
+      russianWords.length < latinWords.length
+    ) {
+      return false;
+    }
+
+    const allowedLatinWords = new Set(
+      this.normalizeText(
+        [
+          context,
+          ...recommendations.map(
+            (recommendation) => recommendation.serviceName,
+          ),
+        ].join(' '),
+      )
+        .split(' ')
+        .filter((word) => /^(?=.*[a-z])[a-z0-9]+$/i.test(word)),
+    );
+    allowedLatinWords.add('ai');
+
+    return latinWords.every((word) => allowedLatinWords.has(word));
   }
 
   private selectCatalogForLlm(

@@ -45,6 +45,7 @@ import { RecommendationSource } from './entities/recommendation-source.enum';
 import {
   RecommendationScoringService,
   type GeneratedRecommendationItem,
+  type GeneratedRecommendationsResult,
   type ServiceCandidate,
 } from './recommendation-scoring.service';
 import { RECOMMENDATION_CATALOG_ENTRIES } from './recommendation-catalog.registry';
@@ -758,6 +759,13 @@ export class RecommendationsService implements OnModuleInit {
   async generateForUser(
     dto: GenerateRecommendationsDto,
   ): Promise<GeneratedRecommendationItem[]> {
+    const result = await this.generateForUserWithSummary(dto);
+    return result.recommendations;
+  }
+
+  async generateForUserWithSummary(
+    dto: GenerateRecommendationsDto,
+  ): Promise<GeneratedRecommendationsResult> {
     await this.ensureUserExists(dto.userId);
     const effectiveDto: GenerateRecommendationsDto = {
       ...dto,
@@ -770,11 +778,12 @@ export class RecommendationsService implements OnModuleInit {
     const limit = dto.limit;
     const services = await this.findRecommendableServices();
     const context = this.scoringService.buildDiagnosticContext(effectiveDto);
-    let ranked = await this.scoringService.generateAiRecommendations(
+    const aiResult = await this.scoringService.generateAiRecommendations(
       effectiveDto,
       services,
       context,
     );
+    let ranked = aiResult.recommendations;
 
     ranked = this.relevanceRanker.rankRecommendations(
       effectiveDto,
@@ -797,9 +806,18 @@ export class RecommendationsService implements OnModuleInit {
       if (limit !== undefined) {
         visibleRanked = visibleRanked.slice(0, limit);
       }
-      return visibleRanked.map((item) =>
+      const recommendations = visibleRanked.map((item) =>
         this.toPublicGeneratedRecommendationItem(item),
       );
+      return {
+        summary: this.scoringService.finalizeRecommendationSummary(
+          effectiveDto,
+          aiResult,
+          recommendations,
+          context,
+        ),
+        recommendations,
+      };
     }
 
     const { persisted, compactedRecommendationIds } =
@@ -844,11 +862,20 @@ export class RecommendationsService implements OnModuleInit {
 
         return { persisted, compactedRecommendationIds };
       });
-    return persisted.filter(
+    const recommendations = persisted.filter(
       (item) =>
         !item.recommendation?.id ||
         !compactedRecommendationIds.has(item.recommendation.id),
     );
+    return {
+      summary: this.scoringService.finalizeRecommendationSummary(
+        effectiveDto,
+        aiResult,
+        recommendations,
+        context,
+      ),
+      recommendations,
+    };
   }
 
   // ── Admin delete ──────────────────────────────────────────────────
