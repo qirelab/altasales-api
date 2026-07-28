@@ -21,3 +21,12 @@ export const AI_WELCOME_MESSAGE =
   'рекомендациях, объясню, почему вам подобрали именно эти услуги, и отвечу ' +
   'на вопросы про услуги, экспертов и работу платформы. Просто напишите, что ' +
   'вас интересует.';
+
+/**
+ * Sent by the AI when a handoff to a live operator is triggered by an
+ * explicit user request. Persisted as an AI-authored ChatMessage so the
+ * client sees a natural continuation of the thread while the operator is
+ * being paged.
+ */
+export const HANDOFF_ANNOUNCE_MESSAGE =
+  'Соединяю вас со специалистом. Менеджер ответит в ближайшее время.';

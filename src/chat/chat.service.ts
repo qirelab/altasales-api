@@ -96,6 +96,9 @@ export class ChatService {
           lastMessage: lastMessagePreview,
           unreadCount,
           updatedAt: conv.updatedAt,
+          needsHumanHandoff: conv.needsHumanHandoff,
+          handoffTrigger: conv.handoffTrigger,
+          handoffRequestedAt: conv.handoffRequestedAt,
         };
       }),
     );
@@ -290,6 +293,9 @@ export class ChatService {
       unreadCount,
       orderId: conversation.orderId,
       updatedAt: conversation.updatedAt,
+      needsHumanHandoff: conversation.needsHumanHandoff,
+      handoffTrigger: conversation.handoffTrigger,
+      handoffRequestedAt: conversation.handoffRequestedAt,
     };
   }
 
@@ -422,9 +428,30 @@ export class ChatService {
     });
     const files = await this.linkFilesToMessage(dto.fileIds, savedMessage.id);
     const now = new Date();
+
+    const isHumanReplierTurn =
+      membership.role !== ChatParticipantRole.Client &&
+      membership.role !== ChatParticipantRole.Ai;
+
     await this.conversationRepository.update(conversation.id, {
       updatedAt: now,
     });
+
+    let handoffResolved = false;
+    if (isHumanReplierTurn) {
+      const result = await this.conversationRepository
+        .createQueryBuilder()
+        .update(ChatConversation)
+        .set({
+          needsHumanHandoff: false,
+          handoffTrigger: null,
+          handoffRequestedAt: null,
+        })
+        .where('id = :id', { id: conversation.id })
+        .andWhere('"needsHumanHandoff" = true')
+        .execute();
+      handoffResolved = (result.affected ?? 0) > 0;
+    }
 
     const recipientIds = await this.getRecipientIds(conversation, userId);
     const payload = {
@@ -434,6 +461,25 @@ export class ChatService {
     this.wsGateway.emitToUser(userId, 'chat:new_message', payload);
     for (const recipientId of recipientIds) {
       this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+    }
+
+    if (handoffResolved) {
+      const handoffPayload = {
+        conversationId: conversation.id,
+        resolvedAt: now,
+      };
+      this.wsGateway.emitToUser(
+        userId,
+        'chat:handoff_resolved',
+        handoffPayload,
+      );
+      for (const recipientId of recipientIds) {
+        this.wsGateway.emitToUser(
+          recipientId,
+          'chat:handoff_resolved',
+          handoffPayload,
+        );
+      }
     }
 
     if (membership.role === ChatParticipantRole.Client) {
