@@ -312,7 +312,7 @@ export class ServicesService {
       .where('service.id = :id', { id })
       .andWhere('(service."categoryId" IS NULL OR category.id IS NOT NULL)')
       .getOne();
-    if (!service) {
+    if (!service || service.isHidden) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
     return service;

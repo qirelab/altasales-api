@@ -158,7 +158,7 @@ export class PackagesService {
       )`)
       .getOne();
 
-    if (!servicePackage) {
+    if (!servicePackage || servicePackage.isHidden) {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
