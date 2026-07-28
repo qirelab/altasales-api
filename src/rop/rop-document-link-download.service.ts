@@ -1,14 +1,20 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  type RopAnalyzeUploadProfile,
+  ROP_DOCUMENT_ANALYZE_UPLOAD_PROFILE,
+} from './rop-analyze-upload-profile';
 
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
-
-const ALLOWED_EXTENSIONS = new Set(['pdf', 'docx', 'xlsx']);
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
 };
 
 const EXTENSION_BY_MIME = new Map<string, string>([
@@ -20,6 +26,12 @@ const EXTENSION_BY_MIME = new Map<string, string>([
   ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'],
   ['application/vnd.ms-excel', 'xlsx'],
   ['application/msword', 'docx'],
+  ['text/csv', 'csv'],
+  ['application/csv', 'csv'],
+  ['image/png', 'png'],
+  ['image/jpeg', 'jpg'],
+  ['image/jpg', 'jpg'],
+  ['image/webp', 'webp'],
 ]);
 
 @Injectable()
@@ -27,13 +39,14 @@ export class RopDocumentLinkDownloadService {
   async downloadAsFile(
     link: string,
     suggestedName?: string,
+    profile: RopAnalyzeUploadProfile = ROP_DOCUMENT_ANALYZE_UPLOAD_PROFILE,
   ): Promise<Express.Multer.File> {
     const normalizedLink = link.trim();
     const downloadUrl = await this.resolveDownloadUrl(normalizedLink);
     const parsedDownloadUrl = this.parseUrl(downloadUrl);
 
     const response = await this.fetchDocument(parsedDownloadUrl.href);
-    const buffer = Buffer.from(await this.readResponseBody(response));
+    const buffer = Buffer.from(await this.readResponseBody(response, profile));
     const contentType = this.normalizeMimeType(
       response.headers.get('content-type'),
     );
@@ -45,10 +58,8 @@ export class RopDocumentLinkDownloadService {
     );
     const extension = this.getExtension(fileName);
 
-    if (!ALLOWED_EXTENSIONS.has(extension)) {
-      throw new BadRequestException(
-        'Допустимы только файлы PDF, DOCX или XLSX',
-      );
+    if (!profile.allowedExtensions.has(extension)) {
+      throw new BadRequestException(profile.formatErrorMessage);
     }
 
     const mimetype =
@@ -209,15 +220,18 @@ export class RopDocumentLinkDownloadService {
     }
   }
 
-  private async readResponseBody(response: Response): Promise<ArrayBuffer> {
+  private async readResponseBody(
+    response: Response,
+    profile: RopAnalyzeUploadProfile,
+  ): Promise<ArrayBuffer> {
     const contentLength = Number(response.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > MAX_FILE_BYTES) {
-      throw new BadRequestException('Максимальный размер файла — 20 МБ');
+    if (Number.isFinite(contentLength) && contentLength > profile.maxBytes) {
+      throw new BadRequestException(profile.sizeErrorMessage);
     }
 
     const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > MAX_FILE_BYTES) {
-      throw new BadRequestException('Максимальный размер файла — 20 МБ');
+    if (buffer.byteLength > profile.maxBytes) {
+      throw new BadRequestException(profile.sizeErrorMessage);
     }
 
     if (buffer.byteLength === 0) {
