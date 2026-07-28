@@ -413,6 +413,7 @@ export class RecommendationScoringService {
       recommendations,
       summaryPreamble,
     );
+    if (recommendations.length === 0) return fallback;
     if (summaryPreamble) return summaryPreamble;
     if (!summary?.trim()) return fallback;
 
@@ -465,7 +466,7 @@ export class RecommendationScoringService {
     recommendations: GeneratedRecommendationItem[],
     summaryPreamble?: string,
   ): string {
-    if (summaryPreamble) return summaryPreamble;
+    if (summaryPreamble && recommendations.length > 0) return summaryPreamble;
 
     const recommendationNames = recommendations
       .slice(0, 4)

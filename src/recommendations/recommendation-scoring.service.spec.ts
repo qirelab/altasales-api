@@ -218,10 +218,21 @@ describe('RecommendationScoringService', () => {
       category: null,
     } as unknown as ServiceCandidate;
     llmProxy.chat.mockResolvedValueOnce({
-      content:
-        '{"recommendations":[{"serviceId":"unrelated-service-id","priority":"medium","rationale":' +
-        '"Подходит, потому что закрывает описанный клиентом сценарий.","diagnosticSignals":["cust' +
-        'om_fit"]}]}',
+      content: JSON.stringify({
+        summary: [
+          'AI-ассистент рекомендует юридический документ.',
+          'Он поможет решить задачи клиента.',
+        ].join(' '),
+        recommendations: [
+          {
+            serviceId: 'unrelated-service-id',
+            priority: 'medium',
+            rationale:
+              'Подходит, потому что закрывает описанный клиентом сценарий.',
+            diagnosticSignals: ['custom_fit'],
+          },
+        ],
+      }),
     });
 
     const result = await service.generateAiRecommendations(
@@ -234,6 +245,8 @@ describe('RecommendationScoringService', () => {
     );
 
     expect(result.recommendations).toEqual([]);
+    expect(result.summary).toContain('Данных пока недостаточно');
+    expect(result.summary).not.toContain('юридический документ');
   });
 
   it('resolves AI recommendation output to packageId for package candidates', async () => {
