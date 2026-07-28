@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  ChatbotRagResponse,
-  ChatbotRagService,
-} from '../../chatbot/services/chatbot-rag.service';
+import { ChatbotRagService } from '../../chatbot/services/chatbot-rag.service';
 import {
   HandoffDetection,
   HandoffTriggerService,
@@ -225,7 +222,11 @@ export class AiChatOrchestratorService {
     };
 
     for (const recipientId of recipientIds) {
-      this.wsGateway.emitToUser(recipientId, 'chat:new_message', messagePayload);
+      this.wsGateway.emitToUser(
+        recipientId,
+        'chat:new_message',
+        messagePayload,
+      );
     }
 
     if (handoffRegistered) {

@@ -84,9 +84,9 @@ export class ChatConversation {
 
   @ApiProperty({
     description:
-      'True when the AI could not close the last client turn and a human '
-      + 'operator is expected to step in. Set by the orchestrator, cleared '
-      + 'when any non-AI participant sends a message in the conversation.',
+      'True when the AI could not close the last client turn and a human ' +
+      'operator is expected to step in. Set by the orchestrator, cleared ' +
+      'when any non-AI participant sends a message in the conversation.',
   })
   @Column({ type: 'boolean', default: false })
   needsHumanHandoff: boolean;

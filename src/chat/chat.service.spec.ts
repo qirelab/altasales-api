@@ -325,8 +325,12 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 
   it('resolves a pending handoff when an operator writes into the conversation', async () => {
-    const { service, conversationRepository, participantRepository, wsGateway } =
-      buildService({ conditionalUpdateAffected: 1 });
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService({ conditionalUpdateAffected: 1 });
     conversationRepository.findOne.mockResolvedValueOnce(
       makeConversation({ needsHumanHandoff: true }),
     );
@@ -356,8 +360,12 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 
   it('does not reset handoff when a client writes (only human replier resolves)', async () => {
-    const { service, conversationRepository, participantRepository, wsGateway } =
-      buildService();
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(
       makeConversation({ needsHumanHandoff: true }),
     );
@@ -387,8 +395,12 @@ describe('ChatService.sendPlatformMessage', () => {
     // Simulates the race where orchestrator has not yet flipped the flag
     // (or another operator already cleared it) — conditional UPDATE reports
     // affected=0, so we must NOT broadcast a false-positive resolved event.
-    const { service, conversationRepository, participantRepository, wsGateway } =
-      buildService({ conditionalUpdateAffected: 0 });
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService({ conditionalUpdateAffected: 0 });
     conversationRepository.findOne.mockResolvedValueOnce(
       makeConversation({ needsHumanHandoff: false }),
     );

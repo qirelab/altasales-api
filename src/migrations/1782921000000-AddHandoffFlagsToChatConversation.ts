@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddHandoffFlagsToChatConversation1782920000000
-  implements MigrationInterface
-{
+export class AddHandoffFlagsToChatConversation1782921000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       DO $$ BEGIN

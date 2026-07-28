@@ -471,9 +471,11 @@ describe('AiChatOrchestratorService', () => {
       ],
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm1',
@@ -492,7 +494,9 @@ describe('AiChatOrchestratorService', () => {
 
     const eventNames = wsGateway.emitToUser.mock.calls.map((call) => call[1]);
     expect(eventNames.filter((e) => e === 'chat:new_message')).toHaveLength(2);
-    expect(eventNames.filter((e) => e === 'chat:handoff_requested')).toHaveLength(2);
+    expect(
+      eventNames.filter((e) => e === 'chat:handoff_requested'),
+    ).toHaveLength(2);
     const handoffPayload = wsGateway.emitToUser.mock.calls.find(
       (call) => call[1] === 'chat:handoff_requested',
     )?.[2];
@@ -505,17 +509,24 @@ describe('AiChatOrchestratorService', () => {
   });
 
   it('marks rag_no_context handoff when RAG refuses with no_results', async () => {
-    const clientMsg = makeMessage({ id: 'm1', senderId: clientUserId, text: 'q' });
-    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
-      historyRows: [clientMsg],
-      currentMessage: clientMsg,
-      ragRefusalReason: 'no_results',
-      ragAnswer: 'Я не нашёл информации',
+    const clientMsg = makeMessage({
+      id: 'm1',
+      senderId: clientUserId,
+      text: 'q',
     });
+    const { orchestrator, conversationRepository, wsGateway } =
+      buildOrchestrator({
+        historyRows: [clientMsg],
+        currentMessage: clientMsg,
+        ragRefusalReason: 'no_results',
+        ragAnswer: 'Я не нашёл информации',
+      });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm1',
@@ -534,19 +545,22 @@ describe('AiChatOrchestratorService', () => {
     // turn — conditional UPDATE with WHERE needsHumanHandoff = false hits
     // nothing, so no duplicate WS event goes out and handoffRequestedAt
     // stays at its original value.
-    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
-      historyRows: [
-        makeMessage({ id: 'm1', senderId: clientUserId, text: 'q1' }),
-      ],
-      ragRefusalReason: 'no_results',
-    });
+    const { orchestrator, conversationRepository, wsGateway } =
+      buildOrchestrator({
+        historyRows: [
+          makeMessage({ id: 'm1', senderId: clientUserId, text: 'q1' }),
+        ],
+        ragRefusalReason: 'no_results',
+      });
     conversationRepository.conditionalExecute.mockResolvedValueOnce({
       affected: 0,
     });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm1',
@@ -561,16 +575,23 @@ describe('AiChatOrchestratorService', () => {
   });
 
   it('does not flag handoff when RAG returned a normal answer', async () => {
-    const clientMsg = makeMessage({ id: 'm1', senderId: clientUserId, text: 'q' });
-    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
-      historyRows: [clientMsg],
-      currentMessage: clientMsg,
-      ragAnswer: 'вот ответ',
+    const clientMsg = makeMessage({
+      id: 'm1',
+      senderId: clientUserId,
+      text: 'q',
     });
+    const { orchestrator, conversationRepository, wsGateway } =
+      buildOrchestrator({
+        historyRows: [clientMsg],
+        currentMessage: clientMsg,
+        ragAnswer: 'вот ответ',
+      });
 
-    await (orchestrator as unknown as {
-      respondToClientMessage: (input: unknown) => Promise<void>;
-    }).respondToClientMessage({
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
       conversation,
       clientUserId,
       clientMessageId: 'm1',

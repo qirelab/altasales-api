@@ -429,10 +429,13 @@ export class ChatService {
     const files = await this.linkFilesToMessage(dto.fileIds, savedMessage.id);
     const now = new Date();
 
-    const isHumanReplierTurn = membership.role !== ChatParticipantRole.Client
-      && membership.role !== ChatParticipantRole.Ai;
+    const isHumanReplierTurn =
+      membership.role !== ChatParticipantRole.Client &&
+      membership.role !== ChatParticipantRole.Ai;
 
-    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+    await this.conversationRepository.update(conversation.id, {
+      updatedAt: now,
+    });
 
     let handoffResolved = false;
     if (isHumanReplierTurn) {
@@ -465,9 +468,17 @@ export class ChatService {
         conversationId: conversation.id,
         resolvedAt: now,
       };
-      this.wsGateway.emitToUser(userId, 'chat:handoff_resolved', handoffPayload);
+      this.wsGateway.emitToUser(
+        userId,
+        'chat:handoff_resolved',
+        handoffPayload,
+      );
       for (const recipientId of recipientIds) {
-        this.wsGateway.emitToUser(recipientId, 'chat:handoff_resolved', handoffPayload);
+        this.wsGateway.emitToUser(
+          recipientId,
+          'chat:handoff_resolved',
+          handoffPayload,
+        );
       }
     }
 

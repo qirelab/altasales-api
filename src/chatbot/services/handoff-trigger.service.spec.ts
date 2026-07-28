@@ -79,19 +79,16 @@ describe('HandoffTriggerService.detect', () => {
     'generation_failed',
     'empty_llm_response',
     'context_too_large',
-  ] as const)(
-    'fires rag_infra_error on refusalReason %s',
-    (reason) => {
-      const result = service.detect({
-        clientMessage: 'Расскажите про CRM Silver',
-        ragResponse: makeRag({ refusalReason: reason }),
-      });
-      expect(result).toEqual({
-        needsHandoff: true,
-        trigger: ChatHandoffTrigger.RagInfraError,
-      });
-    },
-  );
+  ] as const)('fires rag_infra_error on refusalReason %s', (reason) => {
+    const result = service.detect({
+      clientMessage: 'Расскажите про CRM Silver',
+      ragResponse: makeRag({ refusalReason: reason }),
+    });
+    expect(result).toEqual({
+      needsHandoff: true,
+      trigger: ChatHandoffTrigger.RagInfraError,
+    });
+  });
 
   it('does not fire on an unrelated word that only overlaps a substring', () => {
     // "менее" contains "мене" — pattern must NOT match without the full stem.
