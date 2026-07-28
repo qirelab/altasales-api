@@ -86,27 +86,14 @@ export class ChatService {
 
         const unreadCount = await this.computeUnreadCount(conv, userId);
 
+        const participant = pickParticipant(otherUser);
+        const lastMessagePreview = pickLastMessagePreview(lastMessage);
         return {
           id: conv.id,
           type: conv.type,
           orderId: conv.orderId,
-          participant: otherUser
-            ? {
-              id: otherUser.id,
-              name: otherUser.name,
-              lastName: otherUser.lastName,
-              email: otherUser.email,
-            }
-            : null,
-          lastMessage: lastMessage
-            ? {
-              id: lastMessage.id,
-              text: lastMessage.text,
-              senderId: lastMessage.senderId,
-              isAiGenerated: lastMessage.isAiGenerated,
-              createdAt: lastMessage.createdAt,
-            }
-            : null,
+          participant,
+          lastMessage: lastMessagePreview,
           unreadCount,
           updatedAt: conv.updatedAt,
         };
@@ -293,26 +280,13 @@ export class ChatService {
     });
     const unreadCount = await this.computeUnreadCount(conversation, userId);
 
+    const participant = pickParticipant(aiUser);
+    const lastMessagePreview = pickLastMessagePreview(lastMessage);
     return {
       id: conversation.id,
       type: conversation.type,
-      participant: aiUser
-        ? {
-          id: aiUser.id,
-          name: aiUser.name,
-          lastName: aiUser.lastName,
-          email: aiUser.email,
-        }
-        : null,
-      lastMessage: lastMessage
-        ? {
-          id: lastMessage.id,
-          text: lastMessage.text,
-          senderId: lastMessage.senderId,
-          isAiGenerated: lastMessage.isAiGenerated,
-          createdAt: lastMessage.createdAt,
-        }
-        : null,
+      participant,
+      lastMessage: lastMessagePreview,
       unreadCount,
       orderId: conversation.orderId,
       updatedAt: conversation.updatedAt,
@@ -736,7 +710,8 @@ export class ChatService {
         .createQueryBuilder()
         .update(ChatConversationParticipant)
         .set({
-          lastReadAt: () => 'GREATEST(COALESCE("lastReadAt", :cursor), :cursor)',
+          lastReadAt: () =>
+            'GREATEST(COALESCE("lastReadAt", :cursor), :cursor)',
         })
         .where('"conversationId" = :conversationId', {
           conversationId: conversation.id,
@@ -966,4 +941,36 @@ export class ChatService {
     }
     return user;
   }
+}
+
+// Extracted from inline ternary literals so prettier's continuation indent
+// stops clashing with eslint's `indent` rule. Callers just receive an object
+// or null and drop it into the response shape.
+function pickParticipant(
+  user: User | null,
+): { id: string; name: string; lastName: string; email: string } | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    name: user.name,
+    lastName: user.lastName,
+    email: user.email,
+  };
+}
+
+function pickLastMessagePreview(message: ChatMessage | null): {
+  id: string;
+  text: string;
+  senderId: string;
+  isAiGenerated: boolean;
+  createdAt: Date;
+} | null {
+  if (!message) return null;
+  return {
+    id: message.id,
+    text: message.text,
+    senderId: message.senderId,
+    isAiGenerated: message.isAiGenerated,
+    createdAt: message.createdAt,
+  };
 }

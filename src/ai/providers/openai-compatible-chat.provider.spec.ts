@@ -149,6 +149,145 @@ describe('OpenAICompatibleChatProviderAdapter', () => {
     });
   });
 
+  it('streams OpenAI-compatible deltas as content chunks and closes on [DONE]', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"Пр"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"ивет"}}]}\n\n',
+        'data: {"usage":{"prompt_tokens":4,"completion_tokens":2}}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    );
+
+    const events: unknown[] = [];
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'delta', content: 'Пр' },
+      { type: 'delta', content: 'ивет' },
+      expect.objectContaining({
+        type: 'done',
+        usage: expect.objectContaining({ tokensIn: 4, tokensOut: 2 }),
+      }),
+    ]);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://provider.test/v1/chat/completions',
+      expect.objectContaining({
+        body: JSON.stringify({
+          model: 'real-chat-model',
+          messages: [{ role: 'user', content: 'Hi' }],
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
+      }),
+    );
+  });
+
+  it('streamChat throws provider unavailable when upstream returns no content', async () => {
+    fetchSpy.mockResolvedValueOnce(sseResponse(['data: [DONE]\n\n']));
+
+    let caught: unknown;
+    try {
+      for await (const _ of provider.streamChat([
+        { role: 'user', content: 'Hi' },
+      ])) {
+        // consume
+      }
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AiError);
+    expect((caught as AiError).code).toBe('AI_PROVIDER_UNAVAILABLE');
+  });
+
+  it('streamChat skips malformed frames but keeps yielding valid ones', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse([
+        'data: not-json-oops\n\n',
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    );
+
+    const events: unknown[] = [];
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      events.push(event);
+    }
+
+    // The malformed frame is silently skipped; the valid one still lands.
+    expect(
+      events.filter((e) => (e as { type: string }).type === 'delta'),
+    ).toEqual([{ type: 'delta', content: 'ok' }]);
+  });
+
+  it('streamChat parses SSE frames delimited with CRLF (proxy-normalised)', async () => {
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse([
+        'data: {"choices":[{"delta":{"content":"a"}}]}\r\n\r\n',
+        'data: {"choices":[{"delta":{"content":"b"}}]}\r\n\r\n',
+        'data: [DONE]\r\n\r\n',
+      ]),
+    );
+
+    const deltas: string[] = [];
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      if (event.type === 'delta') deltas.push(event.content);
+    }
+
+    expect(deltas).toEqual(['a', 'b']);
+  });
+
+  it('streamChat cancels the upstream body reader on early exit', async () => {
+    const cancelSpy = jest.fn().mockResolvedValue(undefined);
+    fetchSpy.mockResolvedValueOnce(
+      sseResponse(
+        [
+          'data: {"choices":[{"delta":{"content":"first"}}]}\n\n',
+          // Provider keeps generating — we break out before receiving [DONE].
+          'data: {"choices":[{"delta":{"content":"second"}}]}\n\n',
+        ],
+        cancelSpy,
+      ),
+    );
+
+    let count = 0;
+    for await (const event of provider.streamChat([
+      { role: 'user', content: 'Hi' },
+    ])) {
+      if (event.type === 'delta') {
+        count += 1;
+        if (count === 1) break;
+      }
+    }
+
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it('streamChat surfaces safe HTTP errors from the upstream', async () => {
+    fetchSpy.mockResolvedValueOnce(errorResponse(429));
+
+    let caught: unknown;
+    try {
+      for await (const _ of provider.streamChat([
+        { role: 'user', content: 'Hi' },
+      ])) {
+        // consume
+      }
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AiError);
+    expect((caught as AiError).code).toBe('AI_PROVIDER_RATE_LIMITED');
+  });
+
   it('does not leak baseUrl, apiKey, real model, request body, or response body', async () => {
     fetchSpy.mockResolvedValueOnce(errorResponse(500));
 
@@ -163,6 +302,27 @@ describe('OpenAICompatibleChatProviderAdapter', () => {
     return {
       ok: true,
       json: jest.fn().mockResolvedValue(body),
+    } as unknown as Response;
+  }
+
+  function sseResponse(frames: string[], onCancel?: jest.Mock): Response {
+    const encoder = new TextEncoder();
+    const chunks = frames.map((frame) => encoder.encode(frame));
+    let cursor = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (cursor >= chunks.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(chunks[cursor]);
+        cursor += 1;
+      },
+      cancel: onCancel,
+    });
+    return {
+      ok: true,
+      body: stream,
     } as unknown as Response;
   }
 
