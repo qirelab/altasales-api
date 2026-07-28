@@ -275,6 +275,22 @@ export class AiChatOrchestratorService {
   ): Promise<void> {
     const startedAt = Date.now();
 
+    const explicit = this.handoffTrigger.detect({
+      clientMessage: input.question,
+    });
+    if (explicit.needsHandoff) {
+      hooks.onDelta(HANDOFF_ANNOUNCE_MESSAGE);
+      await this.persistStreamAnswer({
+        input,
+        answerText: HANDOFF_ANNOUNCE_MESSAGE,
+        handoff: explicit,
+        hooks,
+        refusalReason: 'explicit_request',
+        startedAt,
+      });
+      return;
+    }
+
     const currentMessage = await this.messageRepository.findOne({
       where: { id: input.clientMessageId },
     });
@@ -348,19 +364,48 @@ export class AiChatOrchestratorService {
       return;
     }
 
-    // A refusal replaces any partial deltas — the RAG service only emits
-    // deltas on the success path. Persist the final answer (delta-accumulated
-    // or refusal message) as a single ChatMessage row.
     const answerText = terminalResponse?.answer ?? accumulated;
     if (!answerText) {
       hooks.onError('empty_answer');
       return;
     }
 
-    // Persist the AI message + broadcast to other participants. If the
-    // conversation was deleted mid-stream (FK cascade), we surface a
-    // conversation_gone error to the caller rather than a generic crash.
+    const postRag = this.handoffTrigger.detect({
+      clientMessage: input.question,
+      ragResponse: {
+        answer: terminalResponse?.answer ?? accumulated,
+        hasContext: !terminalResponse?.refusalReason,
+        sources: [],
+        refusalReason: terminalResponse?.refusalReason as never,
+      },
+    });
+
+    await this.persistStreamAnswer({
+      input,
+      answerText,
+      handoff: postRag,
+      hooks,
+      refusalReason: terminalResponse?.refusalReason,
+      startedAt,
+    });
+  }
+
+  private async persistStreamAnswer(args: {
+    input: RespondInput;
+    answerText: string;
+    handoff: HandoffDetection;
+    hooks: StreamReplyHooks;
+    refusalReason?: string;
+    startedAt: number;
+  }): Promise<void> {
+    const { input, answerText, handoff, hooks, refusalReason, startedAt } =
+      args;
+
     let savedAnswer: ChatMessage;
+    let handoffRegistered = false;
+    let handoffTriggerType: ChatHandoffTrigger | null = null;
+    let handoffRequestedAt: Date | null = null;
+
     try {
       const answerMessage = this.messageRepository.create({
         conversationId: input.conversation.id,
@@ -375,6 +420,25 @@ export class AiChatOrchestratorService {
         updatedAt: now,
       });
 
+      if (handoff.needsHandoff) {
+        const result = await this.conversationRepository
+          .createQueryBuilder()
+          .update(ChatConversation)
+          .set({
+            needsHumanHandoff: true,
+            handoffTrigger: handoff.trigger,
+            handoffRequestedAt: now,
+          })
+          .where('id = :id', { id: input.conversation.id })
+          .andWhere('"needsHumanHandoff" = false')
+          .execute();
+        handoffRegistered = (result.affected ?? 0) > 0;
+        if (handoffRegistered) {
+          handoffTriggerType = handoff.trigger;
+          handoffRequestedAt = now;
+        }
+      }
+
       const recipientIds = await this.resolveRecipientIds(input.conversation);
       const payload = {
         message: { ...savedAnswer, files: [] },
@@ -384,11 +448,23 @@ export class AiChatOrchestratorService {
         },
       };
       for (const recipientId of recipientIds) {
-        // The streaming client saw the answer via SSE; skip echoing it back
-        // on WS or the UI will render duplicates. Other participants
-        // (experts, operators) still receive the standard chat:new_message.
         if (recipientId === input.clientUserId) continue;
         this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+      }
+
+      if (handoffRegistered) {
+        const handoffPayload = {
+          conversationId: input.conversation.id,
+          trigger: handoffTriggerType,
+          requestedAt: handoffRequestedAt,
+        };
+        for (const recipientId of recipientIds) {
+          this.wsGateway.emitToUser(
+            recipientId,
+            'chat:handoff_requested',
+            handoffPayload,
+          );
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -400,8 +476,8 @@ export class AiChatOrchestratorService {
       return;
     }
 
-    if (terminalResponse?.refusalReason) {
-      hooks.onRefusal(savedAnswer, terminalResponse.refusalReason);
+    if (refusalReason) {
+      hooks.onRefusal(savedAnswer, refusalReason);
     } else {
       hooks.onDone(savedAnswer);
     }
@@ -409,7 +485,9 @@ export class AiChatOrchestratorService {
     this.logger.log(
       `AI reply streamed for conversation ${input.conversation.id} in ${
         Date.now() - startedAt
-      }ms (refusalReason=${terminalResponse?.refusalReason ?? 'none'})`,
+      }ms (refusalReason=${refusalReason ?? 'none'}, handoff=${
+        handoffRegistered ? handoffTriggerType : 'none'
+      })`,
     );
   }
 

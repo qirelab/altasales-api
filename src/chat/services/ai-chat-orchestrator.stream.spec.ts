@@ -1,5 +1,7 @@
-import { AI_SYSTEM_USER_ID } from '../chat.constants';
+import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
 import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
+import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
 import {
   AiChatOrchestratorService,
   StreamReplyHooks,
@@ -46,8 +48,17 @@ function buildOrchestrator(
     create: jest.fn((entity) => ({ ...entity, id: 'ai-msg-1' })),
     save: jest.fn(async (entity) => ({ ...entity, id: 'ai-msg-1' })),
   };
+  const conditionalExecute = jest.fn().mockResolvedValue({ affected: 1 });
   const conversationRepository = {
     update: jest.fn().mockResolvedValue(undefined),
+    createQueryBuilder: jest.fn(() => ({
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: conditionalExecute,
+    })),
+    conditionalExecute,
   };
   const participantRepository = {
     find: jest
@@ -79,6 +90,7 @@ function buildOrchestrator(
     emitToUser: jest.fn(),
   };
   const historyMapper = new ChatHistoryMapperService();
+  const handoffTrigger = new HandoffTriggerService();
   const orchestrator = new AiChatOrchestratorService(
     messageRepository as never,
     conversationRepository as never,
@@ -86,6 +98,7 @@ function buildOrchestrator(
     ragService as never,
     historyMapper,
     wsGateway as never,
+    handoffTrigger,
   );
   return {
     orchestrator,
@@ -292,5 +305,105 @@ describe('AiChatOrchestratorService.streamReply', () => {
     );
 
     expect(calls.error).toEqual(['stream_failed']);
+  });
+
+  it('short-circuits RAG and marks handoff on an explicit user request', async () => {
+    const { orchestrator, messageRepository, conversationRepository, wsGateway } =
+      buildOrchestrator();
+    const askQuestionStream = jest.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (orchestrator as any).ragService = { askQuestionStream };
+    const { hooks, calls } = makeHooks();
+
+    await orchestrator.streamReply(
+      {
+        conversation,
+        clientUserId: 'client-1',
+        clientMessageId: 'client-msg-1',
+        question: 'Позовите менеджера, пожалуйста',
+      },
+      hooks,
+    );
+
+    expect(askQuestionStream).not.toHaveBeenCalled();
+    expect(calls.deltas).toEqual([HANDOFF_ANNOUNCE_MESSAGE]);
+    expect(messageRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: HANDOFF_ANNOUNCE_MESSAGE,
+        senderId: AI_SYSTEM_USER_ID,
+        isAiGenerated: true,
+      }),
+    );
+    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
+    const handoffEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_requested',
+    );
+    expect(handoffEvents.length).toBeGreaterThan(0);
+    expect(handoffEvents[0][2]).toEqual(
+      expect.objectContaining({
+        conversationId: 'conv-1',
+        trigger: ChatHandoffTrigger.UserExplicitRequest,
+      }),
+    );
+    expect(calls.refusal).toEqual(['ai-msg-1:explicit_request']);
+  });
+
+  it('marks rag_no_context handoff after a streamed no_results refusal', async () => {
+    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator({
+      ragEvents: [
+        {
+          type: 'refusal',
+          response: {
+            answer: 'Я не нашёл информации по этому вопросу.',
+            hasContext: false,
+            sources: [],
+            refusalReason: 'no_results',
+          },
+        },
+      ],
+    });
+    const { hooks } = makeHooks();
+
+    await orchestrator.streamReply(
+      {
+        conversation,
+        clientUserId: 'client-1',
+        clientMessageId: 'client-msg-1',
+        question: 'какой-то невозможный вопрос',
+      },
+      hooks,
+    );
+
+    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
+    const handoffEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_requested',
+    );
+    expect(handoffEvents.length).toBeGreaterThan(0);
+    expect(handoffEvents[0][2]).toEqual(
+      expect.objectContaining({
+        trigger: ChatHandoffTrigger.RagNoContext,
+      }),
+    );
+  });
+
+  it('does not flag handoff on a normal streamed answer', async () => {
+    const { orchestrator, conversationRepository, wsGateway } = buildOrchestrator();
+    const { hooks } = makeHooks();
+
+    await orchestrator.streamReply(
+      {
+        conversation,
+        clientUserId: 'client-1',
+        clientMessageId: 'client-msg-1',
+        question: 'Что такое CRM Silver?',
+      },
+      hooks,
+    );
+
+    expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
+    const handoffEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_requested',
+    );
+    expect(handoffEvents).toHaveLength(0);
   });
 });

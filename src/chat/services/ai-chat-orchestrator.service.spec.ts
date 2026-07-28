@@ -565,7 +565,6 @@ describe('AiChatOrchestratorService', () => {
       clientUserId,
       clientMessageId: 'm1',
       question: 'ещё один невозможный вопрос',
-      recipientIds: ['client-1'],
     });
 
     const handoffCalls = wsGateway.emitToUser.mock.calls.filter(

@@ -100,6 +100,7 @@ export class ChatConversation {
   @Column({
     type: 'enum',
     enum: ChatHandoffTrigger,
+    enumName: 'chat_handoff_trigger_enum',
     nullable: true,
     default: null,
   })
