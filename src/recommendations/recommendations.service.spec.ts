@@ -88,7 +88,10 @@ describe('RecommendationsService', () => {
     };
     const scoringService = {
       buildDiagnosticContext: jest.fn().mockReturnValue('context'),
-      generateAiRecommendations: jest.fn().mockResolvedValue([]),
+      generateAiRecommendations: jest.fn().mockResolvedValue({
+        summary: 'Общее описание рекомендаций. Текст основан на анкете.',
+        recommendations: [],
+      }),
       scoreService: jest.fn((candidate) => ({
         serviceId: candidate.packageId ? null : candidate.serviceId,
         packageId: candidate.packageId ?? null,

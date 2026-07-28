@@ -770,11 +770,12 @@ export class RecommendationsService implements OnModuleInit {
     const limit = dto.limit;
     const services = await this.findRecommendableServices();
     const context = this.scoringService.buildDiagnosticContext(effectiveDto);
-    let ranked = await this.scoringService.generateAiRecommendations(
+    const aiResult = await this.scoringService.generateAiRecommendations(
       effectiveDto,
       services,
       context,
     );
+    let ranked = aiResult.recommendations;
 
     ranked = this.relevanceRanker.rankRecommendations(
       effectiveDto,
