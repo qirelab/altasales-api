@@ -103,15 +103,16 @@ describe('AiChatOrchestratorService', () => {
           ],
         ),
     };
+    const ragResolution = {
+      answer: opts.ragAnswer ?? 'AI answer',
+      hasContext: true,
+      sources: [],
+      refusalReason: opts.ragRefusalReason,
+    };
     const ragService = {
       askQuestion: opts.ragThrows
         ? jest.fn().mockRejectedValue(opts.ragThrows)
-        : jest.fn().mockResolvedValue({
-          answer: opts.ragAnswer ?? 'AI answer',
-          hasContext: true,
-          sources: [],
-          refusalReason: opts.ragRefusalReason,
-        }),
+        : jest.fn().mockResolvedValue(ragResolution),
     };
     const wsGateway = {
       emitToUser: jest.fn(),

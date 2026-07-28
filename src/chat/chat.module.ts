@@ -12,6 +12,7 @@ import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { ChatHistoryMapperService } from './services/chat-history-mapper.service';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
+import { ChatStreamingService } from './services/chat-streaming.service';
 
 @Module({
   imports: [
@@ -27,7 +28,12 @@ import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.servi
     ChatbotModule,
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatHistoryMapperService, AiChatOrchestratorService],
+  providers: [
+    ChatService,
+    ChatHistoryMapperService,
+    AiChatOrchestratorService,
+    ChatStreamingService,
+  ],
   exports: [ChatService],
 })
 export class ChatModule {}

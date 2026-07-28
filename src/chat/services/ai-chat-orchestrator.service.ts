@@ -19,6 +19,13 @@ type RespondInput = {
   question: string;
 };
 
+export type StreamReplyHooks = {
+  onDelta: (_content: string) => void;
+  onDone: (_message: ChatMessage) => void;
+  onRefusal: (_message: ChatMessage, _refusalReason: string) => void;
+  onError: (_reason: string) => void;
+};
+
 /**
  * Async orchestrator for the AI half of a platform conversation.
  *
@@ -143,6 +150,166 @@ export class AiChatOrchestratorService {
       `AI reply delivered for conversation ${input.conversation.id} in ${
         Date.now() - startedAt
       }ms (refusalReason=${ragResponse.refusalReason ?? 'none'})`,
+    );
+  }
+
+  /**
+   * Streaming counterpart of `scheduleReply`, invoked synchronously from the
+   * SSE endpoint. The caller receives every content chunk through `hooks.onDelta`
+   * as it arrives, and a single terminal `onDone` / `onRefusal` / `onError`
+   * once the answer is persisted (or generation fails).
+   *
+   * The streaming path bypasses the per-conversation queue: the SSE request
+   * keeps the HTTP connection open for the client's turn, which naturally
+   * serialises with the same client's next turn. Concurrent clients get their
+   * own connection, and the underlying `ChatConversation.updatedAt` timestamp
+   * is set once — same shape as the non-streaming reply.
+   *
+   * WS `chat:new_message` is emitted to OTHER participants only. The streaming
+   * client sees the message inline via SSE and would otherwise get a duplicate.
+   */
+  async streamReply(
+    input: RespondInput,
+    hooks: StreamReplyHooks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const startedAt = Date.now();
+
+    const currentMessage = await this.messageRepository.findOne({
+      where: { id: input.clientMessageId },
+    });
+    if (!currentMessage) {
+      hooks.onError('client_message_missing');
+      return;
+    }
+
+    const recentMessages = await this.messageRepository
+      .createQueryBuilder('m')
+      .where('m."conversationId" = :conversationId', {
+        conversationId: input.conversation.id,
+      })
+      .andWhere('m."createdAt" < :cutoff', { cutoff: currentMessage.createdAt })
+      .orderBy('m."createdAt"', 'DESC')
+      .addOrderBy('m."id"', 'DESC')
+      .take(HISTORY_FETCH_LIMIT)
+      .getMany();
+    const historySource = [...recentMessages].reverse();
+    const history = this.historyMapper.toHistoryEntries(
+      historySource,
+      input.clientUserId,
+    );
+
+    let accumulated = '';
+    let terminalResponse: {
+      answer: string;
+      refusalReason?: string;
+    } | null = null;
+
+    try {
+      const stream = this.ragService.askQuestionStream(
+        {
+          question: input.question,
+          history,
+        },
+        signal,
+      );
+      for await (const event of stream) {
+        if (event.type === 'delta') {
+          accumulated += event.content;
+          hooks.onDelta(event.content);
+          continue;
+        }
+        if (event.type === 'refusal') {
+          terminalResponse = {
+            answer: event.response.answer,
+            refusalReason: event.response.refusalReason,
+          };
+          continue;
+        }
+        terminalResponse = { answer: event.response.answer };
+      }
+    } catch (error) {
+      this.logger.error(
+        `AI chat streaming crashed for conversation ${input.conversation.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      hooks.onError(signal?.aborted ? 'client_disconnected' : 'stream_failed');
+      return;
+    }
+
+    // If the client disconnected mid-stream, `askQuestionStream` catches the
+    // AbortError and turns it into a `generation_failed` refusal — which
+    // would then be persisted as an infra-error message the user never
+    // asked for. Detect the abort here and bail before touching the DB.
+    if (signal?.aborted) {
+      hooks.onError('client_disconnected');
+      return;
+    }
+
+    // A refusal replaces any partial deltas — the RAG service only emits
+    // deltas on the success path. Persist the final answer (delta-accumulated
+    // or refusal message) as a single ChatMessage row.
+    const answerText = terminalResponse?.answer ?? accumulated;
+    if (!answerText) {
+      hooks.onError('empty_answer');
+      return;
+    }
+
+    // Persist the AI message + broadcast to other participants. If the
+    // conversation was deleted mid-stream (FK cascade), we surface a
+    // conversation_gone error to the caller rather than a generic crash.
+    let savedAnswer: ChatMessage;
+    try {
+      const answerMessage = this.messageRepository.create({
+        conversationId: input.conversation.id,
+        senderId: AI_SYSTEM_USER_ID,
+        text: answerText,
+        isAiGenerated: true,
+      });
+      savedAnswer = await this.messageRepository.save(answerMessage);
+
+      const now = new Date();
+      await this.conversationRepository.update(input.conversation.id, {
+        updatedAt: now,
+      });
+
+      const recipientIds = await this.resolveRecipientIds(input.conversation);
+      const payload = {
+        message: { ...savedAnswer, files: [] },
+        conversation: {
+          id: input.conversation.id,
+          updatedAt: now,
+        },
+      };
+      for (const recipientId of recipientIds) {
+        // The streaming client saw the answer via SSE; skip echoing it back
+        // on WS or the UI will render duplicates. Other participants
+        // (experts, operators) still receive the standard chat:new_message.
+        if (recipientId === input.clientUserId) continue;
+        this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist AI answer for conversation ${input.conversation.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      hooks.onError('conversation_gone');
+      return;
+    }
+
+    if (terminalResponse?.refusalReason) {
+      hooks.onRefusal(savedAnswer, terminalResponse.refusalReason);
+    } else {
+      hooks.onDone(savedAnswer);
+    }
+
+    this.logger.log(
+      `AI reply streamed for conversation ${input.conversation.id} in ${
+        Date.now() - startedAt
+      }ms (refusalReason=${terminalResponse?.refusalReason ?? 'none'})`,
     );
   }
 
