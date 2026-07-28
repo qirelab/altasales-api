@@ -55,7 +55,9 @@ const MIN_AI_EVIDENCE_TOKEN_LENGTH = 4;
 const MIN_RUSSIAN_SUMMARY_WORDS = 5;
 const MAX_RECOMMENDATION_SUMMARY_LENGTH = 1000;
 const SUMMARY_PRIORITY_LANGUAGE_PATTERN =
-  /\bpriority\b|приоритет\p{L}*|срочн\p{L}*|первоочередн\p{L}*|важн\p{L}*|главн\p{L}*|в\s+первую\s+очередь|раньше\s+остальн\p{L}*/iu;
+  /\bpriority\b|приоритет\p{L}*|срочн\p{L}*|первоочередн\p{L}*|важн\p{L}*|главн\p{L}*/iu;
+const SUMMARY_ORDER_LANGUAGE_PATTERN =
+  /в\s+первую\s+очередь|раньше\s+остальн\p{L}*/iu;
 const AI_RECOMMENDATIONS_RESPONSE_EXAMPLE =
   '{"summary":"общий вводный текст","recommendations":[' +
   '{"serviceId":"...","priority":"urgent|medium|low",' +
@@ -459,6 +461,7 @@ export class RecommendationScoringService {
       sentences.length > 4 ||
       !this.isValidRussianSummary(normalized, recommendations, context) ||
       SUMMARY_PRIORITY_LANGUAGE_PATTERN.test(normalized) ||
+      SUMMARY_ORDER_LANGUAGE_PATTERN.test(normalized) ||
       this.hasUnsupportedSummaryNumbers(normalized, recommendations, context)
     ) {
       return fallback;
