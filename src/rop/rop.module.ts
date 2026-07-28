@@ -5,11 +5,8 @@ import { User } from '../users/entities/user.entity';
 import { RopController } from './rop.controller';
 import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
 import { RopDocumentsService } from './rop-documents.service';
-import { RopIndicatorsService } from './rop-indicators.service';
-import { RopMeetingsService } from './rop-meetings.service';
 import { RopProvisioningService } from './rop-provisioning.service';
 import { RopService } from './rop.service';
-import { RopTasksService } from './rop-tasks.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([User]), AuthModule],
@@ -19,17 +16,7 @@ import { RopTasksService } from './rop-tasks.service';
     RopProvisioningService,
     RopDocumentLinkDownloadService,
     RopDocumentsService,
-    RopIndicatorsService,
-    RopMeetingsService,
-    RopTasksService,
   ],
-  exports: [
-    RopService,
-    RopProvisioningService,
-    RopDocumentsService,
-    RopIndicatorsService,
-    RopMeetingsService,
-    RopTasksService,
-  ],
+  exports: [RopService, RopProvisioningService, RopDocumentsService],
 })
 export class RopModule {}
