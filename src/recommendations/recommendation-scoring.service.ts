@@ -52,9 +52,10 @@ const MAX_CATALOG_FOR_LLM = 500;
 const AI_RECOMMENDATION_CACHE_TTL_MS = 60 * 60 * 1000;
 const AI_SEMANTIC_RECOMMENDATION_SCORE = 6;
 const MIN_AI_EVIDENCE_TOKEN_LENGTH = 4;
+const MIN_RUSSIAN_SUMMARY_WORDS = 5;
 const MAX_RECOMMENDATION_SUMMARY_LENGTH = 1000;
 const SUMMARY_PRIORITY_LANGUAGE_PATTERN =
-  /\bpriority\b|приоритет\p{L}*|срочн\p{L}*|первоочередн\p{L}*|в\s+первую\s+очередь/iu;
+  /\bpriority\b|приоритет\p{L}*|срочн\p{L}*|первоочередн\p{L}*|важн\p{L}*|главн\p{L}*|в\s+первую\s+очередь|раньше\s+остальн\p{L}*/iu;
 const AI_RECOMMENDATIONS_RESPONSE_EXAMPLE =
   '{"summary":"общий вводный текст","recommendations":[' +
   '{"serviceId":"...","priority":"urgent|medium|low",' +
@@ -387,6 +388,28 @@ export class RecommendationScoringService {
     );
   }
 
+  finalizeRecommendationSummary(
+    dto: GenerateRecommendationsDto,
+    generated: GeneratedRecommendationsResult,
+    recommendations: GeneratedRecommendationItem[],
+    context: string,
+  ): string {
+    const summaryPreamble = this.resolveSummaryPreamble(dto);
+    const summary = this.haveSameRecommendationTargets(
+      generated.recommendations,
+      recommendations,
+    )
+      ? generated.summary
+      : undefined;
+
+    return this.normalizeSummary(
+      summary,
+      recommendations,
+      context,
+      summaryPreamble,
+    );
+  }
+
   private isValidAiRecommendationCandidate(
     item: AiRecommendationCandidate,
   ): boolean {
@@ -434,7 +457,7 @@ export class RecommendationScoringService {
       normalized.length > MAX_RECOMMENDATION_SUMMARY_LENGTH ||
       sentences.length < 2 ||
       sentences.length > 4 ||
-      !this.hasRussianText(normalized) ||
+      !this.isValidRussianSummary(normalized, recommendations, context) ||
       SUMMARY_PRIORITY_LANGUAGE_PATTERN.test(normalized) ||
       this.hasUnsupportedSummaryNumbers(normalized, recommendations, context)
     ) {
@@ -525,11 +548,7 @@ export class RecommendationScoringService {
       'построить отдел продаж',
     ].some((marker) => profileText.includes(marker));
 
-    if (
-      productStage === 'new' ||
-      productStage.includes('новый') ||
-      explicitlyNeedsDepartmentFromZero
-    ) {
+    if (productStage === 'new' || productStage.includes('новый')) {
       return NEW_SALES_DEPARTMENT_PREAMBLE;
     }
 
@@ -541,7 +560,68 @@ export class RecommendationScoringService {
       return EXISTING_SALES_DEPARTMENT_PREAMBLE;
     }
 
+    if (explicitlyNeedsDepartmentFromZero) {
+      return NEW_SALES_DEPARTMENT_PREAMBLE;
+    }
+
     return undefined;
+  }
+
+  private haveSameRecommendationTargets(
+    generated: GeneratedRecommendationItem[],
+    final: GeneratedRecommendationItem[],
+  ): boolean {
+    const generatedTargets = new Set(
+      generated.map((item) => this.getRecommendationTargetKey(item)),
+    );
+    const finalTargets = new Set(
+      final.map((item) => this.getRecommendationTargetKey(item)),
+    );
+    return (
+      generatedTargets.size === finalTargets.size &&
+      [...generatedTargets].every((target) => finalTargets.has(target))
+    );
+  }
+
+  private getRecommendationTargetKey(
+    recommendation: GeneratedRecommendationItem,
+  ): string {
+    return recommendation.packageId
+      ? `package:${recommendation.packageId}`
+      : `service:${recommendation.serviceId ?? ''}`;
+  }
+
+  private isValidRussianSummary(
+    summary: string,
+    recommendations: GeneratedRecommendationItem[],
+    context: string,
+  ): boolean {
+    const russianWords = summary.match(/[а-яё]+/giu) ?? [];
+    const latinWords = (summary.match(/[a-z0-9]*[a-z][a-z0-9]*/giu) ?? []).map(
+      (word) => word.toLowerCase(),
+    );
+    if (
+      russianWords.length < MIN_RUSSIAN_SUMMARY_WORDS ||
+      russianWords.length < latinWords.length
+    ) {
+      return false;
+    }
+
+    const allowedLatinWords = new Set(
+      this.normalizeText(
+        [
+          context,
+          ...recommendations.map(
+            (recommendation) => recommendation.serviceName,
+          ),
+        ].join(' '),
+      )
+        .split(' ')
+        .filter((word) => /^(?=.*[a-z])[a-z0-9]+$/i.test(word)),
+    );
+    allowedLatinWords.add('ai');
+
+    return latinWords.every((word) => allowedLatinWords.has(word));
   }
 
   private selectCatalogForLlm(

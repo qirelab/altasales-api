@@ -423,6 +423,18 @@ describe('RecommendationScoringService', () => {
         targetResult: 'Построить отдел продаж с нуля',
       },
       expectedSummary: [
+        'На основании ваших ответов AI проанализировал текущую организацию отдела продаж',
+        'и определил, какие изменения помогут повысить его эффективность.',
+        'Ниже представлены решения, которые рекомендуется внедрить именно вашей компании.',
+        'Каждая рекомендация направлена на устранение выявленных ограничений,',
+        'автоматизацию процессов и достижение поставленных бизнес-целей.',
+      ].join(' '),
+    },
+    {
+      clientProfile: {
+        targetResult: 'Построить отдел продаж с нуля',
+      },
+      expectedSummary: [
         'На основании заполненной анкеты AI сформировал проект вашего отдела продаж.',
         'В него вошли инструменты, документы, специалисты и AI-модули,',
         'которые необходимы для достижения ваших целей.',
@@ -510,6 +522,7 @@ describe('RecommendationScoringService', () => {
 
   it.each([
     'AI-ассистент считает CRM-аудит срочной рекомендацией. Этот инструмент соответствует ответам анкеты.',
+    'AI-ассистент считает CRM-аудит главной рекомендацией. Этот инструмент соответствует ответам анкеты.',
     'AI-ассистент рекомендует CRM-аудит из-за снижения конверсии на 30%. Этот инструмент соответствует ответам анкеты.',
   ])(
     'replaces an unsafe summary with a neutral fallback: %s',
@@ -544,6 +557,108 @@ describe('RecommendationScoringService', () => {
       expect(result.summary).not.toMatch(/срочн|приоритет|30%/i);
     },
   );
+
+  it('allows English service names inside an otherwise Russian summary', async () => {
+    const candidate = {
+      id: 'dashboard-id',
+      name: 'B2B Sales Performance Dashboard',
+      description: 'Аналитика показателей отдела продаж',
+      type: ServiceType.Service,
+      skills: ['аналитика'],
+      category: null,
+    } as ServiceCandidate;
+    const summary = [
+      'AI-ассистент рекомендует B2B Sales Performance Dashboard для контроля показателей.',
+      'Этот инструмент поможет анализировать работу отдела продаж по данным анкеты.',
+    ].join(' ');
+    llmProxy.chat.mockResolvedValueOnce({
+      content: JSON.stringify({
+        summary,
+        recommendations: [
+          {
+            serviceId: 'dashboard-id',
+            rationale: 'Подходит для аналитики.',
+          },
+        ],
+      }),
+    });
+
+    const result = await service.generateAiRecommendations(
+      { userId: 'user-id', diagnostics: ['аналитика продаж'] },
+      [candidate],
+      'аналитика продаж',
+    );
+
+    expect(result.summary).toBe(summary);
+  });
+
+  it('rejects a predominantly English summary even when its words occur in the questionnaire', async () => {
+    const candidate = {
+      id: 'crm-audit-id',
+      name: 'CRM Audit',
+      description: 'Проверка CRM',
+      type: ServiceType.Service,
+      skills: ['CRM'],
+      category: null,
+    } as ServiceCandidate;
+    const summary = [
+      'Client needs CRM implementation for sales team.',
+      'Этот инструмент подходит по данным анкеты.',
+    ].join(' ');
+    llmProxy.chat.mockResolvedValueOnce({
+      content: JSON.stringify({
+        summary,
+        recommendations: [
+          {
+            serviceId: 'crm-audit-id',
+            rationale: 'Подходит для CRM.',
+          },
+        ],
+      }),
+    });
+
+    const result = await service.generateAiRecommendations(
+      {
+        userId: 'user-id',
+        diagnostics: ['Client needs CRM implementation for sales team'],
+      },
+      [candidate],
+      'client needs crm implementation for sales team',
+    );
+
+    expect(result.summary).not.toBe(summary);
+    expect(result.summary).toContain('предоставленной вами информацией');
+  });
+
+  it('rebuilds summary from the final recommendations when ranking changes the target set', () => {
+    const generatedRecommendation = {
+      serviceId: 'generated-id',
+      serviceName: 'Первичная услуга',
+      priority: RecommendationPriority.Medium,
+      rationale: 'Исходная рекомендация.',
+      diagnosticSignals: [],
+      score: 30,
+    };
+    const finalRecommendation = {
+      ...generatedRecommendation,
+      serviceId: 'final-id',
+      serviceName: 'Итоговая услуга',
+    };
+
+    const summary = service.finalizeRecommendationSummary(
+      { userId: 'user-id', diagnostics: ['задачи продаж'] },
+      {
+        summary:
+          'AI-ассистент рекомендует первичную услугу. Она соответствует ответам анкеты.',
+        recommendations: [generatedRecommendation],
+      },
+      [finalRecommendation],
+      'задачи продаж',
+    );
+
+    expect(summary).toContain('«Итоговая услуга»');
+    expect(summary).not.toContain('первичную услугу');
+  });
 
   it('does not declare user diagnostics as no_pii for proxy calls', async () => {
     llmProxy.chat.mockResolvedValueOnce({ content: '{"recommendations":[]}' });
