@@ -1,6 +1,23 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNumber, IsOptional, IsArray, IsUrl, IsEnum, IsUUID, IsInt, Min, IsEmail, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsArray,
+  IsBoolean,
+  IsEmail,
+  IsEnum,
+  IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { ServiceType } from '../entities/service-type.enum';
+
+const SERVICE_MAX_DESCRIPTION_LENGTH = 5000;
 
 export class CreateServiceDto {
   @ApiProperty({
@@ -12,11 +29,19 @@ export class CreateServiceDto {
   type: ServiceType;
 
   @ApiProperty({ example: 'Внедрение CRM интеграции', description: 'Service name' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty({ message: 'Название услуги не может быть пустым' })
+  @MaxLength(255, { message: 'Название услуги не должно превышать 255 символов' })
   name: string;
 
   @ApiProperty({ example: 'Настройка и интеграция CRM с вашими системами', description: 'Service description' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty({ message: 'Описание услуги не может быть пустым' })
+  @MaxLength(SERVICE_MAX_DESCRIPTION_LENGTH, {
+    message: `Описание услуги не должно превышать ${SERVICE_MAX_DESCRIPTION_LENGTH} символов`,
+  })
   description: string;
 
   @ApiPropertyOptional({
