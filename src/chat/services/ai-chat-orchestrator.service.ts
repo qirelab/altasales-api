@@ -1,12 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ChatbotRagService } from '../../chatbot/services/chatbot-rag.service';
+import {
+  ChatbotRagRefusalReason,
+  ChatbotRagService,
+} from '../../chatbot/services/chatbot-rag.service';
+import {
+  HandoffDetection,
+  HandoffTriggerService,
+} from '../../chatbot/services/handoff-trigger.service';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
-import { AI_SYSTEM_USER_ID } from '../chat.constants';
+import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
 import { ChatConversation } from '../entities/chat-conversation.entity';
 import { ChatConversationParticipant } from '../entities/chat-conversation-participant.entity';
 import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatHistoryMapperService } from './chat-history-mapper.service';
 
@@ -38,6 +46,15 @@ export type StreamReplyHooks = {
  * Recipient list is resolved right before WS emit (not at schedule time)
  * so an admin who revokes an expert's chat access while the AI is still
  * generating stops that message from reaching the expert.
+ *
+ * Handoff pipeline (added by QIR-263):
+ *   1. Cheap explicit-handoff detection on the raw client text — if the
+ *      client asked for a human, skip RAG entirely.
+ *   2. Otherwise call ChatbotRagService.askQuestion, then re-run the
+ *      trigger service on (message + ragResponse) to catch RAG-side
+ *      handoff signals (no context / infra error).
+ *   3. If any trigger fired, mark the conversation as needing a human
+ *      via a conditional UPDATE and emit `chat:handoff_requested`.
  */
 @Injectable()
 export class AiChatOrchestratorService {
@@ -54,6 +71,7 @@ export class AiChatOrchestratorService {
     private readonly ragService: ChatbotRagService,
     private readonly historyMapper: ChatHistoryMapperService,
     private readonly wsGateway: WebSocketGatewayService,
+    private readonly handoffTrigger: HandoffTriggerService,
   ) {}
 
   scheduleReply(input: RespondInput): void {
@@ -81,11 +99,24 @@ export class AiChatOrchestratorService {
   private async respondToClientMessage(input: RespondInput): Promise<void> {
     const startedAt = Date.now();
 
+    const explicit = this.handoffTrigger.detect({
+      clientMessage: input.question,
+    });
+    if (explicit.needsHandoff) {
+      await this.deliverAnswer({
+        input,
+        text: HANDOFF_ANNOUNCE_MESSAGE,
+        handoff: explicit,
+        startedAt,
+        refusalReason: 'explicit_request',
+      });
+      return;
+    }
+
     const currentMessage = await this.messageRepository.findOne({
       where: { id: input.clientMessageId },
     });
     if (!currentMessage) {
-      // Message was deleted before we could respond; skip.
       return;
     }
 
@@ -117,15 +148,44 @@ export class AiChatOrchestratorService {
       history,
     });
 
+    // Second detection pass now that we know how RAG went. Explicit-request
+    // is already handled above; this call only surfaces rag_no_context /
+    // rag_infra_error branches.
+    const postRag = this.handoffTrigger.detect({
+      clientMessage: input.question,
+      ragResponse,
+    });
+
+    await this.deliverAnswer({
+      input,
+      text: ragResponse.answer,
+      handoff: postRag,
+      startedAt,
+      refusalReason: ragResponse.refusalReason ?? 'none',
+    });
+  }
+
+  private async deliverAnswer(args: {
+    input: RespondInput;
+    text: string;
+    handoff: HandoffDetection;
+    startedAt: number;
+    refusalReason: string;
+  }): Promise<void> {
+    const { input, text, handoff, startedAt, refusalReason } = args;
+
     const answerMessage = this.messageRepository.create({
       conversationId: input.conversation.id,
       senderId: AI_SYSTEM_USER_ID,
-      text: ragResponse.answer,
+      text,
       isAiGenerated: true,
     });
     const savedAnswer = await this.messageRepository.save(answerMessage);
 
     const now = new Date();
+
+    // updatedAt bump is unconditional so the conversation surfaces at the
+    // top of the client's list every turn.
     await this.conversationRepository.update(input.conversation.id, {
       updatedAt: now,
     });
@@ -134,7 +194,29 @@ export class AiChatOrchestratorService {
     // AI generation immediately stops delivery to the revoked user.
     const recipientIds = await this.resolveRecipientIds(input.conversation);
 
-    const payload = {
+    let handoffRegistered = false;
+    let handoffTriggerType: ChatHandoffTrigger | null = null;
+    let handoffRequestedAt: Date | null = null;
+    if (handoff.needsHandoff) {
+      const result = await this.conversationRepository
+        .createQueryBuilder()
+        .update(ChatConversation)
+        .set({
+          needsHumanHandoff: true,
+          handoffTrigger: handoff.trigger,
+          handoffRequestedAt: now,
+        })
+        .where('id = :id', { id: input.conversation.id })
+        .andWhere('"needsHumanHandoff" = false')
+        .execute();
+      handoffRegistered = (result.affected ?? 0) > 0;
+      if (handoffRegistered) {
+        handoffTriggerType = handoff.trigger;
+        handoffRequestedAt = now;
+      }
+    }
+
+    const messagePayload = {
       message: { ...savedAnswer, files: [] },
       conversation: {
         id: input.conversation.id,
@@ -143,13 +225,34 @@ export class AiChatOrchestratorService {
     };
 
     for (const recipientId of recipientIds) {
-      this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+      this.wsGateway.emitToUser(
+        recipientId,
+        'chat:new_message',
+        messagePayload,
+      );
+    }
+
+    if (handoffRegistered) {
+      const handoffPayload = {
+        conversationId: input.conversation.id,
+        trigger: handoffTriggerType,
+        requestedAt: handoffRequestedAt,
+      };
+      for (const recipientId of recipientIds) {
+        this.wsGateway.emitToUser(
+          recipientId,
+          'chat:handoff_requested',
+          handoffPayload,
+        );
+      }
     }
 
     this.logger.log(
       `AI reply delivered for conversation ${input.conversation.id} in ${
         Date.now() - startedAt
-      }ms (refusalReason=${ragResponse.refusalReason ?? 'none'})`,
+      }ms (refusalReason=${refusalReason}, handoff=${
+        handoff.needsHandoff ? handoff.trigger : 'none'
+      })`,
     );
   }
 
@@ -174,6 +277,22 @@ export class AiChatOrchestratorService {
     signal?: AbortSignal,
   ): Promise<void> {
     const startedAt = Date.now();
+
+    const explicit = this.handoffTrigger.detect({
+      clientMessage: input.question,
+    });
+    if (explicit.needsHandoff) {
+      hooks.onDelta(HANDOFF_ANNOUNCE_MESSAGE);
+      await this.persistStreamAnswer({
+        input,
+        answerText: HANDOFF_ANNOUNCE_MESSAGE,
+        handoff: explicit,
+        hooks,
+        refusalReason: 'explicit_request',
+        startedAt,
+      });
+      return;
+    }
 
     const currentMessage = await this.messageRepository.findOne({
       where: { id: input.clientMessageId },
@@ -202,7 +321,7 @@ export class AiChatOrchestratorService {
     let accumulated = '';
     let terminalResponse: {
       answer: string;
-      refusalReason?: string;
+      refusalReason?: ChatbotRagRefusalReason;
     } | null = null;
 
     try {
@@ -248,19 +367,48 @@ export class AiChatOrchestratorService {
       return;
     }
 
-    // A refusal replaces any partial deltas — the RAG service only emits
-    // deltas on the success path. Persist the final answer (delta-accumulated
-    // or refusal message) as a single ChatMessage row.
     const answerText = terminalResponse?.answer ?? accumulated;
     if (!answerText) {
       hooks.onError('empty_answer');
       return;
     }
 
-    // Persist the AI message + broadcast to other participants. If the
-    // conversation was deleted mid-stream (FK cascade), we surface a
-    // conversation_gone error to the caller rather than a generic crash.
+    const postRag = this.handoffTrigger.detect({
+      clientMessage: input.question,
+      ragResponse: {
+        answer: terminalResponse?.answer ?? accumulated,
+        hasContext: !terminalResponse?.refusalReason,
+        sources: [],
+        refusalReason: terminalResponse?.refusalReason,
+      },
+    });
+
+    await this.persistStreamAnswer({
+      input,
+      answerText,
+      handoff: postRag,
+      hooks,
+      refusalReason: terminalResponse?.refusalReason,
+      startedAt,
+    });
+  }
+
+  private async persistStreamAnswer(args: {
+    input: RespondInput;
+    answerText: string;
+    handoff: HandoffDetection;
+    hooks: StreamReplyHooks;
+    refusalReason?: string;
+    startedAt: number;
+  }): Promise<void> {
+    const { input, answerText, handoff, hooks, refusalReason, startedAt } =
+      args;
+
     let savedAnswer: ChatMessage;
+    let handoffRegistered = false;
+    let handoffTriggerType: ChatHandoffTrigger | null = null;
+    let handoffRequestedAt: Date | null = null;
+
     try {
       const answerMessage = this.messageRepository.create({
         conversationId: input.conversation.id,
@@ -275,6 +423,25 @@ export class AiChatOrchestratorService {
         updatedAt: now,
       });
 
+      if (handoff.needsHandoff) {
+        const result = await this.conversationRepository
+          .createQueryBuilder()
+          .update(ChatConversation)
+          .set({
+            needsHumanHandoff: true,
+            handoffTrigger: handoff.trigger,
+            handoffRequestedAt: now,
+          })
+          .where('id = :id', { id: input.conversation.id })
+          .andWhere('"needsHumanHandoff" = false')
+          .execute();
+        handoffRegistered = (result.affected ?? 0) > 0;
+        if (handoffRegistered) {
+          handoffTriggerType = handoff.trigger;
+          handoffRequestedAt = now;
+        }
+      }
+
       const recipientIds = await this.resolveRecipientIds(input.conversation);
       const payload = {
         message: { ...savedAnswer, files: [] },
@@ -284,11 +451,23 @@ export class AiChatOrchestratorService {
         },
       };
       for (const recipientId of recipientIds) {
-        // The streaming client saw the answer via SSE; skip echoing it back
-        // on WS or the UI will render duplicates. Other participants
-        // (experts, operators) still receive the standard chat:new_message.
         if (recipientId === input.clientUserId) continue;
         this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
+      }
+
+      if (handoffRegistered) {
+        const handoffPayload = {
+          conversationId: input.conversation.id,
+          trigger: handoffTriggerType,
+          requestedAt: handoffRequestedAt,
+        };
+        for (const recipientId of recipientIds) {
+          this.wsGateway.emitToUser(
+            recipientId,
+            'chat:handoff_requested',
+            handoffPayload,
+          );
+        }
       }
     } catch (error) {
       this.logger.error(
@@ -300,8 +479,8 @@ export class AiChatOrchestratorService {
       return;
     }
 
-    if (terminalResponse?.refusalReason) {
-      hooks.onRefusal(savedAnswer, terminalResponse.refusalReason);
+    if (refusalReason) {
+      hooks.onRefusal(savedAnswer, refusalReason);
     } else {
       hooks.onDone(savedAnswer);
     }
@@ -309,7 +488,9 @@ export class AiChatOrchestratorService {
     this.logger.log(
       `AI reply streamed for conversation ${input.conversation.id} in ${
         Date.now() - startedAt
-      }ms (refusalReason=${terminalResponse?.refusalReason ?? 'none'})`,
+      }ms (refusalReason=${refusalReason ?? 'none'}, handoff=${
+        handoffRegistered ? handoffTriggerType : 'none'
+      })`,
     );
   }
 

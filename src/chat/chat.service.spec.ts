@@ -32,23 +32,32 @@ function buildService(
     transactionThrows?: Error;
     users?: Record<string, unknown>;
     historyMessages?: unknown[];
+    conditionalUpdateAffected?: number;
   } = {},
 ) {
   const users = opts.users ?? { 'client-1': makeUser() };
+  const conditionalExecute = jest.fn().mockResolvedValue({
+    affected: opts.conditionalUpdateAffected ?? 1,
+  });
   const conversationRepository = {
     findOne: jest.fn().mockResolvedValue(opts.existingConversation ?? null),
     createQueryBuilder: jest.fn(() => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
       setParameter: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      execute: conditionalExecute,
     })),
     create: jest.fn((entity) => ({ ...entity, id: 'new-conv' })),
     save: jest.fn(async (entity) => ({ ...entity, id: 'new-conv' })),
     update: jest.fn().mockResolvedValue(undefined),
+    conditionalExecute,
   };
   const messageRepository = {
     findOne: jest.fn().mockResolvedValue(null),
@@ -313,6 +322,109 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'Let me help',
     } as never);
     expect(aiOrchestrator.scheduleReply).not.toHaveBeenCalled();
+  });
+
+  it('resolves a pending handoff when an operator writes into the conversation', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService({ conditionalUpdateAffected: 1 });
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeConversation({ needsHumanHandoff: true }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      conversationId: 'conv-1',
+      userId: 'op-1',
+      role: ChatParticipantRole.Operator,
+    });
+    participantRepository.find.mockResolvedValueOnce([
+      { userId: 'client-1', role: ChatParticipantRole.Client },
+      { userId: 'op-1', role: ChatParticipantRole.Operator },
+      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
+    ]);
+
+    await service.sendPlatformMessage('op-1', 'conv-1', {
+      text: 'Hello, I am the manager',
+    } as never);
+
+    // Conditional UPDATE was issued to clear the flag atomically.
+    expect(conversationRepository.createQueryBuilder).toHaveBeenCalled();
+    // Every recipient (sender + client) got a handoff_resolved event
+    // because the mocked conditional UPDATE reports affected=1.
+    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_resolved',
+    );
+    expect(resolvedEvents.length).toBeGreaterThan(0);
+  });
+
+  it('does not reset handoff when a client writes (only human replier resolves)', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeConversation({ needsHumanHandoff: true }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      conversationId: 'conv-1',
+      userId: 'client-1',
+      role: ChatParticipantRole.Client,
+    });
+    participantRepository.find.mockResolvedValueOnce([
+      { userId: 'client-1', role: ChatParticipantRole.Client },
+      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
+    ]);
+
+    await service.sendPlatformMessage('client-1', 'conv-1', {
+      text: 'follow-up',
+    } as never);
+
+    // A client turn never issues the conditional resolve UPDATE.
+    expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
+    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_resolved',
+    );
+    expect(resolvedEvents).toHaveLength(0);
+  });
+
+  it('does not emit handoff_resolved when the conditional UPDATE affects zero rows', async () => {
+    // Simulates the race where orchestrator has not yet flipped the flag
+    // (or another operator already cleared it) — conditional UPDATE reports
+    // affected=0, so we must NOT broadcast a false-positive resolved event.
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService({ conditionalUpdateAffected: 0 });
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeConversation({ needsHumanHandoff: false }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      conversationId: 'conv-1',
+      userId: 'op-1',
+      role: ChatParticipantRole.Operator,
+    });
+    participantRepository.find.mockResolvedValueOnce([
+      { userId: 'client-1', role: ChatParticipantRole.Client },
+      { userId: 'op-1', role: ChatParticipantRole.Operator },
+    ]);
+
+    await service.sendPlatformMessage('op-1', 'conv-1', {
+      text: 'checking in',
+    } as never);
+
+    // The conditional UPDATE was attempted, but affected=0 means no state
+    // actually transitioned — we stay silent on the WS channel.
+    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
+    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:handoff_resolved',
+    );
+    expect(resolvedEvents).toHaveLength(0);
   });
 });
 
