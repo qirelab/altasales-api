@@ -194,7 +194,8 @@ export class RopController {
 
   @Post('dashboards/analyze/inspect-link')
   @ApiOperation({
-    summary: 'Download a dashboard file by URL and list selectable pages or sheets',
+    summary:
+      'Download a dashboard file by URL and list selectable pages or sheets',
   })
   @ApiOkResponse({ type: RopDashboardFileInspectResponseDto })
   async inspectDashboardFromLink(

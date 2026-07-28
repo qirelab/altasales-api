@@ -22,7 +22,9 @@ const WHOLE_FILE_PART: DashboardFilePart = {
 
 @Injectable()
 export class RopDashboardFilePartsService {
-  async inspect(file: Express.Multer.File): Promise<DashboardFileInspectResult> {
+  async inspect(
+    file: Express.Multer.File,
+  ): Promise<DashboardFileInspectResult> {
     const extension = getFileExtension(file.originalname);
 
     if (extension === 'pdf') {
@@ -51,7 +53,9 @@ export class RopDashboardFilePartsService {
 
     if (partId.startsWith('page:')) {
       if (extension !== 'pdf') {
-        throw new BadRequestException('Выбранная страница недоступна для этого файла');
+        throw new BadRequestException(
+          'Выбранная страница недоступна для этого файла',
+        );
       }
 
       const pageNumber = Number(partId.slice('page:'.length));
@@ -64,7 +68,9 @@ export class RopDashboardFilePartsService {
 
     if (partId.startsWith('sheet:')) {
       if (extension !== 'xlsx') {
-        throw new BadRequestException('Выбранный лист недоступен для этого файла');
+        throw new BadRequestException(
+          'Выбранный лист недоступен для этого файла',
+        );
       }
 
       const sheetIndex = Number(partId.slice('sheet:'.length));
@@ -78,7 +84,9 @@ export class RopDashboardFilePartsService {
     throw new BadRequestException('Некорректный фрагмент файла');
   }
 
-  private async inspectPdf(buffer: Buffer): Promise<DashboardFileInspectResult> {
+  private async inspectPdf(
+    buffer: Buffer,
+  ): Promise<DashboardFileInspectResult> {
     const pdf = await PDFDocument.load(buffer, { ignoreEncryption: true });
     const pageCount = pdf.getPageCount();
 
@@ -98,7 +106,9 @@ export class RopDashboardFilePartsService {
     };
   }
 
-  private async inspectXlsx(buffer: Buffer): Promise<DashboardFileInspectResult> {
+  private async inspectXlsx(
+    buffer: Buffer,
+  ): Promise<DashboardFileInspectResult> {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(this.toArrayBuffer(buffer));
     const sheets = workbook.worksheets.filter((sheet) => sheet.name);
@@ -106,10 +116,12 @@ export class RopDashboardFilePartsService {
     if (sheets.length <= 1) {
       const sheet = sheets[0];
       return {
-        parts: [{
-          id: 'sheet:0',
-          label: sheet?.name ?? 'Лист 1',
-        }],
+        parts: [
+          {
+            id: 'sheet:0',
+            label: sheet?.name ?? 'Лист 1',
+          },
+        ],
         partType: 'sheet',
       };
     }
@@ -127,7 +139,9 @@ export class RopDashboardFilePartsService {
     file: Express.Multer.File,
     pageNumber: number,
   ): Promise<Express.Multer.File> {
-    const source = await PDFDocument.load(file.buffer, { ignoreEncryption: true });
+    const source = await PDFDocument.load(file.buffer, {
+      ignoreEncryption: true,
+    });
     const pageCount = source.getPageCount();
 
     if (pageNumber > pageCount) {
