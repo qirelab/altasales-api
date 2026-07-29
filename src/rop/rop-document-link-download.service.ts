@@ -8,6 +8,7 @@ const FETCH_TIMEOUT_MS = 30_000;
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf',
+  doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   csv: 'text/csv',
@@ -25,7 +26,7 @@ const EXTENSION_BY_MIME = new Map<string, string>([
   ],
   ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'],
   ['application/vnd.ms-excel', 'xlsx'],
-  ['application/msword', 'docx'],
+  ['application/msword', 'doc'],
   ['text/csv', 'csv'],
   ['application/csv', 'csv'],
   ['image/png', 'png'],
@@ -50,17 +51,15 @@ export class RopDocumentLinkDownloadService {
     const contentType = this.normalizeMimeType(
       response.headers.get('content-type'),
     );
+    this.assertAllowedContentType(contentType, profile);
     const fileName = this.resolveFileName(
       suggestedName,
       response.headers.get('content-disposition'),
       parsedDownloadUrl,
       contentType,
+      profile,
     );
-    const extension = this.getExtension(fileName);
-
-    if (!profile.allowedExtensions.has(extension)) {
-      throw new BadRequestException(profile.formatErrorMessage);
-    }
+    const extension = this.resolveFileExtension(fileName, contentType, profile);
 
     const mimetype =
       contentType ?? MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
@@ -241,11 +240,61 @@ export class RopDocumentLinkDownloadService {
     return buffer;
   }
 
+  private assertAllowedContentType(
+    contentType: string | null,
+    profile: RopAnalyzeUploadProfile,
+  ): void {
+    if (!contentType) {
+      return;
+    }
+
+    const blockedContentTypes = new Set([
+      'text/html',
+      'text/plain',
+      'application/json',
+      'application/javascript',
+      'text/javascript',
+      'text/css',
+      'application/xml',
+      'text/xml',
+    ]);
+
+    if (blockedContentTypes.has(contentType)) {
+      throw new BadRequestException(profile.formatErrorMessage);
+    }
+
+    const extension = EXTENSION_BY_MIME.get(contentType);
+    if (extension && !profile.allowedExtensions.has(extension)) {
+      throw new BadRequestException(profile.formatErrorMessage);
+    }
+  }
+
+  private resolveFileExtension(
+    fileName: string,
+    contentType: string | null,
+    profile: RopAnalyzeUploadProfile,
+  ): string {
+    const extensionFromName = this.getExtension(fileName);
+    if (profile.allowedExtensions.has(extensionFromName)) {
+      return extensionFromName;
+    }
+
+    const extensionFromMime = contentType
+      ? EXTENSION_BY_MIME.get(contentType)
+      : undefined;
+    if (extensionFromMime && profile.allowedExtensions.has(extensionFromMime)) {
+      return extensionFromMime;
+    }
+
+    throw new BadRequestException(profile.formatErrorMessage);
+  }
+
   private resolveFileName(
     suggestedName: string | undefined,
     contentDisposition: string | null,
     url: URL,
     contentType: string | null,
+    profile: RopAnalyzeUploadProfile,
   ): string {
     const fromHeader =
       this.getFileNameFromContentDisposition(contentDisposition);
@@ -268,7 +317,11 @@ export class RopDocumentLinkDownloadService {
     const extension = contentType
       ? EXTENSION_BY_MIME.get(contentType)
       : undefined;
-    return extension ? `document.${extension}` : 'document.pdf';
+    if (extension && profile.allowedExtensions.has(extension)) {
+      return `document.${extension}`;
+    }
+
+    throw new BadRequestException(profile.formatErrorMessage);
   }
 
   private getFileNameFromContentDisposition(
