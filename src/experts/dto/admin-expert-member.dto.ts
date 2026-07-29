@@ -39,7 +39,9 @@ export class CreateAdminExpertMemberDto {
 
   @ApiProperty({ example: 'Secret123', minLength: EXPERT_PASSWORD_MIN_LENGTH })
   @IsString()
-  @MinLength(EXPERT_PASSWORD_MIN_LENGTH, { message: EXPERT_PASSWORD_RULES_MESSAGE })
+  @MinLength(EXPERT_PASSWORD_MIN_LENGTH, {
+    message: EXPERT_PASSWORD_RULES_MESSAGE,
+  })
   @Matches(/\d/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
   @Matches(/[A-ZА-ЯЁ]/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
   password: string;
@@ -101,7 +103,9 @@ export class UpdateAdminExpertMemberDto {
   })
   @IsOptional()
   @IsString()
-  @MinLength(EXPERT_PASSWORD_MIN_LENGTH, { message: EXPERT_PASSWORD_RULES_MESSAGE })
+  @MinLength(EXPERT_PASSWORD_MIN_LENGTH, {
+    message: EXPERT_PASSWORD_RULES_MESSAGE,
+  })
   @Matches(/\d/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
   @Matches(/[A-ZА-ЯЁ]/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
   password?: string;
