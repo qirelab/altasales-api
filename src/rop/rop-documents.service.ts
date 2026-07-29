@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-analysis-link.dto';
 import { CreateRopDashboardAnalysisLinkDto } from './dto/create-rop-dashboard-analysis-link.dto';
@@ -23,6 +24,7 @@ import {
 } from './rop-analyze-upload-profile';
 import { RopDashboardFilePartsService } from './rop-dashboard-file-parts.service';
 import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
+import { RopProvisioningService } from './rop-provisioning.service';
 import { RopService } from './rop.service';
 
 @Injectable()
@@ -32,10 +34,13 @@ export class RopDocumentsService {
 
   constructor(
     private readonly ropService: RopService,
+    private readonly ropProvisioningService: RopProvisioningService,
     private readonly linkDownloadService: RopDocumentLinkDownloadService,
     private readonly dashboardFilePartsService: RopDashboardFilePartsService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Questionnaire)
+    private readonly questionnaireRepository: Repository<Questionnaire>,
   ) {}
 
   async listForUser(userId: string): Promise<RopDocumentListItemResponseDto[]> {
@@ -224,6 +229,21 @@ export class RopDocumentsService {
       throw new InternalServerErrorException('ROP API not configured');
     }
 
-    throw new BadRequestException('Сначала заполните анкету');
+    const questionnaire = await this.questionnaireRepository.findOne({
+      where: { userId },
+    });
+    if (!questionnaire) {
+      throw new BadRequestException('Сначала заполните анкету');
+    }
+
+    const provisionedProjectId = await this.ropProvisioningService.ensureProjectForUser(
+      userId,
+      questionnaire.answers.companyName,
+    );
+    if (!provisionedProjectId) {
+      throw new InternalServerErrorException('Не удалось создать проект ROP');
+    }
+
+    return provisionedProjectId;
   }
 }
