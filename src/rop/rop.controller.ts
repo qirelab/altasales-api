@@ -26,10 +26,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-analysis-link.dto';
-import { CreateRopDashboardAnalysisLinkDto } from './dto/create-rop-dashboard-analysis-link.dto';
 import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
-import { RopDashboardFileInspectResponseDto } from './dto/rop-dashboard-file-inspect-response.dto';
-import { RopLinkAccessResponseDto } from './dto/rop-link-access-response.dto';
 import { RopDocumentListItemResponseDto } from './dto/rop-document-list-item-response.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
 import {
@@ -144,114 +141,6 @@ export class RopController {
     @Body() dto: CreateRopDocumentAnalysisLinkDto,
   ): Promise<RopDocumentResponseDto> {
     return this.ropDocumentsService.createFromLinkForAnalyzeForUser(
-      user.id,
-      dto,
-    );
-  }
-
-  @Post('documents/analyze/inspect-link')
-  @ApiOperation({
-    summary: 'Check whether a document link is accessible and downloadable',
-  })
-  @ApiOkResponse({ type: RopLinkAccessResponseDto })
-  async inspectDocumentFromLink(
-    @CurrentUser() user: CurrentUserData,
-    @Body() dto: CreateRopDocumentAnalysisLinkDto,
-  ): Promise<RopLinkAccessResponseDto> {
-    void user;
-    return this.ropDocumentsService.inspectDocumentLinkForUser(dto);
-  }
-
-  @Post('dashboards/analyze/inspect')
-  @ApiOperation({
-    summary: 'Inspect a dashboard file and list selectable pages or sheets',
-  })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['file'],
-      properties: {
-        file: { type: 'string', format: 'binary' },
-      },
-    },
-  })
-  @ApiOkResponse({ type: RopDashboardFileInspectResponseDto })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
-  )
-  async inspectDashboardFile(
-    @CurrentUser() user: CurrentUserData,
-    @UploadedFile() file: Express.Multer.File,
-  ): Promise<RopDashboardFileInspectResponseDto> {
-    void user;
-    if (!file) {
-      throw new BadRequestException('Файл не предоставлен');
-    }
-
-    return this.ropDocumentsService.inspectDashboardFileForUser(file);
-  }
-
-  @Post('dashboards/analyze/inspect-link')
-  @ApiOperation({
-    summary:
-      'Download a dashboard file by URL and list selectable pages or sheets',
-  })
-  @ApiOkResponse({ type: RopDashboardFileInspectResponseDto })
-  async inspectDashboardFromLink(
-    @CurrentUser() user: CurrentUserData,
-    @Body() dto: CreateRopDocumentAnalysisLinkDto,
-  ): Promise<RopDashboardFileInspectResponseDto> {
-    void user;
-    return this.ropDocumentsService.inspectDashboardLinkForUser(dto);
-  }
-
-  @Post('dashboards/analyze/upload')
-  @ApiOperation({
-    summary: 'Upload a dashboard file to ROP and start its AI analysis',
-  })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['file'],
-      properties: {
-        file: { type: 'string', format: 'binary' },
-        partId: { type: 'string', example: 'page:2' },
-      },
-    },
-  })
-  @ApiCreatedResponse({ type: RopDocumentResponseDto })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
-  )
-  async uploadDashboardForAnalyze(
-    @CurrentUser() user: CurrentUserData,
-    @UploadedFile() file: Express.Multer.File,
-    @Body('partId') partId?: string,
-  ): Promise<RopDocumentResponseDto> {
-    if (!file) {
-      throw new BadRequestException('Файл не предоставлен');
-    }
-
-    return this.ropDocumentsService.uploadDashboardForAnalyzeForUser(
-      user.id,
-      file,
-      partId?.trim() || undefined,
-    );
-  }
-
-  @Post('dashboards/analyze/link')
-  @ApiOperation({
-    summary:
-      'Download a dashboard file by URL and upload it to ROP for AI analysis',
-  })
-  @ApiCreatedResponse({ type: RopDocumentResponseDto })
-  async createDashboardFromLinkForAnalyze(
-    @CurrentUser() user: CurrentUserData,
-    @Body() dto: CreateRopDashboardAnalysisLinkDto,
-  ): Promise<RopDocumentResponseDto> {
-    return this.ropDocumentsService.createDashboardFromLinkForAnalyzeForUser(
       user.id,
       dto,
     );
