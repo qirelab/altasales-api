@@ -50,10 +50,16 @@ export class RopDocumentsService {
     }
 
     const documents = await this.ropService.listDocuments(projectId);
-    return documents.map((document) => ({
-      name: document.name,
-      downloadUrl: `/rop/documents/${encodeURIComponent(String(document.id))}/download`,
-    }));
+    return documents.map((document) => {
+      const mapped = mapRopDocument(document);
+      return {
+        id: mapped.id,
+        name: mapped.name,
+        downloadUrl: mapped.downloadUrl,
+        categoryId: mapped.categoryId ?? null,
+        createdAt: mapped.createdAt,
+      };
+    });
   }
 
   async getForUser(
