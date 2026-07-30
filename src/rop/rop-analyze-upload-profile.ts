@@ -9,8 +9,8 @@ export interface RopAnalyzeUploadProfile {
 
 export const ROP_DOCUMENT_ANALYZE_UPLOAD_PROFILE: RopAnalyzeUploadProfile = {
   maxBytes: 20 * 1024 * 1024,
-  allowedExtensions: new Set(['pdf', 'docx', 'xlsx']),
-  formatErrorMessage: 'Допустимы только файлы PDF, DOCX или XLSX',
+  allowedExtensions: new Set(['pdf', 'doc', 'docx', 'xlsx']),
+  formatErrorMessage: 'Допустимы только файлы PDF, DOC, DOCX или XLSX',
   sizeErrorMessage: 'Максимальный размер файла — 20 МБ',
 };
 
