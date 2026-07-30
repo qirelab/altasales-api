@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { User } from '../users/entities/user.entity';
 import { RopController } from './rop.controller';
 import { RopDashboardFilePartsService } from './rop-dashboard-file-parts.service';
@@ -13,7 +14,7 @@ import { RopService } from './rop.service';
 import { RopTasksService } from './rop-tasks.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User]), AuthModule],
+  imports: [TypeOrmModule.forFeature([User, Questionnaire]), AuthModule],
   controllers: [RopController],
   providers: [
     RopService,
