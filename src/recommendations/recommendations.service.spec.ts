@@ -88,7 +88,13 @@ describe('RecommendationsService', () => {
     };
     const scoringService = {
       buildDiagnosticContext: jest.fn().mockReturnValue('context'),
-      generateAiRecommendations: jest.fn().mockResolvedValue([]),
+      generateAiRecommendations: jest.fn().mockResolvedValue({
+        summary: 'Общее описание рекомендаций. Текст основан на анкете.',
+        recommendations: [],
+      }),
+      finalizeRecommendationSummary: jest
+        .fn()
+        .mockReturnValue('Итоговое описание. Оно соответствует списку.'),
       scoreService: jest.fn((candidate) => ({
         serviceId: candidate.packageId ? null : candidate.serviceId,
         packageId: candidate.packageId ?? null,
@@ -1205,6 +1211,68 @@ describe('RecommendationsService', () => {
       [],
       'context',
       undefined,
+    );
+  });
+
+  it('finalizes summary after ranking, filtering, and limit are applied', async () => {
+    const { service, scoringService, relevanceRanker } = createService();
+    const aiResult = {
+      summary: 'Описание исходного набора. Оно относится к модели.',
+      recommendations: [
+        {
+          serviceId: 'model-service-id',
+          packageId: null,
+          serviceName: 'Исходная услуга',
+          priority: RecommendationPriority.Medium,
+          rationale: 'model fit',
+          diagnosticSignals: [],
+          score: 30,
+          coveredServiceIds: ['model-service-id'],
+        },
+      ],
+    };
+    const finalRecommendations: GeneratedRecommendationItem[] = [
+      {
+        serviceId: 'final-service-id',
+        packageId: null,
+        serviceName: 'Итоговая услуга',
+        priority: RecommendationPriority.Urgent,
+        rationale: 'final fit',
+        diagnosticSignals: [],
+        score: 90,
+        coveredServiceIds: ['final-service-id'],
+      },
+      {
+        serviceId: 'limited-out-id',
+        packageId: null,
+        serviceName: 'Исключённая лимитом услуга',
+        priority: RecommendationPriority.Medium,
+        rationale: 'lower fit',
+        diagnosticSignals: [],
+        score: 40,
+        coveredServiceIds: ['limited-out-id'],
+      },
+    ];
+    scoringService.generateAiRecommendations.mockResolvedValueOnce(aiResult);
+    relevanceRanker.rankRecommendations.mockReturnValueOnce(
+      finalRecommendations,
+    );
+
+    const result = await service.generateForUserWithSummary({
+      userId,
+      persist: false,
+      limit: 1,
+    });
+
+    expect(result.recommendations.map((item) => item.serviceId)).toEqual([
+      'final-service-id',
+    ]);
+    expect(result.summary).toBe('Итоговое описание. Оно соответствует списку.');
+    expect(scoringService.finalizeRecommendationSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ clientProfile: questionnaireAnswers }),
+      aiResult,
+      [expect.objectContaining({ serviceId: 'final-service-id' })],
+      'context',
     );
   });
 

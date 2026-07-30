@@ -21,8 +21,10 @@ import { LlmProvider } from './enums/llm-provider.enum';
 import { LlmTask } from './enums/llm-task.enum';
 import { LlmChatRequest } from './interfaces/llm-chat-request.interface';
 import { LlmChatResponse } from './interfaces/llm-chat-response.interface';
+import { LlmChatStreamEvent } from './interfaces/llm-chat-stream-event.interface';
 import { LlmMessage } from './interfaces/llm-message.interface';
 import { LlmProviderAdapter } from './interfaces/llm-provider-adapter.interface';
+import { LlmProviderStreamEvent } from './interfaces/llm-provider-stream-event.interface';
 import { AnonymizationResult } from './interfaces/pii-anonymization.interface';
 import { SafeLlmErrorCode } from './interfaces/safe-llm-log.interface';
 import { PiiAnonymizerService } from './pii-anonymizer.service';
@@ -875,6 +877,13 @@ export class LlmProxyService {
       if (error.code === 'AI_RESTORE_FAILED') {
         return this.safeRestoreError();
       }
+
+      if (
+        error.code === 'AI_STREAM_UNSUPPORTED' ||
+        error.code === 'AI_STREAM_EMPTY'
+      ) {
+        return this.safeProviderUnavailableError(error.code);
+      }
     }
 
     return this.safeProviderUnavailableError('AI_PROVIDER_UNAVAILABLE');
@@ -1012,5 +1021,205 @@ export class LlmProxyService {
     }
 
     return parsed;
+  }
+
+  /**
+   * Streams an LLM chat response through the same anonymization, policy and
+   * monitoring pipeline as `chat`, yielding `delta` events as content arrives
+   * and a terminal `done` event carrying the fully-restored `LlmChatResponse`.
+   *
+   * Streaming does NOT participate in the shared cache — `stream_options.include_usage`
+   * gives us real usage counters at the tail, but every stream still costs a
+   * fresh provider call. Cache write on stream would leak partial content into
+   * the cached record on abort mid-stream.
+   *
+   * When anonymization rewrote the outgoing messages, we cannot safely emit
+   * upstream deltas as-is (a placeholder like `{{PII_PHONE_0001}}` could arrive
+   * split across two chunks and leak the raw fragment client-side). In that
+   * case we throw `AI_STREAM_UNSUPPORTED`; the caller can fall back to the
+   * regular `chat` method.
+   */
+  async *chatStream(
+    request: LlmChatRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<LlmChatStreamEvent, void, void> {
+    const flowStartedAt = Date.now();
+    let currentStage = AiMonitoringStage.Validation;
+    let task: LlmTask | undefined;
+    let effectiveDataClass: DataClass | undefined;
+    let anonymizationStats: Record<string, number> | undefined;
+    let provider: LlmProviderAdapter | undefined;
+
+    try {
+      this.validateRequest(request);
+      task = request.task;
+
+      const declaredDataClass = this.resolveDeclaredDataClass(request);
+      const anonymizationMode = this.getAnonymizationMode();
+      provider = this.selectProvider(request, 'primary');
+      if (typeof provider.streamChat !== 'function') {
+        throw this.safeStreamUnsupportedError();
+      }
+
+      currentStage = AiMonitoringStage.Anonymization;
+      const anonymizationResult = await this.resolveAnonymization(
+        request.messages,
+        declaredDataClass,
+        anonymizationMode,
+      );
+      if (anonymizationResult) {
+        // See method jsdoc — streaming with placeholder-restore is not safe.
+        throw this.safeStreamUnsupportedError();
+      }
+
+      const providerMessages = this.buildProviderMessages(
+        request.messages,
+        undefined,
+      );
+
+      effectiveDataClass = this.resolveUnanonymizedDataClass(
+        request.messages,
+        declaredDataClass,
+        anonymizationMode,
+      );
+      anonymizationStats = undefined;
+
+      this.assertProviderPolicy(
+        effectiveDataClass,
+        provider,
+        anonymizationMode,
+      );
+
+      currentStage = AiMonitoringStage.ProviderCall;
+      const startedAt = Date.now();
+      let accumulated = '';
+      let usage = {
+        tokensIn: 0,
+        tokensOut: 0,
+        costRub: 0,
+        latencyMs: 0,
+      };
+      let sawContent = false;
+      // The PII scanner must catch a pattern that straddles two deltas but
+      // it does not need to rescan the entire response on every chunk. Keep
+      // a sliding window sized for the longest PII pattern in `PII_PATTERNS`
+      // plus the current delta, so worst-case work stays O(window) per event.
+      // Today the widest pattern (`birth_date` trigger "date of birth" + a
+      // 40-char content window + date literal) fits in ~63 chars. If a new
+      // pattern longer than 63 chars is added to `pii-anonymizer.service.ts`,
+      // raise `piiWindowSize` accordingly or a straddle can slip through.
+      const piiWindowSize = 64;
+      let piiScanCursor = 0;
+
+      const stream = provider.streamChat(providerMessages, { signal });
+      for await (const event of stream as AsyncIterable<LlmProviderStreamEvent>) {
+        if (event.type === 'delta') {
+          if (!event.content) continue;
+          accumulated += event.content;
+          const scanFrom = Math.max(0, piiScanCursor - piiWindowSize);
+          this.assertProviderResponsePolicy(
+            accumulated.slice(scanFrom),
+            anonymizationMode,
+          );
+          piiScanCursor = accumulated.length;
+          sawContent = true;
+          yield { type: 'delta', content: event.content };
+          continue;
+        }
+        // done
+        usage = {
+          tokensIn: event.usage.tokensIn,
+          tokensOut: event.usage.tokensOut,
+          costRub: event.usage.costRub ?? 0,
+          latencyMs: event.usage.latencyMs || Date.now() - startedAt,
+        };
+      }
+
+      if (!sawContent) {
+        throw new AiError('AI_STREAM_EMPTY', 'stream_empty', {
+          retryable: false,
+          fallbackEligible: false,
+        });
+      }
+
+      currentStage = AiMonitoringStage.SafetyScan;
+      this.assertProviderResponsePolicy(accumulated, anonymizationMode);
+
+      currentStage = AiMonitoringStage.Restore;
+      const restoredContent = this.restoreProviderResponse(
+        accumulated,
+        undefined,
+      );
+
+      const response: LlmChatResponse = {
+        providerId: provider.providerId,
+        modelId: provider.modelId,
+        content: restoredContent,
+        usage,
+        dataClass: effectiveDataClass,
+        anonymizationStats,
+      };
+
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiFlowSucceeded,
+        operation: AiMonitoringOperation.LlmChatStream,
+        stage: AiMonitoringStage.AiFlow,
+        status: AiMonitoringStatus.Success,
+        providerAlias: 'primary',
+        modelAlias: provider.modelId,
+        providerConfigured: true,
+        task,
+        dataClass: effectiveDataClass,
+        effectiveDataClass,
+        tokensIn: usage.tokensIn,
+        tokensOut: usage.tokensOut,
+        costRub: usage.costRub,
+        latencyMs: Date.now() - flowStartedAt,
+        anonymizationStats,
+        fallbackUsed: false,
+      });
+
+      yield { type: 'done', response };
+    } catch (error) {
+      const safeError = this.toSafeException(error);
+      const errorCode = this.getErrorCode(safeError);
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiStageFailed,
+        operation: AiMonitoringOperation.LlmChatStream,
+        stage: currentStage,
+        status: AiMonitoringStatus.Failure,
+        task,
+        dataClass: effectiveDataClass ?? 'unresolved',
+        effectiveDataClass: effectiveDataClass ?? 'unresolved',
+        errorCode,
+        latencyMs: Date.now() - flowStartedAt,
+        anonymizationStats,
+        fallbackUsed: false,
+        providerConfigured: Boolean(provider),
+      });
+      this.monitoring.log({
+        eventName: AiMonitoringEventName.AiFlowFailed,
+        operation: AiMonitoringOperation.LlmChatStream,
+        stage: AiMonitoringStage.AiFlow,
+        status: AiMonitoringStatus.Failure,
+        task,
+        dataClass: effectiveDataClass ?? 'unresolved',
+        effectiveDataClass: effectiveDataClass ?? 'unresolved',
+        errorCode,
+        latencyMs: Date.now() - flowStartedAt,
+        anonymizationStats,
+        fallbackUsed: false,
+        providerConfigured: Boolean(provider),
+      });
+      throw safeError;
+    }
+  }
+
+  private safeStreamUnsupportedError(): ServiceUnavailableException {
+    const error = new ServiceUnavailableException(
+      'LLM provider does not support streaming',
+    ) as ServiceUnavailableException & SafeException;
+    error.safeErrorCode = 'AI_STREAM_UNSUPPORTED';
+    return error;
   }
 }
