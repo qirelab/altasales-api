@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AiModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
 import { FilesModule } from '../files/files.module';
 import { ChatbotModule } from '../chatbot/chatbot.module';
@@ -13,6 +14,7 @@ import { ChatController } from './chat.controller';
 import { ChatHistoryMapperService } from './services/chat-history-mapper.service';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { ChatStreamingService } from './services/chat-streaming.service';
+import { SessionTitleService } from './services/session-title.service';
 
 @Module({
   imports: [
@@ -23,6 +25,7 @@ import { ChatStreamingService } from './services/chat-streaming.service';
       User,
       Order,
     ]),
+    AiModule,
     AuthModule,
     FilesModule,
     ChatbotModule,
@@ -33,6 +36,7 @@ import { ChatStreamingService } from './services/chat-streaming.service';
     ChatHistoryMapperService,
     AiChatOrchestratorService,
     ChatStreamingService,
+    SessionTitleService,
   ],
   exports: [ChatService],
 })

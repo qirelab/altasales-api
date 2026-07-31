@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { UserRole } from '../users/entities/user-role.enum';
-import { AI_SYSTEM_USER_ID, AI_WELCOME_MESSAGE } from './chat.constants';
+import { AI_SYSTEM_USER_ID } from './chat.constants';
 import { ChatService } from './chat.service';
 import { ChatSessionType } from './entities/chat-session-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
@@ -128,6 +128,9 @@ function buildService(
     });
   }
 
+  const sessionTitleService = {
+    generateAndAssign: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new ChatService(
     conversationRepository as never,
     messageRepository as never,
@@ -137,11 +140,13 @@ function buildService(
     wsGateway as never,
     filesService as never,
     aiOrchestrator as never,
+    sessionTitleService as never,
     dataSource as never,
   );
 
   return {
     service,
+    sessionTitleService,
     conversationRepository,
     messageRepository,
     participantRepository,
@@ -191,7 +196,7 @@ describe('ChatService.openPlatformSession', () => {
     expect(conversationRepository.save).toHaveBeenCalled();
   });
 
-  it('seeds welcome message + client + AI participants on every new session', async () => {
+  it('registers client + AI participants and seeds NO welcome message on new session', async () => {
     const { service, participantRepository, messageRepository } = buildService({
       users: {
         'client-1': makeUser(),
@@ -204,10 +209,10 @@ describe('ChatService.openPlatformSession', () => {
     });
     await service.openPlatformSession('client-1');
 
-    const savedTexts = messageRepository.save.mock.calls.map(
-      (c) => c[0].text,
-    );
-    expect(savedTexts).toContain(AI_WELCOME_MESSAGE);
+    // No message rows are persisted at session creation — the first turn
+    // must come from the client and the AI reply is scheduled via
+    // sendPlatformMessage / stream endpoint.
+    expect(messageRepository.save).not.toHaveBeenCalled();
 
     const savedParticipants = participantRepository.save.mock.calls
       .flat()
@@ -356,11 +361,12 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(arg.question).toBe('q?');
   });
 
-  it('sets session title from the client\'s first message when title is null', async () => {
+  it('schedules AI title generation on the client\'s first message when title is null', async () => {
     const {
       service,
       conversationRepository,
       participantRepository,
+      sessionTitleService,
     } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(makeSession());
     participantRepository.findOne.mockResolvedValueOnce({
@@ -373,46 +379,18 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'Как настроить отдел продаж?',
     } as never);
 
-    const updateCall = conversationRepository.update.mock.calls.find(
-      (c) => c[1]?.title !== undefined,
+    expect(sessionTitleService.generateAndAssign).toHaveBeenCalledWith(
+      'conv-1',
+      'Как настроить отдел продаж?',
     );
-    expect(updateCall).toBeDefined();
-    expect(updateCall![1].title).toBe('Как настроить отдел продаж?');
   });
 
-  it('truncates a long first-message title with ellipsis', async () => {
+  it('does NOT trigger AI title generation when the session already has a title', async () => {
     const {
       service,
       conversationRepository,
       participantRepository,
-    } = buildService();
-    conversationRepository.findOne.mockResolvedValueOnce(makeSession());
-    participantRepository.findOne.mockResolvedValueOnce({
-      sessionId: 'conv-1',
-      userId: 'client-1',
-      role: ChatParticipantRole.Client,
-    });
-    const longText =
-      'Как настроить отдел продаж для компании из 50 человек с учётом сложной специфики B2B рынка и удалённой команды';
-
-    await service.sendPlatformMessage('client-1', 'conv-1', {
-      text: longText,
-    } as never);
-
-    const updateCall = conversationRepository.update.mock.calls.find(
-      (c) => c[1]?.title !== undefined,
-    );
-    expect(updateCall).toBeDefined();
-    const title = updateCall![1].title as string;
-    expect(title.length).toBeLessThanOrEqual(60);
-    expect(title.endsWith('…')).toBe(true);
-  });
-
-  it('does NOT overwrite existing title on subsequent client messages', async () => {
-    const {
-      service,
-      conversationRepository,
-      participantRepository,
+      sessionTitleService,
     } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(
       makeSession({ title: 'Existing topic' }),
@@ -427,17 +405,15 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'follow-up question',
     } as never);
 
-    const updateWithTitle = conversationRepository.update.mock.calls.find(
-      (c) => c[1]?.title !== undefined,
-    );
-    expect(updateWithTitle).toBeUndefined();
+    expect(sessionTitleService.generateAndAssign).not.toHaveBeenCalled();
   });
 
-  it('does NOT auto-title on messages from an expert (only clients set title)', async () => {
+  it('does NOT trigger AI title generation on messages from an expert (only clients seed the title)', async () => {
     const {
       service,
       conversationRepository,
       participantRepository,
+      sessionTitleService,
     } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(makeSession());
     participantRepository.findOne.mockResolvedValueOnce({
@@ -450,10 +426,7 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'Let me jump in',
     } as never);
 
-    const updateWithTitle = conversationRepository.update.mock.calls.find(
-      (c) => c[1]?.title !== undefined,
-    );
-    expect(updateWithTitle).toBeUndefined();
+    expect(sessionTitleService.generateAndAssign).not.toHaveBeenCalled();
   });
 
   it('WS payload uses "session" key with id/updatedAt/title', async () => {
@@ -604,11 +577,8 @@ describe('ChatService.addExpertToClientPlatformSessions', () => {
 
     await service.addExpertToClientPlatformSessions('client-1', 'expert-99');
 
-    // The welcome message was written as part of createPlatformSession.
-    const savedTexts = messageRepository.save.mock.calls.map(
-      (c) => c[0].text,
-    );
-    expect(savedTexts).toContain(AI_WELCOME_MESSAGE);
+    // createPlatformSession no longer seeds a welcome message.
+    expect(messageRepository.save).not.toHaveBeenCalled();
 
     const savedParticipants = participantRepository.save.mock.calls
       .flat()

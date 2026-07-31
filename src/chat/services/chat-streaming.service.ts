@@ -9,7 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
-import { derivePlatformSessionTitle } from '../chat-session-title.util';
 import { SendPlatformMessageDto } from '../dto/send-platform-message.dto';
 import { ChatSession } from '../entities/chat-session.entity';
 import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
@@ -20,6 +19,7 @@ import {
   AiChatOrchestratorService,
   StreamReplyHooks,
 } from './ai-chat-orchestrator.service';
+import { SessionTitleService } from './session-title.service';
 
 export type StreamPlatformMessageHooks = {
   onClientMessage: (_message: ChatMessage) => void;
@@ -60,6 +60,7 @@ export class ChatStreamingService {
     private readonly participantRepository: Repository<ChatSessionParticipant>,
     private readonly wsGateway: WebSocketGatewayService,
     private readonly aiOrchestrator: AiChatOrchestratorService,
+    private readonly sessionTitleService: SessionTitleService,
   ) {}
 
   /**
@@ -141,18 +142,14 @@ export class ChatStreamingService {
       savedClientMessage = await this.messageRepository.save(clientMessage);
 
       const now = new Date();
-      // Same auto-title flow as ChatService.sendPlatformMessage — the
-      // streaming path is the production one for client messages, so it
-      // must derive the sidebar title from the first client turn.
-      const newTitle = !conversation.title
-        ? derivePlatformSessionTitle(text)
-        : null;
-      const sessionUpdate: Partial<ChatSession> = { updatedAt: now };
-      if (newTitle) {
-        sessionUpdate.title = newTitle;
-        conversation.title = newTitle;
+      await this.conversationRepository.update(conversation.id, { updatedAt: now });
+
+      // Fire-and-forget AI-generated session title on the first client turn.
+      // Doesn't block the streaming pipeline — the sidebar picks up the new
+      // title via the `chat:session_updated` WS event once it lands.
+      if (!conversation.title) {
+        void this.sessionTitleService.generateAndAssign(conversation.id, text);
       }
-      await this.conversationRepository.update(conversation.id, sessionUpdate);
 
       const otherParticipants = await this.resolveOtherParticipantIds(
         conversation,
