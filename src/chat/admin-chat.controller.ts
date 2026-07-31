@@ -18,12 +18,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { UserRole } from '../users/entities/user-role.enum';
+import { ChatThrottlerGuard } from './guards/chat-throttler.guard';
 import { AdminChatService } from './services/admin-chat.service';
 import type { OperatorSessionFilter } from './services/admin-chat.service';
 
@@ -60,6 +62,8 @@ export class AdminChatController {
   }
 
   @Post('sessions/:id/claim')
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Claim a session for the current operator',
@@ -80,6 +84,8 @@ export class AdminChatController {
   }
 
   @Post('sessions/:id/resolve')
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Mark a session as resolved',

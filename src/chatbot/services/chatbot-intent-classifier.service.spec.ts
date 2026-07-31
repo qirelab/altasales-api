@@ -52,17 +52,17 @@ describe('ChatbotIntentClassifierService', () => {
     await expect(service.classify('Что о политике?')).resolves.toBe(ChatIntent.OffTopic);
   });
 
-  it('falls back to platform_question when LLM returns unrecognised content', async () => {
+  it('falls back to sales_question (non-escalating) when LLM returns unrecognised content', async () => {
     const { service } = buildClassifier({ llmContent: 'i-have-no-idea' });
     await expect(service.classify('Странный вопрос')).resolves.toBe(
-      ChatIntent.PlatformQuestion,
+      ChatIntent.SalesQuestion,
     );
   });
 
-  it('falls back to platform_question when LLM throws', async () => {
+  it('falls back to sales_question (non-escalating) when LLM throws', async () => {
     const { service, llmProxy } = buildClassifier({ llmError: new Error('rate limit') });
     await expect(service.classify('Что входит в пакет?')).resolves.toBe(
-      ChatIntent.PlatformQuestion,
+      ChatIntent.SalesQuestion,
     );
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
   });

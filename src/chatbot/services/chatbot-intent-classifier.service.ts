@@ -90,7 +90,13 @@ export class ChatbotIntentClassifierService {
       });
       const raw = response.content ?? '';
       const parsed = parseChatIntent(raw) ?? this.parseFuzzy(raw);
-      const intent = parsed ?? ChatIntent.PlatformQuestion;
+      // Fallback when the LLM answer can't be parsed: SalesQuestion, NOT
+      // PlatformQuestion. PlatformQuestion + empty RAG triggers a handoff,
+      // so an unparseable classifier response would systematically page
+      // the AltaSales team for every off-topic user message during an
+      // outage. SalesQuestion lets the LLM answer from general knowledge
+      // without escalation — same policy as the LLM-throws catch below.
+      const intent = parsed ?? ChatIntent.SalesQuestion;
       this.logger.log({
         eventName: EVENT_CLASSIFIED,
         intent,
@@ -104,7 +110,9 @@ export class ChatbotIntentClassifierService {
         error: error instanceof Error ? error.message : String(error),
         latencyMs: Date.now() - startedAt,
       });
-      return ChatIntent.PlatformQuestion;
+      // See rationale above: prefer a non-escalating intent so a classifier
+      // outage does not fire mass false-positive handoffs.
+      return ChatIntent.SalesQuestion;
     }
   }
 

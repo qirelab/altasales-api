@@ -432,13 +432,22 @@ export class ChatbotRagService {
     if (top.score < this.referenceShortcutMinScore) return null;
     const title = top.document.title ?? top.document.originalFileName ?? '';
     if (!title.startsWith(REFERENCE_TITLE_PREFIX)) return null;
-    // No `m` flag on purpose: with multi-line mode `$` matches end of every
-    // line, and the lazy `*?` would stop at the first newline, cutting the
-    // answer to just its opening sentence. Without `m`, `$` is end-of-text
-    // only, so the lazy quantifier extends until it finds `\nТема:` or EOF.
-    const match = /Ответ:\s*([\s\S]*?)(?:\nТема:|$)/.exec(top.text);
-    const body = match?.[1]?.trim();
-    return body && body.length > 0 ? body : null;
+    // The publisher renders every reference as:
+    //   Вопрос: ...
+    //   Ответ: <body, may contain any text including a line starting with
+    //           "Тема:" inside the answer itself>
+    //   Тема: <topic>  ← always the LAST line
+    // A greedy match on the first `\nТема:` would truncate answers whose
+    // body legitimately mentions a "Тема:" line. Anchor to the RIGHT
+    // instead: take everything between the first `Ответ:` and the LAST
+    // `\nТема:` (fall back to end-of-text if no `Тема:` line exists).
+    const answerStart = top.text.indexOf('Ответ:');
+    if (answerStart < 0) return null;
+    const bodyStart = answerStart + 'Ответ:'.length;
+    const topicMarker = top.text.lastIndexOf('\nТема:');
+    const bodyEnd = topicMarker > bodyStart ? topicMarker : top.text.length;
+    const body = top.text.slice(bodyStart, bodyEnd).trim();
+    return body.length > 0 ? body : null;
   }
 
   /**

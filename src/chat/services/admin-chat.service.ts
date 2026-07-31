@@ -88,13 +88,51 @@ export class AdminChatService {
       order: { updatedAt: 'DESC' },
       take: 200,
     });
-    return Promise.all(rows.map((row) => this.toView(row)));
+    if (rows.length === 0) return [];
+
+    // Batch the two per-session lookups that toView() otherwise runs one at a
+    // time (up to 2×200 round-trips). Fetch the latest message per session in
+    // a single window query and questionnaires for all client ids in one IN.
+    const sessionIds = rows.map((r) => r.id);
+    const clientIds = rows
+      .map((r) => pickClient(r)?.id)
+      .filter((id): id is string => Boolean(id));
+
+    const lastMessages = sessionIds.length > 0
+      ? await this.messageRepository
+        .createQueryBuilder('m')
+        .distinctOn(['m."sessionId"'])
+        .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
+        .orderBy('m."sessionId"')
+        .addOrderBy('m."createdAt"', 'DESC')
+        .getMany()
+      : [];
+    const lastMessageBySession = new Map<string, ChatMessage>();
+    for (const m of lastMessages) lastMessageBySession.set(m.sessionId, m);
+
+    const questionnaires = clientIds.length > 0
+      ? await this.questionnaireRepository.find({
+        where: { userId: In(clientIds) },
+      })
+      : [];
+    const companyByUserId = new Map<string, string | null>();
+    for (const q of questionnaires) {
+      const raw = q.answers?.companyName;
+      const trimmed = typeof raw === 'string' ? raw.trim() : '';
+      companyByUserId.set(q.userId, trimmed.length > 0 ? trimmed : null);
+    }
+
+    return rows.map((row) => this.toView(
+      row,
+      lastMessageBySession.get(row.id) ?? null,
+      companyByUserId.get(pickClient(row)?.id ?? '') ?? null,
+    ));
   }
 
   async claim(operatorId: string, sessionId: string): Promise<OperatorSessionView> {
     const session = await this.loadPlatformSession(sessionId);
     if (session.handoffStatus === ChatHandoffStatus.InProgress) {
-      if (session.assignedOperatorId === operatorId) return this.toView(session);
+      if (session.assignedOperatorId === operatorId) return this.loadSingleView(session);
       throw new ConflictException(
         'Session is already being handled by another operator',
       );
@@ -150,7 +188,7 @@ export class AdminChatService {
       claimedAt,
       handoffStatus: fresh.handoffStatus,
     });
-    return this.toView(fresh);
+    return this.loadSingleView(fresh);
   }
 
   private async postClaimAnnouncement(
@@ -171,11 +209,14 @@ export class AdminChatService {
       createdAt: claimedAt,
     });
     const saved = await this.messageRepository.save(announcement);
+    // Bump session.updatedAt to the announcement time so sidebar listings
+    // (which order by updatedAt DESC) surface the new message immediately.
+    await this.sessionRepository.update(session.id, { updatedAt: saved.createdAt });
     const payload = {
       message: { ...saved, files: [] },
       session: {
         id: session.id,
-        updatedAt: session.updatedAt,
+        updatedAt: saved.createdAt,
         title: session.title,
       },
     };
@@ -229,8 +270,9 @@ export class AdminChatService {
       sessionId: fresh.id,
       resolvedAt,
       handoffStatus: fresh.handoffStatus,
+      resolvedBy: pickUser(fresh.assignedOperator, null),
     });
-    return this.toView(fresh);
+    return this.loadSingleView(fresh);
   }
 
   private async loadPlatformSession(sessionId: string): Promise<ChatSession> {
@@ -267,15 +309,12 @@ export class AdminChatService {
     });
   }
 
-  private async toView(session: ChatSession): Promise<OperatorSessionView> {
+  private toView(
+    session: ChatSession,
+    lastMessage: ChatMessage | null,
+    companyName: string | null,
+  ): OperatorSessionView {
     const client = pickClient(session);
-    const [lastMessage, companyName] = await Promise.all([
-      this.messageRepository.findOne({
-        where: { sessionId: session.id },
-        order: { createdAt: 'DESC' },
-      }),
-      this.loadCompanyName(client?.id),
-    ]);
     return {
       id: session.id,
       type: session.type,
@@ -299,6 +338,18 @@ export class AdminChatService {
       assignedOperatorId: session.assignedOperatorId,
       assignedOperator: pickUser(session.assignedOperator, null),
     };
+  }
+
+  private async loadSingleView(session: ChatSession): Promise<OperatorSessionView> {
+    const client = pickClient(session);
+    const [lastMessage, companyName] = await Promise.all([
+      this.messageRepository.findOne({
+        where: { sessionId: session.id },
+        order: { createdAt: 'DESC' },
+      }),
+      this.loadCompanyName(client?.id),
+    ]);
+    return this.toView(session, lastMessage, companyName);
   }
 
   private async loadCompanyName(userId: string | undefined): Promise<string | null> {
