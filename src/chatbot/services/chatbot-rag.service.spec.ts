@@ -200,14 +200,15 @@ describe('ChatbotRagService', () => {
     expect(chatArg.messages).toHaveLength(2);
   });
 
-  it('for meta intent, skips RAG and calls LLM with the raw question', async () => {
+  it('for meta intent, searches (for shortcut check) but calls LLM with raw question when no reference matches', async () => {
     const { service, llmProxy, knowledgeSearch } = buildService({
       intent: ChatIntent.Meta,
+      searchResults: [],
     });
 
     const result = await service.askQuestion({ question: 'Что мы обсуждали?' });
 
-    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).toHaveBeenCalledTimes(1);
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
     const chatArg = llmProxy.chat.mock.calls[0][0];
     const userMessage = chatArg.messages[chatArg.messages.length - 1];
@@ -216,44 +217,68 @@ describe('ChatbotRagService', () => {
     expect(result.intent).toBe(ChatIntent.Meta);
   });
 
-  it('for greeting intent, skips RAG entirely', async () => {
+  it('for greeting intent, still searches for reference shortcut', async () => {
     const { service, llmProxy, knowledgeSearch } = buildService({
       intent: ChatIntent.Greeting,
+      searchResults: [],
     });
 
     const result = await service.askQuestion({ question: 'Здравствуйте' });
 
-    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).toHaveBeenCalledTimes(1);
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
     expect(result.intent).toBe(ChatIntent.Greeting);
   });
 
-  it('for off_topic intent, skips RAG entirely (guards false-positive handoff)', async () => {
+  it('for off_topic intent, still searches for reference shortcut (guards false-positive handoff)', async () => {
     const { service, llmProxy, knowledgeSearch } = buildService({
       intent: ChatIntent.OffTopic,
+      searchResults: [],
     });
 
     const result = await service.askQuestion({ question: 'Что ты думаешь о политике?' });
 
-    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).toHaveBeenCalledTimes(1);
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
     expect(result.intent).toBe(ChatIntent.OffTopic);
     expect(result.refusalReason).toBeUndefined();
   });
 
-  it('for sales_question intent, skips RAG and lets LLM answer from general knowledge', async () => {
+  it('for sales_question intent, still searches for reference shortcut', async () => {
     const { service, llmProxy, knowledgeSearch } = buildService({
       intent: ChatIntent.SalesQuestion,
+      searchResults: [],
     });
 
     const result = await service.askQuestion({
       question: 'Как построить воронку B2B продаж?',
     });
 
-    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).toHaveBeenCalledTimes(1);
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
     expect(result.intent).toBe(ChatIntent.SalesQuestion);
     expect(result.refusalReason).toBeUndefined();
+  });
+
+  it('for greeting intent with a strong reference match, returns the reference verbatim without LLM', async () => {
+    const referenceText = 'Вопрос: Кто ты?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI и платформа';
+    const { service, llmProxy } = buildService({
+      intent: ChatIntent.Greeting,
+      searchResults: [
+        buildResultItem({
+          score: 0.6,
+          text: referenceText,
+          documentTitle: '[Эталон] AI и платформа: Кто ты?',
+        }),
+      ],
+    });
+
+    const result = await service.askQuestion({ question: 'С кем я общаюсь?' });
+
+    expect(llmProxy.chat).not.toHaveBeenCalled();
+    expect(result.answer).toBe('Я цифровой эксперт AltaSales.');
+    expect(result.hasContext).toBe(true);
+    expect(result.intent).toBe(ChatIntent.Greeting);
   });
 
   it('for platform intent with empty RAG results, refuses with no_results_in_scope and escalates', async () => {
