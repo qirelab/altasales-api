@@ -56,6 +56,7 @@ export class ChatService {
       .createQueryBuilder('conv')
       .leftJoinAndSelect('conv.participantOne', 'p1')
       .leftJoinAndSelect('conv.participantTwo', 'p2')
+      .leftJoinAndSelect('conv.assignedOperator', 'op')
       .where((sub) => {
         const memberSub = sub
           .subQuery()
@@ -102,6 +103,11 @@ export class ChatService {
           needsHumanHandoff: conv.needsHumanHandoff,
           handoffTrigger: conv.handoffTrigger,
           handoffRequestedAt: conv.handoffRequestedAt,
+          handoffStatus: conv.handoffStatus,
+          handoffClaimedAt: conv.handoffClaimedAt,
+          handoffResolvedAt: conv.handoffResolvedAt,
+          assignedOperatorId: conv.assignedOperatorId,
+          assignedOperator: pickParticipant(conv.assignedOperator),
         };
       }),
     );
