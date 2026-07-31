@@ -12,6 +12,7 @@ import { ListReferenceAnswersDto, SortDir } from '../dto/list-reference-answers.
 import { UpdateReferenceAnswerDto } from '../dto/update-reference-answer.dto';
 import { ChatbotReferenceAnswer } from '../entities/chatbot-reference-answer.entity';
 import { ReferenceAnswerStatus } from '../enums/reference-answer-status.enum';
+import { ReferenceAnswerPublisherService } from './reference-answer-publisher.service';
 
 export type ListReferenceAnswersResult = {
   items: ChatbotReferenceAnswer[];
@@ -34,6 +35,7 @@ export class ChatbotReferenceAnswersService {
     @InjectRepository(KnowledgeDocument)
     private readonly documentRepository: Repository<KnowledgeDocument>,
     private readonly piiAnonymizer: PiiAnonymizerService,
+    private readonly publisher: ReferenceAnswerPublisherService,
   ) {}
 
   async create(
@@ -53,7 +55,13 @@ export class ChatbotReferenceAnswersService {
       createdById,
       status: ReferenceAnswerStatus.ACTIVE,
     });
-    return this.repository.save(entity);
+    const saved = await this.repository.save(entity);
+    const documentId = await this.publisher.publish(saved);
+    if (documentId) {
+      saved.publishedDocumentId = documentId;
+      await this.repository.update(saved.id, { publishedDocumentId: documentId });
+    }
+    return saved;
   }
 
   async update(
@@ -80,7 +88,18 @@ export class ChatbotReferenceAnswersService {
       existing.sourceDocumentId = dto.sourceDocumentId;
     }
 
-    return this.repository.save(existing);
+    const saved = await this.repository.save(existing);
+    if (saved.status === ReferenceAnswerStatus.ACTIVE) {
+      await this.republish(saved);
+    }
+    return saved;
+  }
+
+  private async republish(entity: ChatbotReferenceAnswer): Promise<void> {
+    await this.publisher.unpublish(entity.publishedDocumentId);
+    const documentId = await this.publisher.publish(entity);
+    entity.publishedDocumentId = documentId;
+    await this.repository.update(entity.id, { publishedDocumentId: documentId });
   }
 
   async findAll(query: ListReferenceAnswersDto): Promise<ListReferenceAnswersResult> {
@@ -134,7 +153,17 @@ export class ChatbotReferenceAnswersService {
     const existing = await this.findOne(id);
     if (existing.status === status) return existing;
     existing.status = status;
-    return this.repository.save(existing);
+    const saved = await this.repository.save(existing);
+    if (status === ReferenceAnswerStatus.ARCHIVED) {
+      await this.publisher.unpublish(saved.publishedDocumentId);
+      saved.publishedDocumentId = null;
+      await this.repository.update(saved.id, { publishedDocumentId: null });
+    } else if (status === ReferenceAnswerStatus.ACTIVE) {
+      const documentId = await this.publisher.publish(saved);
+      saved.publishedDocumentId = documentId;
+      await this.repository.update(saved.id, { publishedDocumentId: documentId });
+    }
+    return saved;
   }
 
   // PII scan is regex-only (email/phone/INN/SNILS/passport/bank_card/birth_date).

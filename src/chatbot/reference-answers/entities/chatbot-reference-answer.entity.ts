@@ -57,6 +57,18 @@ export class ChatbotReferenceAnswer {
   @JoinColumn({ name: 'createdById' })
   createdBy: User | null;
 
+  // Knowledge document that mirrors this reference in the RAG corpus. When
+  // set, AI chat can retrieve the reference via vector search. Null means
+  // the entry exists in the admin bank but is not (yet) indexed — either
+  // because publish failed or the admin archived it.
+  @ApiPropertyOptional({ description: 'Published knowledge document ID', nullable: true })
+  @Column({ type: 'uuid', nullable: true })
+  publishedDocumentId: string | null;
+
+  @ManyToOne(() => KnowledgeDocument, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'publishedDocumentId' })
+  publishedDocument: KnowledgeDocument | null;
+
   @ApiProperty()
   @CreateDateColumn()
   createdAt: Date;
