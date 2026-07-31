@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
 import { SendPlatformMessageDto } from '../dto/send-platform-message.dto';
+import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatSession } from '../entities/chat-session.entity';
 import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
 import { ChatSessionType } from '../entities/chat-session-type.enum';
@@ -186,6 +187,18 @@ export class ChatStreamingService {
         }`,
       );
       hooks.onError('client_message_persist_failed');
+      return;
+    }
+
+    // Skip the AI turn entirely while a human handoff is active — the
+    // operator is either about to answer (awaiting) or already replying
+    // (in_progress). AI resumes once resolved / null. The client message
+    // is already persisted and broadcast above so the operator inbox sees
+    // it in real time.
+    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
+      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
+    if (handoffPaused) {
+      hooks.onDone(savedClientMessage);
       return;
     }
 

@@ -22,6 +22,7 @@ import { GetSessionsQueryDto } from './dto/get-sessions-query.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { StartSessionDto } from './dto/start-session.dto';
 import { AI_SYSTEM_USER_ID } from './chat.constants';
+import { ChatHandoffStatus } from './entities/chat-handoff-status.enum';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
 import { SessionTitleService } from './services/session-title.service';
@@ -516,11 +517,15 @@ export class ChatService {
       }
     }
 
-    if (membership.role === ChatParticipantRole.Client) {
+    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
+      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
+    if (membership.role === ChatParticipantRole.Client && !handoffPaused) {
       // Only client turns trigger an AI reply. Expert / operator turns are
       // human-authored answers to the client and must not spawn an AI echo.
-      // Orchestrator re-reads participants at emit time so a revoke during
-      // AI generation stops delivery to the revoked user.
+      // Skip AI while a handoff is active (awaiting or in_progress): the
+      // client explicitly needs a human and the operator is either about
+      // to answer or already replying, an AI turn on top would race with
+      // them. AI resumes once the operator resolves the handoff.
       this.aiOrchestrator.scheduleReply({
         conversation,
         clientUserId: userId,
