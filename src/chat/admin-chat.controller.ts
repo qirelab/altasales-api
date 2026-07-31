@@ -56,7 +56,7 @@ export class AdminChatController {
       new DefaultValuePipe('active'),
       new ParseEnumPipe(['active', 'resolved']),
     )
-    filter: OperatorSessionFilter,
+      filter: OperatorSessionFilter,
   ) {
     return this.adminChatService.listOperatorSessions(filter);
   }

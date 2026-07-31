@@ -575,7 +575,13 @@ export class ChatbotRagService {
 
     // Intent classification happens first so the pipeline can short-circuit
     // for explicit handoff requests and skip RAG for non-platform questions.
-    const intent = await this.intentClassifier.classify(question);
+    // History is fed into the classifier so it can distinguish a standalone
+    // FAQ from a follow-up like "то есть X, да?" and gate the reference bank
+    // via `useReferenceBank`.
+    const { intent, useReferenceBank } = await this.intentClassifier.classify(
+      question,
+      input.history ?? [],
+    );
     if (intent === ChatIntent.ExplicitHandoff) {
       return this.buildIntentRefusal('explicit_handoff', intent, startedAt);
     }
@@ -593,8 +599,13 @@ export class ChatbotRagService {
     // rewrite + second retrieval.
     const context = this.conversationalContext.build(input.history ?? []);
 
-    const isMetaQuestion = intent === ChatIntent.Meta || looksLikeMetaQuestion(question);
-    const preflightShortcut = !isMetaQuestion
+    // Shortcut gating: the classifier owns the decision on whether the
+    // reference bank is appropriate for this turn. The old regex-based
+    // meta heuristic stays as a belt-and-suspenders backstop only.
+    const shortcutAllowed = useReferenceBank
+      && intent !== ChatIntent.Meta
+      && !looksLikeMetaQuestion(question);
+    const preflightShortcut = shortcutAllowed
       && context.historyMessages.length > 0
       ? await this.tryReferenceShortcut(question)
       : null;
@@ -661,9 +672,9 @@ export class ChatbotRagService {
       (entry) => entry.score >= this.minRelevanceScore,
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    const shortcut = isMetaQuestion
-      ? null
-      : this.extractReferenceShortcut(rankedByScore, question);
+    const shortcut = shortcutAllowed
+      ? this.extractReferenceShortcut(rankedByScore, question)
+      : null;
     if (shortcut) {
       const top = rankedByScore[0];
       this.logSuccess({
@@ -827,7 +838,10 @@ export class ChatbotRagService {
       return;
     }
 
-    const intent = await this.intentClassifier.classify(question);
+    const { intent, useReferenceBank } = await this.intentClassifier.classify(
+      question,
+      input.history ?? [],
+    );
     if (intent === ChatIntent.ExplicitHandoff) {
       yield {
         type: 'refusal',
@@ -837,11 +851,15 @@ export class ChatbotRagService {
     }
     const skipRag = intent !== ChatIntent.PlatformQuestion;
 
-    // See askQuestion for rationale on preflight + rewrite ordering.
+    // See askQuestion for rationale on preflight + rewrite ordering and on
+    // why the classifier owns `useReferenceBank` — this keeps FAQ-style
+    // paste-answers off follow-up turns like "то есть X, да?".
     const context = this.conversationalContext.build(input.history ?? []);
 
-    const isMetaQuestion = intent === ChatIntent.Meta || looksLikeMetaQuestion(question);
-    const preflightShortcut = !isMetaQuestion
+    const shortcutAllowed = useReferenceBank
+      && intent !== ChatIntent.Meta
+      && !looksLikeMetaQuestion(question);
+    const preflightShortcut = shortcutAllowed
       && context.historyMessages.length > 0
       ? await this.tryReferenceShortcut(question)
       : null;
@@ -918,10 +936,10 @@ export class ChatbotRagService {
       (entry) => entry.score >= this.minRelevanceScore,
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    // Meta questions must never take the reference shortcut - see askQuestion.
-    const shortcut = isMetaQuestion
-      ? null
-      : this.extractReferenceShortcut(rankedByScore, question);
+    // Reference shortcut only when the classifier explicitly allowed it.
+    const shortcut = shortcutAllowed
+      ? this.extractReferenceShortcut(rankedByScore, question)
+      : null;
     if (shortcut) {
       const top = rankedByScore[0];
       this.logSuccess({
