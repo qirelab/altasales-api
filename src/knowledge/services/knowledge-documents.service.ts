@@ -29,6 +29,13 @@ export type CreateKnowledgeUrlInput = {
   metadata?: Record<string, unknown>;
 };
 
+export type CreateKnowledgeTextInput = {
+  title: string;
+  text: string;
+  purpose: KnowledgeBasePurpose;
+  metadata?: Record<string, unknown>;
+};
+
 export type ListKnowledgeDocumentsInput = {
   purpose?: KnowledgeBasePurpose;
   status?: KnowledgeDocumentStatus;
@@ -133,6 +140,43 @@ export class KnowledgeDocumentsService {
     const job = await this.createPendingJob(document);
     this.ingestionService.runExtractedAsync(document, job, {
       blocks: source.blocks,
+    });
+
+    return {
+      documentId: document.id,
+      jobId: job.id,
+      status: document.status,
+    };
+  }
+
+  async createFromText(
+    input: CreateKnowledgeTextInput,
+  ): Promise<{
+    documentId: string;
+    jobId: string;
+    status: KnowledgeDocumentStatus;
+  }> {
+    const title = input.title.trim().slice(0, 255) || 'Inline document';
+    const document = await this.documentRepository.save(
+      this.documentRepository.create({
+        title,
+        purpose: input.purpose,
+        sourceType: KnowledgeSourceType.INLINE,
+        originalFileName: title,
+        sourceUrl: null,
+        mimeType: 'text/plain',
+        size: Buffer.byteLength(input.text, 'utf8'),
+        status: KnowledgeDocumentStatus.PENDING,
+        errorCode: null,
+        safeErrorMessage: null,
+        chunksCount: 0,
+        metadata: input.metadata ?? {},
+      }),
+    );
+
+    const job = await this.createPendingJob(document);
+    this.ingestionService.runExtractedAsync(document, job, {
+      blocks: [{ text: input.text, metadata: {} }],
     });
 
     return {
