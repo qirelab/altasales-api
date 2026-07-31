@@ -6,6 +6,7 @@ import { FilesModule } from '../files/files.module';
 import { ChatbotModule } from '../chatbot/chatbot.module';
 import { User } from '../users/entities/user.entity';
 import { Order } from '../orders/entities/order.entity';
+import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
 import { ChatSession } from './entities/chat-session.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatSessionParticipant } from './entities/chat-session-participant.entity';
@@ -26,6 +27,7 @@ import { SessionTitleService } from './services/session-title.service';
       ChatSessionParticipant,
       User,
       Order,
+      Questionnaire,
     ]),
     AiModule,
     AuthModule,

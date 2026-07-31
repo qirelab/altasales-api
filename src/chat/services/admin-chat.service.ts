@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Not, Repository } from 'typeorm';
+import { Questionnaire } from '../../questionnaires/entities/questionnaire.entity';
 import { User } from '../../users/entities/user.entity';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
@@ -25,7 +26,13 @@ export type OperatorSessionView = {
   type: string;
   title: string | null;
   updatedAt: Date;
-  participant: { id: string; name: string; lastName: string; email: string } | null;
+  participant: {
+    id: string;
+    name: string;
+    lastName: string;
+    email: string;
+    companyName: string | null;
+  } | null;
   lastMessage: {
     id: string;
     text: string;
@@ -63,6 +70,8 @@ export class AdminChatService {
     private readonly participantRepository: Repository<ChatSessionParticipant>,
     @InjectRepository(ChatMessage)
     private readonly messageRepository: Repository<ChatMessage>,
+    @InjectRepository(Questionnaire)
+    private readonly questionnaireRepository: Repository<Questionnaire>,
     private readonly dataSource: DataSource,
     private readonly wsGateway: WebSocketGatewayService,
   ) {}
@@ -137,7 +146,7 @@ export class AdminChatService {
     this.broadcast(fresh, operatorId, 'chat:handoff_claimed', {
       sessionId: fresh.id,
       operatorId,
-      operator: pickUser(fresh.assignedOperator),
+      operator: pickUser(fresh.assignedOperator, null),
       claimedAt,
       handoffStatus: fresh.handoffStatus,
     });
@@ -260,16 +269,19 @@ export class AdminChatService {
 
   private async toView(session: ChatSession): Promise<OperatorSessionView> {
     const client = pickClient(session);
-    const lastMessage = await this.messageRepository.findOne({
-      where: { sessionId: session.id },
-      order: { createdAt: 'DESC' },
-    });
+    const [lastMessage, companyName] = await Promise.all([
+      this.messageRepository.findOne({
+        where: { sessionId: session.id },
+        order: { createdAt: 'DESC' },
+      }),
+      this.loadCompanyName(client?.id),
+    ]);
     return {
       id: session.id,
       type: session.type,
       title: session.title,
       updatedAt: session.updatedAt,
-      participant: pickUser(client),
+      participant: pickUser(client, companyName),
       lastMessage: lastMessage
         ? {
           id: lastMessage.id,
@@ -285,8 +297,19 @@ export class AdminChatService {
       handoffClaimedAt: session.handoffClaimedAt,
       handoffResolvedAt: session.handoffResolvedAt,
       assignedOperatorId: session.assignedOperatorId,
-      assignedOperator: pickUser(session.assignedOperator),
+      assignedOperator: pickUser(session.assignedOperator, null),
     };
+  }
+
+  private async loadCompanyName(userId: string | undefined): Promise<string | null> {
+    if (!userId) return null;
+    const questionnaire = await this.questionnaireRepository.findOne({
+      where: { userId },
+    });
+    const raw = questionnaire?.answers?.companyName;
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
   }
 }
 
@@ -305,12 +328,20 @@ function pickClient(session: ChatSession): User | null {
 
 function pickUser(
   user: User | null,
-): { id: string; name: string; lastName: string; email: string } | null {
+  companyName: string | null,
+): {
+  id: string;
+  name: string;
+  lastName: string;
+  email: string;
+  companyName: string | null;
+} | null {
   if (!user) return null;
   return {
     id: user.id,
     name: user.name,
     lastName: user.lastName,
     email: user.email,
+    companyName,
   };
 }
