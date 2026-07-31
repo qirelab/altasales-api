@@ -133,13 +133,49 @@ export class AdminChatService {
     });
 
     const fresh = await this.loadPlatformSession(sessionId);
+    await this.postClaimAnnouncement(fresh, claimedAt);
     this.broadcast(fresh, operatorId, 'chat:handoff_claimed', {
       sessionId: fresh.id,
       operatorId,
+      operator: pickUser(fresh.assignedOperator),
       claimedAt,
       handoffStatus: fresh.handoffStatus,
     });
     return this.toView(fresh);
+  }
+
+  private async postClaimAnnouncement(
+    session: ChatSession,
+    claimedAt: Date,
+  ): Promise<void> {
+    const operator = session.assignedOperator;
+    if (!operator) return;
+    const parts = [operator.name, operator.lastName]
+      .filter((part) => Boolean(part && part.trim().length > 0));
+    const fullName = parts.join(' ').trim() || 'AltaSales';
+    const text = `К чату подключился оператор ${fullName}. Дальше вам ответит он в этом же чате.`;
+    const announcement = this.messageRepository.create({
+      sessionId: session.id,
+      senderId: AI_SYSTEM_USER_ID,
+      text,
+      isAiGenerated: true,
+      createdAt: claimedAt,
+    });
+    const saved = await this.messageRepository.save(announcement);
+    const payload = {
+      message: { ...saved, files: [] },
+      session: {
+        id: session.id,
+        updatedAt: session.updatedAt,
+        title: session.title,
+      },
+    };
+    const participants = await this.participantRepository.find({
+      where: { sessionId: session.id },
+    });
+    for (const p of participants) {
+      this.wsGateway.emitToUser(p.userId, 'chat:new_message', payload);
+    }
   }
 
   async resolve(
