@@ -12,10 +12,6 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   csv: 'text/csv',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
 };
 
 const EXTENSION_BY_MIME = new Map<string, string>([
@@ -29,10 +25,6 @@ const EXTENSION_BY_MIME = new Map<string, string>([
   ['application/msword', 'doc'],
   ['text/csv', 'csv'],
   ['application/csv', 'csv'],
-  ['image/png', 'png'],
-  ['image/jpeg', 'jpg'],
-  ['image/jpg', 'jpg'],
-  ['image/webp', 'webp'],
 ]);
 
 @Injectable()
