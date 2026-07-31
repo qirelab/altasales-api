@@ -11,6 +11,7 @@ import {
 } from '../../chatbot/services/handoff-trigger.service';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
+import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatSession } from '../entities/chat-session.entity';
 import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
 import { ChatSessionType } from '../entities/chat-session-type.enum';
@@ -206,6 +207,7 @@ export class AiChatOrchestratorService {
           needsHumanHandoff: true,
           handoffTrigger: handoff.trigger,
           handoffRequestedAt: now,
+          handoffStatus: ChatHandoffStatus.Awaiting,
         })
         .where('id = :id', { id: input.conversation.id })
         .andWhere('"needsHumanHandoff" = false')
@@ -434,6 +436,7 @@ export class AiChatOrchestratorService {
             needsHumanHandoff: true,
             handoffTrigger: handoff.trigger,
             handoffRequestedAt: now,
+            handoffStatus: ChatHandoffStatus.Awaiting,
           })
           .where('id = :id', { id: input.conversation.id })
           .andWhere('"needsHumanHandoff" = false')

@@ -14,6 +14,7 @@ import { User } from '../../users/entities/user.entity';
 import { Order } from '../../orders/entities/order.entity';
 import { ChatSessionType } from './chat-session-type.enum';
 import { ChatSessionParticipant } from './chat-session-participant.entity';
+import { ChatHandoffStatus } from './chat-handoff-status.enum';
 import { ChatHandoffTrigger } from './chat-handoff-trigger.enum';
 import { ChatMessage } from './chat-message.entity';
 
@@ -131,4 +132,48 @@ export class ChatSession {
   })
   @Column({ type: 'timestamptz', nullable: true, default: null })
   handoffRequestedAt: Date | null;
+
+  @ApiPropertyOptional({
+    enum: ChatHandoffStatus,
+    description:
+      'Lifecycle of the handoff request: `awaiting` right after the AI ' +
+      'flagged the session, `in_progress` once an operator claims it, ' +
+      '`resolved` after the operator marks it done. Null when there is ' +
+      'no handoff (default for expert-per-order chats and unflagged AI ' +
+      'chats).',
+    nullable: true,
+  })
+  @Column({
+    type: 'enum',
+    enum: ChatHandoffStatus,
+    enumName: 'chat_handoff_status_enum',
+    nullable: true,
+    default: null,
+  })
+  handoffStatus: ChatHandoffStatus | null;
+
+  @ApiPropertyOptional({
+    description: 'User ID of the operator who claimed the handoff.',
+    nullable: true,
+  })
+  @Column({ type: 'uuid', nullable: true, default: null })
+  assignedOperatorId: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'assignedOperatorId' })
+  assignedOperator: User | null;
+
+  @ApiPropertyOptional({
+    description: 'Timestamp the handoff was claimed by an operator.',
+    nullable: true,
+  })
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  handoffClaimedAt: Date | null;
+
+  @ApiPropertyOptional({
+    description: 'Timestamp the handoff was resolved.',
+    nullable: true,
+  })
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  handoffResolvedAt: Date | null;
 }
