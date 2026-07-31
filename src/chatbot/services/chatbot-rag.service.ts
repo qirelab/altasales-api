@@ -26,6 +26,59 @@ const DEFAULT_REFERENCE_SHORTCUT_MIN_SCORE = 0.45;
 const REFERENCE_TITLE_PREFIX = '[Эталон]';
 const MAX_QUESTION_CHARS = 2_000;
 
+// Reference shortcut needs BOTH semantic (embedding score) AND lexical
+// (word overlap) proximity. Pure semantic match is too eager — "А какой
+// пример вопросов может быть?" scores high against "С кем я общаюсь?"
+// simply because both are meta-adjacent, but they mean completely
+// different things. Requiring ≥ this share of stopword-filtered stems
+// to overlap between the client question and the reference question
+// kills those false positives while letting "С кем я общаюсь?" vs the
+// reference "С кем я сейчас общаюсь?" through (2/3 overlap).
+const REFERENCE_SHORTCUT_MIN_JACCARD = 0.4;
+
+// Short high-frequency Russian tokens that carry no discriminative weight
+// for question matching. Kept small on purpose — only the truly generic
+// forms so we don't accidentally strip content words.
+const RU_STOPWORDS: ReadonlySet<string> = new Set([
+  'что', 'как', 'где', 'когда', 'куда', 'откуда', 'почему', 'зачем', 'кто',
+  'это', 'этот', 'эта', 'эти', 'тот', 'та', 'те',
+  'мне', 'меня', 'мой', 'моя', 'мои', 'моё',
+  'вам', 'вас', 'ваш', 'ваша', 'ваши', 'ваше',
+  'ему', 'его', 'ей', 'её', 'им', 'их', 'нам', 'нас',
+  'для', 'без', 'над', 'под', 'при', 'про', 'через',
+  'или', 'либо', 'ещё', 'уже', 'даже', 'тоже', 'тут', 'там', 'вот',
+  'если', 'чтобы', 'потому', 'ведь', 'же', 'ли', 'бы', 'не', 'ни',
+  'так', 'вообще', 'просто', 'может', 'быть', 'есть', 'был', 'была', 'было', 'были',
+  'вы', 'ты', 'мы', 'они', 'он', 'она', 'оно',
+  'в', 'с', 'о', 'у', 'к', 'а', 'и', 'на', 'по', 'за', 'до', 'от', 'из',
+]);
+
+function tokenizeForOverlap(text: string): Set<string> {
+  const tokens = text
+    .toLowerCase()
+    .replace(/[.,!?;:()[\]{}<>«»"'—–\-]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !RU_STOPWORDS.has(token));
+  return new Set(tokens);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const token of a) if (b.has(token)) intersection += 1;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function extractReferenceQuestion(text: string): string | null {
+  const start = text.indexOf('Вопрос:');
+  if (start < 0) return null;
+  const bodyStart = start + 'Вопрос:'.length;
+  const answerMarker = text.indexOf('\nОтвет:', bodyStart);
+  const end = answerMarker > bodyStart ? answerMarker : text.length;
+  return text.slice(bodyStart, end).trim();
+}
+
 // Hardcoded fallback for detecting meta questions ("about the dialog itself")
 // when the LLM classifier over-generalises. Backstop only — the classifier
 // still runs; this just prevents such questions from taking the reference
@@ -441,21 +494,27 @@ export class ChatbotRagService {
    */
   private extractReferenceShortcut(
     ranked: KnowledgeSearchResultItem[],
+    userQuestion: string,
   ): string | null {
     const top = ranked[0];
     if (!top) return null;
     if (top.score < this.referenceShortcutMinScore) return null;
     const title = top.document.title ?? top.document.originalFileName ?? '';
     if (!title.startsWith(REFERENCE_TITLE_PREFIX)) return null;
-    // The publisher renders every reference as:
-    //   Вопрос: ...
-    //   Ответ: <body, may contain any text including a line starting with
-    //           "Тема:" inside the answer itself>
-    //   Тема: <topic>  ← always the LAST line
-    // A greedy match on the first `\nТема:` would truncate answers whose
-    // body legitimately mentions a "Тема:" line. Anchor to the RIGHT
-    // instead: take everything between the first `Ответ:` and the LAST
-    // `\nТема:` (fall back to end-of-text if no `Тема:` line exists).
+    // Lexical guard against semantic-only false positives. Extract the
+    // reference's own "Вопрос:" line and require enough word overlap with
+    // the client's question. Kills matches like
+    //   client: "А какой пример вопросов может быть?"
+    //   reference: "С кем я сейчас общаюсь?"
+    // which score high semantically but mean nothing in common.
+    const refQuestion = extractReferenceQuestion(top.text);
+    if (refQuestion) {
+      const overlap = jaccardSimilarity(
+        tokenizeForOverlap(userQuestion),
+        tokenizeForOverlap(refQuestion),
+      );
+      if (overlap < REFERENCE_SHORTCUT_MIN_JACCARD) return null;
+    }
     const answerStart = top.text.indexOf('Ответ:');
     if (answerStart < 0) return null;
     const bodyStart = answerStart + 'Ответ:'.length;
@@ -494,7 +553,7 @@ export class ChatbotRagService {
     const ranked = [...items]
       .filter((entry) => entry.score >= this.minRelevanceScore)
       .sort((a, b) => b.score - a.score);
-    const answer = this.extractReferenceShortcut(ranked);
+    const answer = this.extractReferenceShortcut(ranked, question);
     if (!answer) return null;
     return {
       answer,
@@ -604,7 +663,7 @@ export class ChatbotRagService {
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
     const shortcut = isMetaQuestion
       ? null
-      : this.extractReferenceShortcut(rankedByScore);
+      : this.extractReferenceShortcut(rankedByScore, question);
     if (shortcut) {
       const top = rankedByScore[0];
       this.logSuccess({
@@ -862,7 +921,7 @@ export class ChatbotRagService {
     // Meta questions must never take the reference shortcut - see askQuestion.
     const shortcut = isMetaQuestion
       ? null
-      : this.extractReferenceShortcut(rankedByScore);
+      : this.extractReferenceShortcut(rankedByScore, question);
     if (shortcut) {
       const top = rankedByScore[0];
       this.logSuccess({
