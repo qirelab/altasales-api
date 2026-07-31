@@ -9,8 +9,10 @@ import { Order } from '../orders/entities/order.entity';
 import { ChatSession } from './entities/chat-session.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatSessionParticipant } from './entities/chat-session-participant.entity';
+import { AdminChatController } from './admin-chat.controller';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
+import { AdminChatService } from './services/admin-chat.service';
 import { ChatHistoryMapperService } from './services/chat-history-mapper.service';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { ChatStreamingService } from './services/chat-streaming.service';
@@ -30,14 +32,15 @@ import { SessionTitleService } from './services/session-title.service';
     FilesModule,
     ChatbotModule,
   ],
-  controllers: [ChatController],
+  controllers: [ChatController, AdminChatController],
   providers: [
     ChatService,
+    AdminChatService,
     ChatHistoryMapperService,
     AiChatOrchestratorService,
     ChatStreamingService,
     SessionTitleService,
   ],
-  exports: [ChatService],
+  exports: [ChatService, AdminChatService],
 })
 export class ChatModule {}
