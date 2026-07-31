@@ -867,12 +867,18 @@ export class ChatService {
       const membership = await this.participantRepository.findOne({
         where: { sessionId: conversation.id, userId },
       });
-      if (!membership) {
-        throw new ForbiddenException(
-          'You are not a participant of this conversation',
-        );
-      }
-      return;
+      if (membership) return;
+
+      // Admins (operators) get read + reply access to every platform chat
+      // so the operator inbox can preview and answer awaiting handoffs
+      // before formally claiming. Non-admins stay bound to the participants
+      // table per QIR-256 privacy spec.
+      const requester = await this.requireUserById(userId, 'User not found');
+      if (requester.role === UserRole.ADMIN) return;
+
+      throw new ForbiddenException(
+        'You are not a participant of this conversation',
+      );
     }
 
     // Legacy expert-type conversations: admins have full visibility (existing
