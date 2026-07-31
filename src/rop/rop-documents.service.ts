@@ -24,6 +24,7 @@ import {
 } from './rop-analyze-upload-profile';
 import { RopDashboardFilePartsService } from './rop-dashboard-file-parts.service';
 import { RopDocumentLinkDownloadService } from './rop-document-link-download.service';
+import { decodeMulterOriginalName } from './rop-filename.util';
 import { RopProvisioningService } from './rop-provisioning.service';
 import { RopService } from './rop.service';
 
@@ -50,10 +51,16 @@ export class RopDocumentsService {
     }
 
     const documents = await this.ropService.listDocuments(projectId);
-    return documents.map((document) => ({
-      name: document.name,
-      downloadUrl: `/rop/documents/${encodeURIComponent(String(document.id))}/download`,
-    }));
+    return documents.map((document) => {
+      const mapped = mapRopDocument(document);
+      return {
+        id: mapped.id,
+        name: mapped.name,
+        downloadUrl: mapped.downloadUrl,
+        categoryId: mapped.categoryId ?? null,
+        createdAt: mapped.createdAt,
+      };
+    });
   }
 
   async getForUser(
@@ -85,12 +92,16 @@ export class RopDocumentsService {
     assertAnalyzeUploadFile(file, profile);
 
     const projectId = await this.requireProjectId(userId);
+    const fileName = decodeMulterOriginalName(file.originalname);
     const document = await this.ropService.createDocument(
       projectId,
-      file.originalname,
+      fileName,
       { categoryId },
     );
-    await this.ropService.uploadFile(projectId, document.id, file);
+    await this.ropService.uploadFile(projectId, document.id, {
+      ...file,
+      originalname: fileName,
+    });
     return this.getForUser(userId, document.id);
   }
 

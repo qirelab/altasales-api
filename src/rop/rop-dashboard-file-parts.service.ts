@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { PDFDocument } from 'pdf-lib';
 import { getFileExtension } from './rop-analyze-upload-profile';
+import { decodeMulterOriginalName } from './rop-filename.util';
 
 export type DashboardFilePartType = 'page' | 'sheet' | 'file';
 
@@ -153,7 +154,9 @@ export class RopDashboardFilePartsService {
     target.addPage(page);
 
     const bytes = await target.save();
-    const baseName = file.originalname.replace(/\.pdf$/i, '') || 'dashboard';
+    const baseName =
+      decodeMulterOriginalName(file.originalname).replace(/\.pdf$/i, '') ||
+      'dashboard';
 
     return this.toMulterFile(
       Buffer.from(bytes),
@@ -186,7 +189,9 @@ export class RopDashboardFilePartsService {
     targetSheet.columns = sourceSheet.columns.map((column) => ({ ...column }));
 
     const bytes = await target.xlsx.writeBuffer();
-    const baseName = file.originalname.replace(/\.xlsx$/i, '') || 'dashboard';
+    const baseName =
+      decodeMulterOriginalName(file.originalname).replace(/\.xlsx$/i, '') ||
+      'dashboard';
     const safeSheetName = sourceSheet.name.replace(/[^\wа-яА-ЯёЁ.-]+/gu, '_');
 
     return this.toMulterFile(
