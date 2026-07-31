@@ -11,9 +11,9 @@ import {
 } from '../../chatbot/services/handoff-trigger.service';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
-import { ChatConversation } from '../entities/chat-conversation.entity';
-import { ChatConversationParticipant } from '../entities/chat-conversation-participant.entity';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatSession } from '../entities/chat-session.entity';
+import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatHistoryMapperService } from './chat-history-mapper.service';
@@ -21,7 +21,7 @@ import { ChatHistoryMapperService } from './chat-history-mapper.service';
 const HISTORY_FETCH_LIMIT = 40;
 
 type RespondInput = {
-  conversation: ChatConversation;
+  conversation: ChatSession;
   clientUserId: string;
   clientMessageId: string;
   question: string;
@@ -64,10 +64,10 @@ export class AiChatOrchestratorService {
   constructor(
     @InjectRepository(ChatMessage)
     private readonly messageRepository: Repository<ChatMessage>,
-    @InjectRepository(ChatConversation)
-    private readonly conversationRepository: Repository<ChatConversation>,
-    @InjectRepository(ChatConversationParticipant)
-    private readonly participantRepository: Repository<ChatConversationParticipant>,
+    @InjectRepository(ChatSession)
+    private readonly conversationRepository: Repository<ChatSession>,
+    @InjectRepository(ChatSessionParticipant)
+    private readonly participantRepository: Repository<ChatSessionParticipant>,
     private readonly ragService: ChatbotRagService,
     private readonly historyMapper: ChatHistoryMapperService,
     private readonly wsGateway: WebSocketGatewayService,
@@ -75,23 +75,23 @@ export class AiChatOrchestratorService {
   ) {}
 
   scheduleReply(input: RespondInput): void {
-    const conversationId = input.conversation.id;
-    const previous = this.queues.get(conversationId) ?? Promise.resolve();
+    const sessionId = input.conversation.id;
+    const previous = this.queues.get(sessionId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
       .then(() => this.respondToClientMessage(input))
       .catch((error) => {
         this.logger.error(
-          `AI chat orchestration crashed for conversation ${conversationId}: ${
+          `AI chat orchestration crashed for conversation ${sessionId}: ${
             error instanceof Error ? error.message : String(error)
           }`,
           error instanceof Error ? error.stack : undefined,
         );
       });
-    this.queues.set(conversationId, next);
+    this.queues.set(sessionId, next);
     void next.finally(() => {
-      if (this.queues.get(conversationId) === next) {
-        this.queues.delete(conversationId);
+      if (this.queues.get(sessionId) === next) {
+        this.queues.delete(sessionId);
       }
     });
   }
@@ -129,8 +129,8 @@ export class AiChatOrchestratorService {
     // and preferable to leaking a future message into the LLM context.
     const recentMessages = await this.messageRepository
       .createQueryBuilder('m')
-      .where('m."conversationId" = :conversationId', {
-        conversationId: input.conversation.id,
+      .where('m."sessionId" = :sessionId', {
+        sessionId: input.conversation.id,
       })
       .andWhere('m."createdAt" < :cutoff', { cutoff: currentMessage.createdAt })
       .orderBy('m."createdAt"', 'DESC')
@@ -175,7 +175,7 @@ export class AiChatOrchestratorService {
     const { input, text, handoff, startedAt, refusalReason } = args;
 
     const answerMessage = this.messageRepository.create({
-      conversationId: input.conversation.id,
+      sessionId: input.conversation.id,
       senderId: AI_SYSTEM_USER_ID,
       text,
       isAiGenerated: true,
@@ -200,7 +200,7 @@ export class AiChatOrchestratorService {
     if (handoff.needsHandoff) {
       const result = await this.conversationRepository
         .createQueryBuilder()
-        .update(ChatConversation)
+        .update(ChatSession)
         .set({
           needsHumanHandoff: true,
           handoffTrigger: handoff.trigger,
@@ -218,9 +218,10 @@ export class AiChatOrchestratorService {
 
     const messagePayload = {
       message: { ...savedAnswer, files: [] },
-      conversation: {
+      session: {
         id: input.conversation.id,
         updatedAt: now,
+        title: input.conversation.title,
       },
     };
 
@@ -234,7 +235,7 @@ export class AiChatOrchestratorService {
 
     if (handoffRegistered) {
       const handoffPayload = {
-        conversationId: input.conversation.id,
+        sessionId: input.conversation.id,
         trigger: handoffTriggerType,
         requestedAt: handoffRequestedAt,
       };
@@ -265,7 +266,7 @@ export class AiChatOrchestratorService {
    * The streaming path bypasses the per-conversation queue: the SSE request
    * keeps the HTTP connection open for the client's turn, which naturally
    * serialises with the same client's next turn. Concurrent clients get their
-   * own connection, and the underlying `ChatConversation.updatedAt` timestamp
+   * own connection, and the underlying `ChatSession.updatedAt` timestamp
    * is set once — same shape as the non-streaming reply.
    *
    * WS `chat:new_message` is emitted to OTHER participants only. The streaming
@@ -304,8 +305,8 @@ export class AiChatOrchestratorService {
 
     const recentMessages = await this.messageRepository
       .createQueryBuilder('m')
-      .where('m."conversationId" = :conversationId', {
-        conversationId: input.conversation.id,
+      .where('m."sessionId" = :sessionId', {
+        sessionId: input.conversation.id,
       })
       .andWhere('m."createdAt" < :cutoff', { cutoff: currentMessage.createdAt })
       .orderBy('m."createdAt"', 'DESC')
@@ -411,7 +412,7 @@ export class AiChatOrchestratorService {
 
     try {
       const answerMessage = this.messageRepository.create({
-        conversationId: input.conversation.id,
+        sessionId: input.conversation.id,
         senderId: AI_SYSTEM_USER_ID,
         text: answerText,
         isAiGenerated: true,
@@ -426,7 +427,7 @@ export class AiChatOrchestratorService {
       if (handoff.needsHandoff) {
         const result = await this.conversationRepository
           .createQueryBuilder()
-          .update(ChatConversation)
+          .update(ChatSession)
           .set({
             needsHumanHandoff: true,
             handoffTrigger: handoff.trigger,
@@ -445,9 +446,10 @@ export class AiChatOrchestratorService {
       const recipientIds = await this.resolveRecipientIds(input.conversation);
       const payload = {
         message: { ...savedAnswer, files: [] },
-        conversation: {
+        session: {
           id: input.conversation.id,
           updatedAt: now,
+          title: input.conversation.title,
         },
       };
       for (const recipientId of recipientIds) {
@@ -457,7 +459,7 @@ export class AiChatOrchestratorService {
 
       if (handoffRegistered) {
         const handoffPayload = {
-          conversationId: input.conversation.id,
+          sessionId: input.conversation.id,
           trigger: handoffTriggerType,
           requestedAt: handoffRequestedAt,
         };
@@ -495,11 +497,11 @@ export class AiChatOrchestratorService {
   }
 
   private async resolveRecipientIds(
-    conversation: ChatConversation,
+    conversation: ChatSession,
   ): Promise<string[]> {
-    if (conversation.type === ChatConversationType.Platform) {
+    if (conversation.type === ChatSessionType.Platform) {
       const participants = await this.participantRepository.find({
-        where: { conversationId: conversation.id },
+        where: { sessionId: conversation.id },
       });
       return participants
         .map((p) => p.userId)

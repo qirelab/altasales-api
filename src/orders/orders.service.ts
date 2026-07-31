@@ -1021,13 +1021,13 @@ export class OrdersService {
       // concurrent revoke on a sibling order of the same pair could see
       // this order's `contractorChatAccess = false` (not yet saved),
       // consider itself the last grant, remove the expert we just added,
-      // and only then let us proceed. `addExpertToClientPlatformChat` is
+      // and only then let us proceed. `addExpertToClientPlatformSessions` is
       // idempotent so a repeat grant still self-heals a partial prior run.
       return this.withClientExpertLock(
         order.userId,
         expertUserId,
         async (manager) => {
-          await this.chatService.addExpertToClientPlatformChat(
+          await this.chatService.addExpertToClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1047,7 +1047,7 @@ export class OrdersService {
                 );
               if (!hasOtherGrant) {
                 await this.chatService
-                  .removeExpertFromClientPlatformChat(
+                  .removeExpertFromClientPlatformSessions(
                     order.userId,
                     expertUserId,
                   )
@@ -1082,7 +1082,7 @@ export class OrdersService {
           expertUserId,
         );
         if (!hasOtherGrant) {
-          await this.chatService.removeExpertFromClientPlatformChat(
+          await this.chatService.removeExpertFromClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1131,7 +1131,7 @@ export class OrdersService {
           expertUserId,
         );
         if (!hasOtherGrant) {
-          await this.chatService.removeExpertFromClientPlatformChat(
+          await this.chatService.removeExpertFromClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1171,7 +1171,7 @@ export class OrdersService {
           expertUserId,
         );
         if (!hasOtherGrant) {
-          await this.chatService.removeExpertFromClientPlatformChat(
+          await this.chatService.removeExpertFromClientPlatformSessions(
             order.userId,
             expertUserId,
           );

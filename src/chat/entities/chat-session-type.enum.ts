@@ -1,4 +1,4 @@
-export enum ChatConversationType {
+export enum ChatSessionType {
   Expert = 'expert',
   Platform = 'platform',
 }

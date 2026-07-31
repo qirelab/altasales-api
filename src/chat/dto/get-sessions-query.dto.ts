@@ -2,7 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class GetConversationsQueryDto {
+export class GetSessionsQueryDto {
   @ApiPropertyOptional({ example: 0, default: 0, minimum: 0 })
   @IsOptional()
   @Type(() => Number)

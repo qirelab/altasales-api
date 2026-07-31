@@ -10,25 +10,25 @@ import {
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
-import { ChatConversation } from './chat-conversation.entity';
+import { ChatSession } from './chat-session.entity';
 import { ChatParticipantRole } from './chat-participant-role.enum';
 
-@Entity()
-@Unique(['conversationId', 'userId'])
-@Index(['conversationId'])
+@Entity({ name: 'chat_session_participant' })
+@Unique(['sessionId', 'userId'])
+@Index(['sessionId'])
 @Index(['userId'])
-export class ChatConversationParticipant {
+export class ChatSessionParticipant {
   @ApiProperty({ description: 'Participant record ID (UUID)' })
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ApiProperty({ description: 'Conversation ID' })
+  @ApiProperty({ description: 'Session ID' })
   @Column({ type: 'uuid' })
-  conversationId: string;
+  sessionId: string;
 
-  @ManyToOne(() => ChatConversation, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'conversationId' })
-  conversation: ChatConversation;
+  @ManyToOne(() => ChatSession, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'sessionId' })
+  session: ChatSession;
 
   @ApiProperty({ description: 'User ID of the participant' })
   @Column({ type: 'uuid' })
@@ -40,19 +40,19 @@ export class ChatConversationParticipant {
 
   @ApiProperty({
     enum: ChatParticipantRole,
-    description: 'Role of the participant inside the conversation',
+    description: 'Role of the participant inside the session',
   })
   @Column({ type: 'enum', enum: ChatParticipantRole })
   role: ChatParticipantRole;
 
-  @ApiProperty({ description: 'Date the participant joined the conversation' })
+  @ApiProperty({ description: 'Date the participant joined the session' })
   @CreateDateColumn()
   addedAt: Date;
 
   @ApiProperty({
     description:
       'Timestamp of the last message this participant has seen. Null means ' +
-      'the participant has never opened the conversation, in which case all ' +
+      'the participant has never opened the session, in which case all ' +
       'messages sent by others count as unread.',
     nullable: true,
   })

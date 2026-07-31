@@ -12,30 +12,40 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
 import { Order } from '../../orders/entities/order.entity';
-import { ChatConversationType } from './chat-conversation-type.enum';
-import { ChatConversationParticipant } from './chat-conversation-participant.entity';
+import { ChatSessionType } from './chat-session-type.enum';
+import { ChatSessionParticipant } from './chat-session-participant.entity';
 import { ChatHandoffTrigger } from './chat-handoff-trigger.enum';
 import { ChatMessage } from './chat-message.entity';
 
-@Entity()
+// NOTE: the `(participantOneId, participantTwoId, orderId)` uniqueness only
+// applies to legacy expert-per-order sessions; platform (AI) sessions are
+// intentionally many-per-client. Postgres treats NULL as distinct in unique
+// indexes, so the constraint currently allows multiple platform rows because
+// `orderId` is NULL for them — if a future PG upgrade flips to
+// `NULLS NOT DISTINCT`, this decorator must switch to a partial index that
+// excludes `type = 'platform'` (see migration
+// 1785000000000-RenameChatConversationToSession for the schema-level drop of
+// UQ_platform_conversation_per_client).
+@Entity({ name: 'chat_session' })
 @Unique(['participantOneId', 'participantTwoId', 'orderId'])
-export class ChatConversation {
-  @ApiProperty({ description: 'Conversation ID (UUID)' })
+export class ChatSession {
+  @ApiProperty({ description: 'Session ID (UUID)' })
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @ApiProperty({
-    enum: ChatConversationType,
+    enum: ChatSessionType,
     description:
-      'Conversation type. `expert` is the legacy client-expert-per-order chat. ' +
-      '`platform` is the single AI-consultant chat between the client and the platform.',
+      'Session type. `expert` is the legacy client-expert-per-order chat. ' +
+      '`platform` is an AI-consultant session between the client and the platform.',
   })
   @Column({
     type: 'enum',
-    enum: ChatConversationType,
-    default: ChatConversationType.Expert,
+    enum: ChatSessionType,
+    enumName: 'chat_session_type_enum',
+    default: ChatSessionType.Expert,
   })
-  type: ChatConversationType;
+  type: ChatSessionType;
 
   @ApiProperty({ description: 'First participant ID (smaller UUID)' })
   @Column({ type: 'uuid' })
@@ -54,7 +64,7 @@ export class ChatConversation {
   participantTwo: User;
 
   @ApiProperty({
-    description: 'Related order ID for order-specific conversation',
+    description: 'Related order ID for order-specific session',
     required: false,
     nullable: true,
   })
@@ -65,6 +75,15 @@ export class ChatConversation {
   @JoinColumn({ name: 'orderId' })
   order: Order | null;
 
+  @ApiPropertyOptional({
+    description:
+      'Session title derived from the client\'s first message. Null on freshly ' +
+      'opened platform sessions until the client sends anything.',
+    nullable: true,
+  })
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  title: string | null;
+
   @ApiProperty({ description: 'Creation date' })
   @CreateDateColumn()
   createdAt: Date;
@@ -73,20 +92,20 @@ export class ChatConversation {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @OneToMany(() => ChatMessage, (message) => message.conversation)
+  @OneToMany(() => ChatMessage, (message) => message.session)
   messages: ChatMessage[];
 
   @OneToMany(
-    () => ChatConversationParticipant,
-    (participant) => participant.conversation,
+    () => ChatSessionParticipant,
+    (participant) => participant.session,
   )
-  participants: ChatConversationParticipant[];
+  participants: ChatSessionParticipant[];
 
   @ApiProperty({
     description:
       'True when the AI could not close the last client turn and a human ' +
       'operator is expected to step in. Set by the orchestrator, cleared ' +
-      'when any non-AI participant sends a message in the conversation.',
+      'when any non-AI participant sends a message in the session.',
   })
   @Column({ type: 'boolean', default: false })
   needsHumanHandoff: boolean;

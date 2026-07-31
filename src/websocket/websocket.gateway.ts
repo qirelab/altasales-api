@@ -83,11 +83,11 @@ implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('chat:typing')
   handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string; recipientId: string },
+    @MessageBody() data: { sessionId: string; recipientId: string },
   ) {
-    if (data?.recipientId && data?.conversationId) {
+    if (data?.recipientId && data?.sessionId) {
       this.emitToUser(data.recipientId, 'chat:typing', {
-        conversationId: data.conversationId,
+        sessionId: data.sessionId,
         userId: client.data.userId,
       });
     }

@@ -5,9 +5,9 @@ import { FilesModule } from '../files/files.module';
 import { ChatbotModule } from '../chatbot/chatbot.module';
 import { User } from '../users/entities/user.entity';
 import { Order } from '../orders/entities/order.entity';
-import { ChatConversation } from './entities/chat-conversation.entity';
+import { ChatSession } from './entities/chat-session.entity';
 import { ChatMessage } from './entities/chat-message.entity';
-import { ChatConversationParticipant } from './entities/chat-conversation-participant.entity';
+import { ChatSessionParticipant } from './entities/chat-session-participant.entity';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { ChatHistoryMapperService } from './services/chat-history-mapper.service';
@@ -17,9 +17,9 @@ import { ChatStreamingService } from './services/chat-streaming.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      ChatConversation,
+      ChatSession,
       ChatMessage,
-      ChatConversationParticipant,
+      ChatSessionParticipant,
       User,
       Order,
     ]),
