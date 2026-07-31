@@ -441,6 +441,45 @@ export class ChatbotRagService {
     return body && body.length > 0 ? body : null;
   }
 
+  /**
+   * Preflight vector search on the raw (un-rewritten) question. Used when
+   * there is history and we don't want the query rewriter to potentially
+   * pollute a self-contained question. Returns null if no shortcut fires;
+   * caller then falls back to the normal rewrite + search flow.
+   */
+  private async tryReferenceShortcut(question: string): Promise<{
+    answer: string;
+    top: KnowledgeSearchResultItem;
+    retrievalMs: number;
+    totalResults: number;
+  } | null> {
+    const startedAt = Date.now();
+    let items: KnowledgeSearchResultItem[];
+    try {
+      const response = await this.knowledgeSearch.search({
+        purpose: KnowledgeBasePurpose.QA_CHATBOT,
+        query: question,
+        limit: this.retrievalLimit,
+      });
+      items = response.results;
+    } catch {
+      // Preflight failures should never break the turn - the caller will
+      // fall through to the normal path which has its own error handling.
+      return null;
+    }
+    const ranked = [...items]
+      .filter((entry) => entry.score >= this.minRelevanceScore)
+      .sort((a, b) => b.score - a.score);
+    const answer = this.extractReferenceShortcut(ranked);
+    if (!answer) return null;
+    return {
+      answer,
+      top: ranked[0],
+      retrievalMs: Date.now() - startedAt,
+      totalResults: items.length,
+    };
+  }
+
   async askQuestion(input: ChatbotRagInput): Promise<ChatbotRagResponse> {
     const startedAt = Date.now();
     const question = input.question.trim().slice(0, MAX_QUESTION_CHARS);
@@ -459,14 +498,46 @@ export class ChatbotRagService {
     }
     const skipRag = intent !== ChatIntent.PlatformQuestion;
 
-    // Memory pipeline: slice history → rewrite follow-up query → retrieve → LLM.
-    // Rewrite turns "а сколько он стоит?" into "сколько стоит CRM Silver?" so
-    // vector retrieval matches the right chunks even for terse follow-ups.
-    // We ALWAYS rewrite (even for non-platform intents) because a follow-up
-    // like "а что такое баланс вообще?" needs history context to disambiguate
-    // from the prior "подарочный баланс" turn — otherwise the shortcut match
-    // hits the wrong reference.
+    // Memory pipeline: slice history → optional preflight shortcut check on
+    // the ORIGINAL question → rewrite follow-up query → retrieve → LLM.
+    //
+    // Preflight is needed because the query rewriter, given a long chat
+    // history, sometimes injects unrelated context into a self-contained
+    // question ("Что мне купить в первую очередь?" → "Что купить по CRM и
+    // балансу?") which then no longer matches the reference. We search on
+    // the raw question first and let the shortcut fire early if it lands
+    // on a strong reference. Only when it doesn't do we pay for the
+    // rewrite + second retrieval.
     const context = this.conversationalContext.build(input.history ?? []);
+
+    const preflightShortcut = intent !== ChatIntent.Meta
+      && context.historyMessages.length > 0
+      ? await this.tryReferenceShortcut(question)
+      : null;
+    if (preflightShortcut) {
+      this.logSuccess({
+        totalMs: Date.now() - startedAt,
+        retrievalMs: preflightShortcut.retrievalMs,
+        totalResults: preflightShortcut.totalResults,
+        contextChunks: 1,
+        topScore: preflightShortcut.top.score,
+        rewriteMs: 0,
+        queryRewritten: 0,
+        usedHistoryCount: context.usedHistoryCount,
+      }, intent);
+      return {
+        answer: preflightShortcut.answer,
+        hasContext: true,
+        sources: [{
+          documentId: preflightShortcut.top.documentId,
+          documentTitle: preflightShortcut.top.document.title,
+          chunkIndex: preflightShortcut.top.chunkIndex,
+          score: preflightShortcut.top.score,
+        }],
+        intent,
+      };
+    }
+
     const rewriteStartedAt = Date.now();
     const searchQuery = await this.queryRewriter.rewrite(
       question,
@@ -475,10 +546,6 @@ export class ChatbotRagService {
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
-    // Always search knowledge, even for greeting/meta/off_topic/sales_question.
-    // A curated reference answer may match those intents too (e.g. "С кем я
-    // общаюсь?" is classified as greeting but has a reference in the bank),
-    // and the shortcut below returns it verbatim without invoking the LLM.
     const retrievalStartedAt = Date.now();
     let results: KnowledgeSearchResultItem[] = [];
     try {
@@ -510,9 +577,6 @@ export class ChatbotRagService {
       (entry) => entry.score >= this.minRelevanceScore,
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    // Meta questions ("что мы обсуждали?") must never take the reference
-    // shortcut — they are about the conversation itself, not about a fact in
-    // the bank, and semantic similarity easily maps them onto the wrong QA.
     const shortcut = intent === ChatIntent.Meta
       ? null
       : this.extractReferenceShortcut(rankedByScore);
@@ -689,9 +753,42 @@ export class ChatbotRagService {
     }
     const skipRag = intent !== ChatIntent.PlatformQuestion;
 
-    // Always rewrite - see askQuestion for rationale (disambiguates
-    // follow-ups even in greeting/meta/off_topic/sales_question intents).
+    // See askQuestion for rationale on preflight + rewrite ordering.
     const context = this.conversationalContext.build(input.history ?? []);
+
+    const preflightShortcut = intent !== ChatIntent.Meta
+      && context.historyMessages.length > 0
+      ? await this.tryReferenceShortcut(question)
+      : null;
+    if (preflightShortcut) {
+      this.logSuccess({
+        totalMs: Date.now() - startedAt,
+        retrievalMs: preflightShortcut.retrievalMs,
+        totalResults: preflightShortcut.totalResults,
+        contextChunks: 1,
+        topScore: preflightShortcut.top.score,
+        rewriteMs: 0,
+        queryRewritten: 0,
+        usedHistoryCount: context.usedHistoryCount,
+      }, intent);
+      yield { type: 'delta', content: preflightShortcut.answer };
+      yield {
+        type: 'done',
+        response: {
+          answer: preflightShortcut.answer,
+          hasContext: true,
+          sources: [{
+            documentId: preflightShortcut.top.documentId,
+            documentTitle: preflightShortcut.top.document.title,
+            chunkIndex: preflightShortcut.top.chunkIndex,
+            score: preflightShortcut.top.score,
+          }],
+          intent,
+        },
+      };
+      return;
+    }
+
     const rewriteStartedAt = Date.now();
     const searchQuery = await this.queryRewriter.rewrite(
       question,
