@@ -477,6 +477,12 @@ export class ChatService {
           needsHumanHandoff: false,
           handoffTrigger: null,
           handoffRequestedAt: null,
+          // Keep handoffStatus in sync — otherwise the operator inbox
+          // (filtered by handoffStatus IN awaiting/in_progress) keeps
+          // showing the chat as active and the explicit /resolve endpoint
+          // would emit a duplicate chat:handoff_resolved event.
+          handoffStatus: ChatHandoffStatus.Resolved,
+          handoffResolvedAt: now,
         })
         .where('id = :id', { id: conversation.id })
         .andWhere('"needsHumanHandoff" = true')
@@ -870,20 +876,15 @@ export class ChatService {
     conversation: ChatSession,
   ): Promise<void> {
     if (conversation.type === ChatSessionType.Platform) {
-      // Platform chats are private between the client, their AI-consultant
-      // and (optionally) a purchased expert / joined operator. Admins do NOT
-      // get a global back-door here — per QIR-256 spec section 8, admin
-      // visibility of other clients' platform chats is explicitly out of
-      // scope. Access is granted only via the participants table.
+      // QIR-687 supersedes the QIR-256 "no admin back-door" rule: admins act
+      // as operators for the AI-chat inbox and need read + reply access to
+      // every platform session. Regular users still must be listed in the
+      // participants table.
       const membership = await this.participantRepository.findOne({
         where: { sessionId: conversation.id, userId },
       });
       if (membership) return;
 
-      // Admins (operators) get read + reply access to every platform chat
-      // so the operator inbox can preview and answer awaiting handoffs
-      // before formally claiming. Non-admins stay bound to the participants
-      // table per QIR-256 privacy spec.
       const requester = await this.requireUserById(userId, 'User not found');
       if (requester.role === UserRole.ADMIN) return;
 

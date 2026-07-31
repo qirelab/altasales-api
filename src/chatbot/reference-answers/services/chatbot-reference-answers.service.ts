@@ -166,11 +166,11 @@ export class ChatbotReferenceAnswersService {
     return saved;
   }
 
-  // PII scan is regex-only (email/phone/INN/SNILS/passport/bank_card/birth_date).
-  // Person names (ФИО) require the LLM-backed anonymizer, which is currently
-  // known-broken (see AnonymizerLlmProvider — no JSON contract system prompt).
-  // Once the shared LLM anonymizer is fixed, switch this to a full anonymize
-  // pass and reject when dataClass !== NoPii for stronger coverage.
+  // TODO(QIR-687-followup): upgrade to full LLM-backed anonymize once
+  // AnonymizerLlmProvider ships a working JSON-contract system prompt, then
+  // reject when dataClass !== NoPii. Current regex-only scan covers
+  // email/phone/INN/SNILS/passport/bank_card/birth_date but misses person
+  // names (ФИО). Admin-authored content, defense-in-depth is acceptable.
   private assertNoPii(question: string, answer: string, topic: string): void {
     const combined = [question, answer, topic].join('\n');
     const scan = this.piiAnonymizer.scanText(combined);
