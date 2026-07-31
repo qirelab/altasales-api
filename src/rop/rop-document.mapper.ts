@@ -1,4 +1,5 @@
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
+import { repairUtf8Mojibake } from './rop-filename.util';
 import { RopDocumentRecord } from './rop.types';
 
 export function mapRopDocument(
@@ -7,7 +8,7 @@ export function mapRopDocument(
   return {
     id: String(document.id),
     projectId: String(document.project_id),
-    name: document.name,
+    name: repairUtf8Mojibake(document.name),
     downloadUrl: `/rop/documents/${encodeURIComponent(String(document.id))}/download`,
     description: document.description ?? null,
     comment: document.comment ?? null,
