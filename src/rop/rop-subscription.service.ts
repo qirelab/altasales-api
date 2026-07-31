@@ -3,10 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Order } from '../orders/entities/order.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
+import { User } from '../users/entities/user.entity';
 import { RopProvisioningService } from './rop-provisioning.service';
 import { RopService } from './rop.service';
 import { pickHighestTariff, type RopTariffKey } from './rop-tariff.registry';
-import { User } from '../users/entities/user.entity';
 
 const ACTIVE_ORDER_STATUSES = [OrderStatus.Planned, OrderStatus.InProgress];
 
