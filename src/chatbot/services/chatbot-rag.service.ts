@@ -22,6 +22,8 @@ const DEFAULT_RETRIEVAL_LIMIT = 6;
 const DEFAULT_MIN_RELEVANCE_SCORE = 0.35;
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_CONTEXT_CHARS = 12_000;
+const DEFAULT_REFERENCE_SHORTCUT_MIN_SCORE = 0.45;
+const REFERENCE_TITLE_PREFIX = '[Эталон]';
 const MAX_QUESTION_CHARS = 2_000;
 
 const NO_INFO_MESSAGE = [
@@ -379,6 +381,7 @@ export class ChatbotRagService {
   private readonly minRelevanceScore: number;
   private readonly cacheTtlMs: number;
   private readonly maxContextChars: number;
+  private readonly referenceShortcutMinScore: number;
 
   constructor(
     private readonly knowledgeSearch: KnowledgeSearchService,
@@ -407,6 +410,31 @@ export class ChatbotRagService {
       'CHATBOT_RAG_MAX_CONTEXT_CHARS',
       DEFAULT_MAX_CONTEXT_CHARS,
     );
+    this.referenceShortcutMinScore = this.readNonNegativeFloat(
+      'CHATBOT_RAG_REFERENCE_SHORTCUT_MIN_SCORE',
+      DEFAULT_REFERENCE_SHORTCUT_MIN_SCORE,
+    );
+  }
+
+  /**
+   * Deterministic shortcut for reference answers. When the top-1 retrieved
+   * chunk is a curated reference (`[Эталон]` title prefix) and its score
+   * clears `CHATBOT_RAG_REFERENCE_SHORTCUT_MIN_SCORE`, we return the
+   * `Ответ:` block verbatim without ever calling the LLM. This defeats the
+   * long-running battle where the LLM paraphrases curated answers no matter
+   * what the system prompt demands.
+   */
+  private extractReferenceShortcut(
+    ranked: KnowledgeSearchResultItem[],
+  ): string | null {
+    const top = ranked[0];
+    if (!top) return null;
+    if (top.score < this.referenceShortcutMinScore) return null;
+    const title = top.document.title ?? top.document.originalFileName ?? '';
+    if (!title.startsWith(REFERENCE_TITLE_PREFIX)) return null;
+    const match = /Ответ:\s*([\s\S]*?)(?:\nТема:|$)/m.exec(top.text);
+    const body = match?.[1]?.trim();
+    return body && body.length > 0 ? body : null;
   }
 
   async askQuestion(input: ChatbotRagInput): Promise<ChatbotRagResponse> {
@@ -466,6 +494,32 @@ export class ChatbotRagService {
     const strongResults = results.filter(
       (entry) => entry.score >= this.minRelevanceScore,
     );
+    const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
+    const shortcut = this.extractReferenceShortcut(rankedByScore);
+    if (shortcut) {
+      const top = rankedByScore[0];
+      this.logSuccess({
+        totalMs: Date.now() - startedAt,
+        retrievalMs,
+        totalResults: results.length,
+        contextChunks: 1,
+        topScore: top.score,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
+      }, intent);
+      return {
+        answer: shortcut,
+        hasContext: true,
+        sources: [{
+          documentId: top.documentId,
+          documentTitle: top.document.title,
+          chunkIndex: top.chunkIndex,
+          score: top.score,
+        }],
+        intent,
+      };
+    }
     const contextResults = strongResults.length > 0
       ? this.trimToBudget(strongResults, question)
       : [];
@@ -655,6 +709,37 @@ export class ChatbotRagService {
     const strongResults = results.filter(
       (entry) => entry.score >= this.minRelevanceScore,
     );
+    const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
+    const shortcut = this.extractReferenceShortcut(rankedByScore);
+    if (shortcut) {
+      const top = rankedByScore[0];
+      this.logSuccess({
+        totalMs: Date.now() - startedAt,
+        retrievalMs,
+        totalResults: results.length,
+        contextChunks: 1,
+        topScore: top.score,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
+      }, intent);
+      yield { type: 'delta', content: shortcut };
+      yield {
+        type: 'done',
+        response: {
+          answer: shortcut,
+          hasContext: true,
+          sources: [{
+            documentId: top.documentId,
+            documentTitle: top.document.title,
+            chunkIndex: top.chunkIndex,
+            score: top.score,
+          }],
+          intent,
+        },
+      };
+      return;
+    }
     const contextResults = strongResults.length > 0
       ? this.trimToBudget(strongResults, question)
       : [];
