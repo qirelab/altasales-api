@@ -11,18 +11,6 @@ export const AI_SYSTEM_USER_EMAIL = 'ai@altasales.internal';
 export const AI_SYSTEM_USER_NAME = 'AI-консультант AltaSales';
 
 /**
- * Sent by the platform on the very first open of a client's platform-type
- * conversation. The text is persisted as a real ChatMessage authored by the
- * AI system user, so the client sees it as a normal AI message with the
- * proper "AI-консультант" badge from the moment they open the chat.
- */
-export const AI_WELCOME_MESSAGE =
-  'Здравствуйте! Я AI-консультант AltaSales — помогу разобраться в ваших ' +
-  'рекомендациях, объясню, почему вам подобрали именно эти услуги, и отвечу ' +
-  'на вопросы про услуги, экспертов и работу платформы. Просто напишите, что ' +
-  'вас интересует.';
-
-/**
  * Sent by the AI when a handoff to a live operator is triggered by an
  * explicit user request. Persisted as an AI-authored ChatMessage so the
  * client sees a natural continuation of the thread while the operator is

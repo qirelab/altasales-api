@@ -21,10 +21,10 @@ import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
 import { GetSessionsQueryDto } from './dto/get-sessions-query.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { StartSessionDto } from './dto/start-session.dto';
-import { AI_SYSTEM_USER_ID, AI_WELCOME_MESSAGE } from './chat.constants';
+import { AI_SYSTEM_USER_ID } from './chat.constants';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
-import { derivePlatformSessionTitle } from './chat-session-title.util';
+import { SessionTitleService } from './services/session-title.service';
 
 @Injectable()
 export class ChatService {
@@ -42,6 +42,7 @@ export class ChatService {
     private readonly wsGateway: WebSocketGatewayService,
     private readonly filesService: FilesService,
     private readonly aiOrchestrator: AiChatOrchestratorService,
+    private readonly sessionTitleService: SessionTitleService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -264,11 +265,12 @@ export class ChatService {
    * Create a new platform (AI) session for the given client.
    *
    * Always creates a new session — clients can have any number of platform
-   * sessions to keep different conversation topics separate. On creation:
-   *  - client + AI + all currently-active experts of this client join as
-   *    participants, so a purchased expert stays reachable across every new
-   *    session the client starts;
-   *  - a welcome message is seeded so the session never looks empty.
+   * sessions to keep different conversation topics separate. On creation
+   * client + AI + all currently-active experts of this client join as
+   * participants, so a purchased expert stays reachable across every new
+   * session the client starts. No welcome message is seeded: the first
+   * visible turn is the client's own message, and the AI reply follows via
+   * the orchestrator.
    */
   async openPlatformSession(userId: string) {
     const user = await this.requireUserById(userId, 'User not found');
@@ -352,15 +354,6 @@ export class ChatService {
         ),
       ];
       await manager.getRepository(ChatSessionParticipant).save(participants);
-
-      await manager.getRepository(ChatMessage).save(
-        manager.getRepository(ChatMessage).create({
-          sessionId: savedSession.id,
-          senderId: AI_SYSTEM_USER_ID,
-          text: AI_WELCOME_MESSAGE,
-          isAiGenerated: true,
-        }),
-      );
 
       return savedSession;
     });
@@ -456,22 +449,17 @@ export class ChatService {
       membership.role !== ChatParticipantRole.Client &&
       membership.role !== ChatParticipantRole.Ai;
 
-    // Auto-title on the client's very first message so the sidebar entry
-    // matches what was asked instead of the placeholder AI welcome text.
-    let newTitle: string | null = null;
+    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+
+    // Fire-and-forget AI-generated session title on the client's first
+    // message. Doesn't block the reply pipeline — the sidebar picks up
+    // the new title via the `chat:session_updated` WS event.
     if (
       membership.role === ChatParticipantRole.Client
       && !conversation.title
     ) {
-      newTitle = derivePlatformSessionTitle(dto.text);
+      void this.sessionTitleService.generateAndAssign(conversation.id, dto.text);
     }
-
-    const sessionUpdate: Partial<ChatSession> = { updatedAt: now };
-    if (newTitle) {
-      sessionUpdate.title = newTitle;
-      conversation.title = newTitle;
-    }
-    await this.conversationRepository.update(conversation.id, sessionUpdate);
 
     let handoffResolved = false;
     if (isHumanReplierTurn) {

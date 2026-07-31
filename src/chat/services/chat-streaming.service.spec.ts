@@ -58,15 +58,20 @@ function buildService(
     streamReply:
       overrides.orchestratorStream ?? jest.fn().mockResolvedValue(undefined),
   };
+  const sessionTitleService = {
+    generateAndAssign: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new ChatStreamingService(
     conversationRepository as never,
     messageRepository as never,
     participantRepository as never,
     wsGateway as never,
     aiOrchestrator as never,
+    sessionTitleService as never,
   );
   return {
     service,
+    sessionTitleService,
     conversationRepository,
     messageRepository,
     participantRepository,
@@ -187,8 +192,8 @@ describe('ChatStreamingService.runStream', () => {
     expect(targets).not.toContain(AI_SYSTEM_USER_ID);
   });
 
-  it('sets session title from the client\'s first message when title is null', async () => {
-    const { service, conversationRepository } = buildService({
+  it('schedules AI title generation on the client\'s first streaming message when title is null', async () => {
+    const { service, sessionTitleService } = buildService({
       conversation: {
         id: 'conv-1',
         type: ChatSessionType.Platform,
@@ -201,15 +206,14 @@ describe('ChatStreamingService.runStream', () => {
 
     await service.runStream(context, hooks);
 
-    const updateWithTitle = conversationRepository.update.mock.calls.find(
-      (c) => c[1]?.title !== undefined,
+    expect(sessionTitleService.generateAndAssign).toHaveBeenCalledWith(
+      'conv-1',
+      'Как настроить отдел продаж?',
     );
-    expect(updateWithTitle).toBeDefined();
-    expect(updateWithTitle![1].title).toBe('Как настроить отдел продаж?');
   });
 
-  it('does NOT overwrite an existing session title on subsequent streaming messages', async () => {
-    const { service, conversationRepository } = buildService({
+  it('does NOT trigger AI title generation when the session already has a title', async () => {
+    const { service, sessionTitleService } = buildService({
       conversation: {
         id: 'conv-1',
         type: ChatSessionType.Platform,
@@ -222,10 +226,7 @@ describe('ChatStreamingService.runStream', () => {
 
     await service.runStream(context, hooks);
 
-    const updateWithTitle = conversationRepository.update.mock.calls.find(
-      (c) => c[1]?.title !== undefined,
-    );
-    expect(updateWithTitle).toBeUndefined();
+    expect(sessionTitleService.generateAndAssign).not.toHaveBeenCalled();
   });
 
   it('WS payload uses "session" key with id/updatedAt/title on the streaming path', async () => {
@@ -233,7 +234,7 @@ describe('ChatStreamingService.runStream', () => {
       conversation: {
         id: 'conv-1',
         type: ChatSessionType.Platform,
-        title: null,
+        title: 'Preset',
       },
     });
     const context = await service.validate('client-1', 'conv-1', {
@@ -251,7 +252,7 @@ describe('ChatStreamingService.runStream', () => {
     };
     expect(payload.session).toBeDefined();
     expect(payload.session!.id).toBe('conv-1');
-    expect(payload.session!.title).toBe('first message');
+    expect(payload.session!.title).toBe('Preset');
   });
 
   it('reports client_message_persist_failed when saving the client message throws', async () => {
