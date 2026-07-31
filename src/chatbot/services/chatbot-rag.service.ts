@@ -21,78 +21,8 @@ import { ClientContextService } from './client-context.service';
 const DEFAULT_RETRIEVAL_LIMIT = 6;
 const DEFAULT_MIN_RELEVANCE_SCORE = 0.35;
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_MAX_CONTEXT_CHARS = 12_000;
-const DEFAULT_REFERENCE_SHORTCUT_MIN_SCORE = 0.45;
-const REFERENCE_TITLE_PREFIX = '[Эталон]';
+const DEFAULT_MAX_CONTEXT_CHARS = 16_000;
 const MAX_QUESTION_CHARS = 2_000;
-
-// Reference shortcut needs BOTH semantic (embedding score) AND lexical
-// (word overlap) proximity. Pure semantic match is too eager — "А какой
-// пример вопросов может быть?" scores high against "С кем я общаюсь?"
-// simply because both are meta-adjacent, but they mean completely
-// different things. Requiring ≥ this share of stopword-filtered stems
-// to overlap between the client question and the reference question
-// kills those false positives while letting "С кем я общаюсь?" vs the
-// reference "С кем я сейчас общаюсь?" through (2/3 overlap).
-const REFERENCE_SHORTCUT_MIN_JACCARD = 0.4;
-
-// Short high-frequency Russian tokens that carry no discriminative weight
-// for question matching. Kept small on purpose — only the truly generic
-// forms so we don't accidentally strip content words.
-const RU_STOPWORDS: ReadonlySet<string> = new Set([
-  'что', 'как', 'где', 'когда', 'куда', 'откуда', 'почему', 'зачем', 'кто',
-  'это', 'этот', 'эта', 'эти', 'тот', 'та', 'те',
-  'мне', 'меня', 'мой', 'моя', 'мои', 'моё',
-  'вам', 'вас', 'ваш', 'ваша', 'ваши', 'ваше',
-  'ему', 'его', 'ей', 'её', 'им', 'их', 'нам', 'нас',
-  'для', 'без', 'над', 'под', 'при', 'про', 'через',
-  'или', 'либо', 'ещё', 'уже', 'даже', 'тоже', 'тут', 'там', 'вот',
-  'если', 'чтобы', 'потому', 'ведь', 'же', 'ли', 'бы', 'не', 'ни',
-  'так', 'вообще', 'просто', 'может', 'быть', 'есть', 'был', 'была', 'было', 'были',
-  'вы', 'ты', 'мы', 'они', 'он', 'она', 'оно',
-  'в', 'с', 'о', 'у', 'к', 'а', 'и', 'на', 'по', 'за', 'до', 'от', 'из',
-]);
-
-function tokenizeForOverlap(text: string): Set<string> {
-  const tokens = text
-    .toLowerCase()
-    .replace(/[.,!?;:()[\]{}<>«»"'—–\-]/g, ' ')
-    .split(/\s+/)
-    .filter((token) => token.length >= 3 && !RU_STOPWORDS.has(token));
-  return new Set(tokens);
-}
-
-function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0;
-  let intersection = 0;
-  for (const token of a) if (b.has(token)) intersection += 1;
-  const union = a.size + b.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function extractReferenceQuestion(text: string): string | null {
-  const start = text.indexOf('Вопрос:');
-  if (start < 0) return null;
-  const bodyStart = start + 'Вопрос:'.length;
-  const answerMarker = text.indexOf('\nОтвет:', bodyStart);
-  const end = answerMarker > bodyStart ? answerMarker : text.length;
-  return text.slice(bodyStart, end).trim();
-}
-
-// Hardcoded fallback for detecting meta questions ("about the dialog itself")
-// when the LLM classifier over-generalises. Backstop only — the classifier
-// still runs; this just prevents such questions from taking the reference
-// shortcut, where they would land on the semantically-closest curated Q/A.
-const META_QUESTION_PATTERNS: readonly RegExp[] = [
-  /\b(о\s*чём|о\s*чем|про\s*что)\b[\s\S]{0,40}(говор|обсужд|общ|спраш|беседов)/i,
-  /\b(что|про\s*что)\b[\s\S]{0,20}(я\s+)?(спраш|обсужд|говор)/i,
-  /\b(повтори|напомн)/i,
-  /(в\s+этом\s+чате|в\s+нашем\s+разговоре|в\s+этом\s+разговоре)/i,
-];
-
-function looksLikeMetaQuestion(question: string): boolean {
-  return META_QUESTION_PATTERNS.some((rx) => rx.test(question));
-}
 
 const NO_INFO_MESSAGE = [
   'Здесь мне лучше не гадать, чтобы не подвести вас с ответом.',
@@ -155,27 +85,31 @@ const SYSTEM_PROMPT = [
   '- Все диапазоны и паузы оформляй обычным дефисом: «3-5 дней»,',
   '  «B2B, B2C, B2G» (запятые, не тире).',
   '',
-  '**АБСОЛЮТНЫЙ ПРИОРИТЕТ: секция `=== ЭТАЛОННЫЕ ОТВЕТЫ ===`.**',
-  'Если в user-сообщении есть эта секция, а первый эталон в ней',
-  'отвечает на вопрос клиента, твой ответ = поле "Ответ:" первого',
-  'эталона, скопированное СЛОВО В СЛОВО. Нельзя:',
+  '# Работа с эталонными ответами',
   '',
-  '- Переписывать формулировки своими словами.',
-  '- Сокращать текст, даже если он длинный.',
-  '- Пропускать списки, переносы строк, форматирование.',
-  '- Добавлять вводные фразы («Отличный вопрос», «Конечно», «Хорошо»).',
-  '- Добавлять «от себя» абзацы после эталона.',
-  '- Переносить в свой ответ метки «Вопрос:», «Ответ:», «Тема:».',
+  'В RAG-контексте могут встречаться фрагменты из документов с префиксом',
+  '`[Эталон]` в заголовке. Внутри такие фрагменты размечены полями',
+  '`Вопрос:` / `Ответ:` / `Тема:`. Это готовые ответы, согласованные',
+  'с командой AltaSales. Правила работы с ними:',
   '',
-  'Можно только:',
-  '',
-  '- Обращаться к клиенту по имени, если оно есть в данных клиента.',
-  '- Добавить короткий уточняющий подпараграф после эталона, только',
-  '  если клиент задал доп. вопрос сверх того, на что отвечает эталон.',
-  '',
-  'Если ни один эталон не подходит по смыслу вопроса, игнорируй секцию',
-  'и отвечай из справочного контекста. Если и его нет, честно скажи',
-  'что не знаешь ответа.',
+  '- Смотри на текущее сообщение клиента и на историю диалога.',
+  '  Если клиент задал НОВЫЙ прямой вопрос, и поле `Вопрос:` эталона',
+  '  спрашивает по сути то же самое, твой ответ = текст из `Ответ:`',
+  '  максимально близко к оригиналу. Разрешено обратиться по имени,',
+  '  разрешено чуть подправить порядок предложений; смысл, факты, списки',
+  '  и цифры не меняй.',
+  '- Если клиент делает переспрос, уточнение, короткую реакцию или',
+  '  возражение к твоему предыдущему ответу («то есть X, да?»,',
+  '  «а подробнее?», «понял», «не понимаю»), НЕ повторяй эталон целиком.',
+  '  Отвечай коротко и по контексту истории, опираясь на факты из эталона',
+  '  и предыдущей своей реплики. Дай ровно тот кусок информации, который',
+  '  нужен, а не всё FAQ.',
+  '- Если эталон только частично покрывает вопрос, используй его как',
+  '  часть ответа и добавь недостающее из остального RAG-контекста.',
+  '- Не переноси в ответ метки `Вопрос:`, `Ответ:`, `Тема:`.',
+  '- Если ни один эталон не подходит по смыслу, игнорируй их и отвечай',
+  '  из обычных фрагментов RAG. Если контекста нет вовсе, честно скажи,',
+  '  что не знаешь ответа.',
   '',
   '# Структура ответа',
   '',
@@ -449,7 +383,6 @@ export class ChatbotRagService {
   private readonly minRelevanceScore: number;
   private readonly cacheTtlMs: number;
   private readonly maxContextChars: number;
-  private readonly referenceShortcutMinScore: number;
 
   constructor(
     private readonly knowledgeSearch: KnowledgeSearchService,
@@ -478,89 +411,6 @@ export class ChatbotRagService {
       'CHATBOT_RAG_MAX_CONTEXT_CHARS',
       DEFAULT_MAX_CONTEXT_CHARS,
     );
-    this.referenceShortcutMinScore = this.readNonNegativeFloat(
-      'CHATBOT_RAG_REFERENCE_SHORTCUT_MIN_SCORE',
-      DEFAULT_REFERENCE_SHORTCUT_MIN_SCORE,
-    );
-  }
-
-  /**
-   * Deterministic shortcut for reference answers. When the top-1 retrieved
-   * chunk is a curated reference (`[Эталон]` title prefix) and its score
-   * clears `CHATBOT_RAG_REFERENCE_SHORTCUT_MIN_SCORE`, we return the
-   * `Ответ:` block verbatim without ever calling the LLM. This defeats the
-   * long-running battle where the LLM paraphrases curated answers no matter
-   * what the system prompt demands.
-   */
-  private extractReferenceShortcut(
-    ranked: KnowledgeSearchResultItem[],
-    userQuestion: string,
-  ): string | null {
-    const top = ranked[0];
-    if (!top) return null;
-    if (top.score < this.referenceShortcutMinScore) return null;
-    const title = top.document.title ?? top.document.originalFileName ?? '';
-    if (!title.startsWith(REFERENCE_TITLE_PREFIX)) return null;
-    // Lexical guard against semantic-only false positives. Extract the
-    // reference's own "Вопрос:" line and require enough word overlap with
-    // the client's question. Kills matches like
-    //   client: "А какой пример вопросов может быть?"
-    //   reference: "С кем я сейчас общаюсь?"
-    // which score high semantically but mean nothing in common.
-    const refQuestion = extractReferenceQuestion(top.text);
-    if (refQuestion) {
-      const overlap = jaccardSimilarity(
-        tokenizeForOverlap(userQuestion),
-        tokenizeForOverlap(refQuestion),
-      );
-      if (overlap < REFERENCE_SHORTCUT_MIN_JACCARD) return null;
-    }
-    const answerStart = top.text.indexOf('Ответ:');
-    if (answerStart < 0) return null;
-    const bodyStart = answerStart + 'Ответ:'.length;
-    const topicMarker = top.text.lastIndexOf('\nТема:');
-    const bodyEnd = topicMarker > bodyStart ? topicMarker : top.text.length;
-    const body = top.text.slice(bodyStart, bodyEnd).trim();
-    return body.length > 0 ? body : null;
-  }
-
-  /**
-   * Preflight vector search on the raw (un-rewritten) question. Used when
-   * there is history and we don't want the query rewriter to potentially
-   * pollute a self-contained question. Returns null if no shortcut fires;
-   * caller then falls back to the normal rewrite + search flow.
-   */
-  private async tryReferenceShortcut(question: string): Promise<{
-    answer: string;
-    top: KnowledgeSearchResultItem;
-    retrievalMs: number;
-    totalResults: number;
-  } | null> {
-    const startedAt = Date.now();
-    let items: KnowledgeSearchResultItem[];
-    try {
-      const response = await this.knowledgeSearch.search({
-        purpose: KnowledgeBasePurpose.QA_CHATBOT,
-        query: question,
-        limit: this.retrievalLimit,
-      });
-      items = response.results;
-    } catch {
-      // Preflight failures should never break the turn - the caller will
-      // fall through to the normal path which has its own error handling.
-      return null;
-    }
-    const ranked = [...items]
-      .filter((entry) => entry.score >= this.minRelevanceScore)
-      .sort((a, b) => b.score - a.score);
-    const answer = this.extractReferenceShortcut(ranked, question);
-    if (!answer) return null;
-    return {
-      answer,
-      top: ranked[0],
-      retrievalMs: Date.now() - startedAt,
-      totalResults: items.length,
-    };
   }
 
   async askQuestion(input: ChatbotRagInput): Promise<ChatbotRagResponse> {
@@ -573,65 +423,13 @@ export class ChatbotRagService {
       });
     }
 
-    // Intent classification happens first so the pipeline can short-circuit
-    // for explicit handoff requests and skip RAG for non-platform questions.
-    // History is fed into the classifier so it can distinguish a standalone
-    // FAQ from a follow-up like "то есть X, да?" and gate the reference bank
-    // via `useReferenceBank`.
-    const { intent, useReferenceBank } = await this.intentClassifier.classify(
-      question,
-      input.history ?? [],
-    );
+    const intent = await this.intentClassifier.classify(question);
     if (intent === ChatIntent.ExplicitHandoff) {
       return this.buildIntentRefusal('explicit_handoff', intent, startedAt);
     }
     const skipRag = intent !== ChatIntent.PlatformQuestion;
 
-    // Memory pipeline: slice history → optional preflight shortcut check on
-    // the ORIGINAL question → rewrite follow-up query → retrieve → LLM.
-    //
-    // Preflight is needed because the query rewriter, given a long chat
-    // history, sometimes injects unrelated context into a self-contained
-    // question ("Что мне купить в первую очередь?" → "Что купить по CRM и
-    // балансу?") which then no longer matches the reference. We search on
-    // the raw question first and let the shortcut fire early if it lands
-    // on a strong reference. Only when it doesn't do we pay for the
-    // rewrite + second retrieval.
     const context = this.conversationalContext.build(input.history ?? []);
-
-    // Shortcut gating: the classifier owns the decision on whether the
-    // reference bank is appropriate for this turn. The old regex-based
-    // meta heuristic stays as a belt-and-suspenders backstop only.
-    const shortcutAllowed = useReferenceBank
-      && intent !== ChatIntent.Meta
-      && !looksLikeMetaQuestion(question);
-    const preflightShortcut = shortcutAllowed
-      && context.historyMessages.length > 0
-      ? await this.tryReferenceShortcut(question)
-      : null;
-    if (preflightShortcut) {
-      this.logSuccess({
-        totalMs: Date.now() - startedAt,
-        retrievalMs: preflightShortcut.retrievalMs,
-        totalResults: preflightShortcut.totalResults,
-        contextChunks: 1,
-        topScore: preflightShortcut.top.score,
-        rewriteMs: 0,
-        queryRewritten: 0,
-        usedHistoryCount: context.usedHistoryCount,
-      }, intent);
-      return {
-        answer: preflightShortcut.answer,
-        hasContext: true,
-        sources: [{
-          documentId: preflightShortcut.top.documentId,
-          documentTitle: preflightShortcut.top.document.title,
-          chunkIndex: preflightShortcut.top.chunkIndex,
-          score: preflightShortcut.top.score,
-        }],
-        intent,
-      };
-    }
 
     const rewriteStartedAt = Date.now();
     const searchQuery = await this.queryRewriter.rewrite(
@@ -654,8 +452,6 @@ export class ChatbotRagService {
       this.logger.error(
         `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
       );
-      // For non-platform intents a search failure should not refuse the
-      // whole turn — the LLM can still greet or answer meta without RAG.
       if (!skipRag) {
         return this.buildRefusal('retrieval_failed', startedAt, {
           retrievalMs: Date.now() - retrievalStartedAt,
@@ -671,34 +467,6 @@ export class ChatbotRagService {
     const strongResults = results.filter(
       (entry) => entry.score >= this.minRelevanceScore,
     );
-    const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    const shortcut = shortcutAllowed
-      ? this.extractReferenceShortcut(rankedByScore, question)
-      : null;
-    if (shortcut) {
-      const top = rankedByScore[0];
-      this.logSuccess({
-        totalMs: Date.now() - startedAt,
-        retrievalMs,
-        totalResults: results.length,
-        contextChunks: 1,
-        topScore: top.score,
-        rewriteMs,
-        queryRewritten,
-        usedHistoryCount: context.usedHistoryCount,
-      }, intent);
-      return {
-        answer: shortcut,
-        hasContext: true,
-        sources: [{
-          documentId: top.documentId,
-          documentTitle: top.document.title,
-          chunkIndex: top.chunkIndex,
-          score: top.score,
-        }],
-        intent,
-      };
-    }
     const contextResults = strongResults.length > 0
       ? this.trimToBudget(strongResults, question)
       : [];
@@ -838,10 +606,7 @@ export class ChatbotRagService {
       return;
     }
 
-    const { intent, useReferenceBank } = await this.intentClassifier.classify(
-      question,
-      input.history ?? [],
-    );
+    const intent = await this.intentClassifier.classify(question);
     if (intent === ChatIntent.ExplicitHandoff) {
       yield {
         type: 'refusal',
@@ -851,46 +616,7 @@ export class ChatbotRagService {
     }
     const skipRag = intent !== ChatIntent.PlatformQuestion;
 
-    // See askQuestion for rationale on preflight + rewrite ordering and on
-    // why the classifier owns `useReferenceBank` — this keeps FAQ-style
-    // paste-answers off follow-up turns like "то есть X, да?".
     const context = this.conversationalContext.build(input.history ?? []);
-
-    const shortcutAllowed = useReferenceBank
-      && intent !== ChatIntent.Meta
-      && !looksLikeMetaQuestion(question);
-    const preflightShortcut = shortcutAllowed
-      && context.historyMessages.length > 0
-      ? await this.tryReferenceShortcut(question)
-      : null;
-    if (preflightShortcut) {
-      this.logSuccess({
-        totalMs: Date.now() - startedAt,
-        retrievalMs: preflightShortcut.retrievalMs,
-        totalResults: preflightShortcut.totalResults,
-        contextChunks: 1,
-        topScore: preflightShortcut.top.score,
-        rewriteMs: 0,
-        queryRewritten: 0,
-        usedHistoryCount: context.usedHistoryCount,
-      }, intent);
-      yield { type: 'delta', content: preflightShortcut.answer };
-      yield {
-        type: 'done',
-        response: {
-          answer: preflightShortcut.answer,
-          hasContext: true,
-          sources: [{
-            documentId: preflightShortcut.top.documentId,
-            documentTitle: preflightShortcut.top.document.title,
-            chunkIndex: preflightShortcut.top.chunkIndex,
-            score: preflightShortcut.top.score,
-          }],
-          intent,
-        },
-      };
-      return;
-    }
 
     const rewriteStartedAt = Date.now();
     const searchQuery = await this.queryRewriter.rewrite(
@@ -900,9 +626,6 @@ export class ChatbotRagService {
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
-    // Always search - see askQuestion for rationale. Curated references may
-    // match greeting/meta questions too, and the shortcut below returns them
-    // verbatim without ever invoking the LLM.
     const retrievalStartedAt = Date.now();
     let results: KnowledgeSearchResultItem[] = [];
     try {
@@ -935,40 +658,6 @@ export class ChatbotRagService {
     const strongResults = results.filter(
       (entry) => entry.score >= this.minRelevanceScore,
     );
-    const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    // Reference shortcut only when the classifier explicitly allowed it.
-    const shortcut = shortcutAllowed
-      ? this.extractReferenceShortcut(rankedByScore, question)
-      : null;
-    if (shortcut) {
-      const top = rankedByScore[0];
-      this.logSuccess({
-        totalMs: Date.now() - startedAt,
-        retrievalMs,
-        totalResults: results.length,
-        contextChunks: 1,
-        topScore: top.score,
-        rewriteMs,
-        queryRewritten,
-        usedHistoryCount: context.usedHistoryCount,
-      }, intent);
-      yield { type: 'delta', content: shortcut };
-      yield {
-        type: 'done',
-        response: {
-          answer: shortcut,
-          hasContext: true,
-          sources: [{
-            documentId: top.documentId,
-            documentTitle: top.document.title,
-            chunkIndex: top.chunkIndex,
-            score: top.score,
-          }],
-          intent,
-        },
-      };
-      return;
-    }
     const contextResults = strongResults.length > 0
       ? this.trimToBudget(strongResults, question)
       : [];
@@ -1139,11 +828,10 @@ export class ChatbotRagService {
       });
       sections.push(
         '=== ЭТАЛОННЫЕ ОТВЕТЫ ===',
-        'Ниже готовые ответы, составленные командой AltaSales.',
-        'Если [Эталон 1] отвечает на вопрос клиента, скопируй его поле',
-        '"Ответ:" ДОСЛОВНО в свой ответ. Не сокращай, не переписывай,',
-        'не добавляй свои формулировки. Метки "Вопрос:", "Ответ:",',
-        '"Тема:" в свой ответ не переноси, только сам текст ответа.',
+        'Готовые ответы команды AltaSales. Применяй по правилам из',
+        'секции «Работа с эталонными ответами» в system prompt:',
+        'на прямой FAQ-вопрос отвечай близко к тексту, на переспрос',
+        'или уточнение отвечай кратко в контексте истории.',
         '',
         refBlocks.join('\n\n---\n\n'),
       );

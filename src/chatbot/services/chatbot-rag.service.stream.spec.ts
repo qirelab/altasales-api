@@ -82,10 +82,8 @@ function buildService(
     buildContextBlock: jest.fn().mockResolvedValue(''),
   };
   const intent = overrides.intent ?? ChatIntent.PlatformQuestion;
-  const useReferenceBank = intent === ChatIntent.PlatformQuestion
-    || intent === ChatIntent.Greeting;
   const intentClassifier = {
-    classify: jest.fn().mockResolvedValue({ intent, useReferenceBank }),
+    classify: jest.fn().mockResolvedValue(intent),
   };
   const service = new ChatbotRagService(
     knowledgeSearch as never,

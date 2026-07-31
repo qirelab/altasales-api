@@ -40,7 +40,6 @@ function buildService(overrides: {
   historyMessages?: { role: 'user' | 'assistant'; content: string }[];
   rewrittenQuery?: string;
   intent?: ChatIntent;
-  useReferenceBank?: boolean;
 } = {}) {
   const knowledgeSearch = {
     search: overrides.searchError
@@ -79,13 +78,8 @@ function buildService(overrides: {
     buildContextBlock: jest.fn().mockResolvedValue(''),
   };
   const intent = overrides.intent ?? ChatIntent.PlatformQuestion;
-  // Bank defaults to true for platform/greeting so the existing shortcut
-  // tests still exercise the shortcut path; other intents default to false
-  // like the real classifier.
-  const useReferenceBank = overrides.useReferenceBank
-    ?? (intent === ChatIntent.PlatformQuestion || intent === ChatIntent.Greeting);
   const intentClassifier = {
-    classify: jest.fn().mockResolvedValue({ intent, useReferenceBank }),
+    classify: jest.fn().mockResolvedValue(intent),
   };
   const service = new ChatbotRagService(
     knowledgeSearch as never,
@@ -267,38 +261,13 @@ describe('ChatbotRagService', () => {
     expect(result.refusalReason).toBeUndefined();
   });
 
-  it('for greeting intent with a strong reference match, returns the reference verbatim without LLM', async () => {
-    // Reference question mirrors the client question so the lexical Jaccard
-    // guard is satisfied — semantic score alone is not enough.
-    const referenceText = 'Вопрос: С кем я сейчас общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI и платформа';
-    const { service, llmProxy } = buildService({
-      intent: ChatIntent.Greeting,
-      searchResults: [
-        buildResultItem({
-          score: 0.6,
-          text: referenceText,
-          documentTitle: '[Эталон] AI и платформа: С кем я общаюсь?',
-        }),
-      ],
-    });
-
-    const result = await service.askQuestion({ question: 'С кем я общаюсь?' });
-
-    expect(llmProxy.chat).not.toHaveBeenCalled();
-    expect(result.answer).toBe('Я цифровой эксперт AltaSales.');
-    expect(result.hasContext).toBe(true);
-    expect(result.intent).toBe(ChatIntent.Greeting);
-  });
-
-  it('does NOT take reference shortcut when classifier says useReferenceBank=false (follow-up turn)', async () => {
-    // High semantic + high lexical overlap - the shortcut would fire on its
-    // own. But the classifier decided this is a conversational follow-up
-    // (e.g. "то есть ты X, да?"), so the FAQ paste must be suppressed and
-    // the pipeline must go through the LLM with history instead.
+  it('passes [Эталон] chunks to the LLM as RAG context instead of pasting them verbatim', async () => {
+    // Curated reference chunks are no longer a deterministic shortcut - the
+    // LLM sees them in the augmented prompt (in the "ЭТАЛОННЫЕ ОТВЕТЫ"
+    // section) and decides paraphrase vs. near-verbatim based on the turn.
     const referenceText = 'Вопрос: С кем я общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI';
     const { service, llmProxy } = buildService({
       intent: ChatIntent.PlatformQuestion,
-      useReferenceBank: false,
       searchResults: [
         buildResultItem({
           score: 0.9,
@@ -310,26 +279,10 @@ describe('ChatbotRagService', () => {
 
     await service.askQuestion({ question: 'С кем я общаюсь?' });
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
-  });
-
-  it('does NOT take reference shortcut when lexical overlap is too low, even at high semantic score', async () => {
-    const referenceText = 'Вопрос: С кем я сейчас общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI';
-    const { service, llmProxy } = buildService({
-      intent: ChatIntent.PlatformQuestion,
-      searchResults: [
-        buildResultItem({
-          score: 0.7,
-          text: referenceText,
-          documentTitle: '[Эталон] AI: С кем я общаюсь?',
-        }),
-      ],
-    });
-
-    // Client asks something totally different lexically. Semantic match still
-    // ranks the reference top but the Jaccard filter should reject shortcut,
-    // pipeline falls through to normal LLM path.
-    await service.askQuestion({ question: 'А какой пример вопросов может быть?' });
-    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    const call = llmProxy.chat.mock.calls[0][0];
+    const userMessage = call.messages[call.messages.length - 1];
+    expect(userMessage.content).toContain('ЭТАЛОННЫЕ ОТВЕТЫ');
+    expect(userMessage.content).toContain('Я цифровой эксперт AltaSales.');
   });
 
   it('for platform intent with empty RAG results, refuses with no_results_in_scope and escalates', async () => {
