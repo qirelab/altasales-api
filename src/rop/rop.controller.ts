@@ -32,6 +32,7 @@ import { RopDashboardFileInspectResponseDto } from './dto/rop-dashboard-file-ins
 import { RopLinkAccessResponseDto } from './dto/rop-link-access-response.dto';
 import { RopDocumentListItemResponseDto } from './dto/rop-document-list-item-response.dto';
 import { RopDocumentResponseDto } from './dto/rop-document-response.dto';
+import { RopSsoLoginLinkResponseDto } from './dto/rop-sso-login-link-response.dto';
 import {
   RopBenchmarkDecompositionQueryDto,
   RopIntervalDashboardQueryDto,
@@ -42,6 +43,7 @@ import { RopTaskResponseDto } from './dto/rop-task-response.dto';
 import { RopDocumentsService } from './rop-documents.service';
 import { RopIndicatorsService } from './rop-indicators.service';
 import { RopMeetingsService } from './rop-meetings.service';
+import { RopService } from './rop.service';
 import { RopTasksService } from './rop-tasks.service';
 
 @ApiTags('rop')
@@ -49,11 +51,27 @@ import { RopTasksService } from './rop-tasks.service';
 @UseGuards(SessionGuard)
 export class RopController {
   constructor(
+    private readonly ropService: RopService,
     private readonly ropDocumentsService: RopDocumentsService,
     private readonly ropIndicatorsService: RopIndicatorsService,
     private readonly ropMeetingsService: RopMeetingsService,
     private readonly ropTasksService: RopTasksService,
   ) {}
+
+  @Post('sso/login-link')
+  @ApiOperation({
+    summary: 'Create a one-time ROP Sharing SSO login link for the current user',
+  })
+  @ApiOkResponse({ type: RopSsoLoginLinkResponseDto })
+  async createSsoLoginLink(
+    @CurrentUser() user: CurrentUserData,
+  ): Promise<RopSsoLoginLinkResponseDto> {
+    if (!user.email?.trim()) {
+      throw new BadRequestException('У пользователя не указан email');
+    }
+
+    return this.ropService.createSsoLoginLink(user.email.trim());
+  }
 
   @Get('indicators/month-dashboard')
   @ApiOperation({

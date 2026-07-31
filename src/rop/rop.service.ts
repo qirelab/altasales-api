@@ -474,4 +474,43 @@ export class RopService {
 
     return response.json() as Promise<RopMeetingRecord>;
   }
+
+  async createSsoLoginLink(
+    email: string,
+  ): Promise<{ loginUrl: string; expiresIn: number }> {
+    this.ensureConfigured();
+
+    const response = await fetch(`${this.apiUrl}/sso/login-link`, {
+      method: 'POST',
+      headers: this.jsonHeaders,
+      body: JSON.stringify({ email }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('create SSO login link', response, error);
+      throw new InternalServerErrorException(
+        'Failed to create ROP SSO login link',
+      );
+    }
+
+    const data = (await response.json()) as {
+      login_url?: string;
+      loginUrl?: string;
+      expires_in?: number;
+      expiresIn?: number;
+    };
+
+    const loginUrl = data.login_url ?? data.loginUrl;
+    if (!loginUrl) {
+      throw new InternalServerErrorException(
+        'ROP SSO login link response is missing login_url',
+      );
+    }
+
+    return {
+      loginUrl,
+      expiresIn: data.expires_in ?? data.expiresIn ?? 120,
+    };
+  }
 }
