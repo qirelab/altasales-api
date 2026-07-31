@@ -364,9 +364,10 @@ describe('ChatbotRagService', () => {
 
   it('trims oversized context: keeps highest-score chunks under the char budget', async () => {
     const bigText = 'x'.repeat(4000);
-    // Budget: fits system prompt (~4KB) + one 4KB chunk, but not two.
+    // Budget: fits system prompt (~10KB after safety-phrases block) + one
+    // 4KB chunk, but not two.
     const { service, llmProxy } = buildService({
-      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 9000 },
+      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 15000 },
       searchResults: [
         buildResultItem({ chunkId: 'top', score: 0.95, chunkIndex: 0, text: bigText }),
         buildResultItem({ chunkId: 'mid', score: 0.85, chunkIndex: 1, text: bigText }),
@@ -379,8 +380,7 @@ describe('ChatbotRagService', () => {
     const chatArg = llmProxy.chat.mock.calls[0][0];
     expect(result.sources).toHaveLength(1);
     expect(result.sources[0].chunkIndex).toBe(0);
-    // Only system + augmented user (no history in this scenario).
-    expect(chatArg.messages[1].content.length).toBeLessThan(9_000);
+    expect(chatArg.messages[1].content.length).toBeLessThan(15_000);
   });
 
   it('refuses with context_too_large when the char budget cannot fit any chunk', async () => {
