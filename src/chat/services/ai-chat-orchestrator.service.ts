@@ -457,8 +457,14 @@ export class AiChatOrchestratorService {
           title: input.conversation.title,
         },
       };
+      // Emit to everyone including the client. The client normally receives
+      // the AI reply through the SSE stream (deltas + done), but if the
+      // stream terminates without a proper `done` event (network blip,
+      // proxy timeout, or the client tab losing focus) they would only
+      // see the reply after a page reload. The WS event is a redundant
+      // path; useWsHandlers.onNewMessage dedupes against streaming
+      // placeholders and against messages already committed with the same id.
       for (const recipientId of recipientIds) {
-        if (recipientId === input.clientUserId) continue;
         this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
       }
 

@@ -183,11 +183,13 @@ describe('AiChatOrchestratorService.streamReply', () => {
         isAiGenerated: true,
       }),
     );
-    // WS is emitted to OTHER participants, never to the streaming client
-    // (they already saw the deltas over SSE).
+    // WS is emitted to everyone including the client. The client normally
+    // consumes the reply through SSE deltas; the WS event is a redundant
+    // path so a torn stream can still deliver the message via useWsHandlers
+    // (dedupe against streaming placeholder happens on the frontend).
     const targetIds = wsGateway.emitToUser.mock.calls.map((call) => call[0]);
     expect(targetIds).toContain('expert-1');
-    expect(targetIds).not.toContain('client-1');
+    expect(targetIds).toContain('client-1');
     expect(targetIds).not.toContain(AI_SYSTEM_USER_ID);
   });
 
