@@ -462,11 +462,16 @@ export class ChatbotRagService {
     // Memory pipeline: slice history → rewrite follow-up query → retrieve → LLM.
     // Rewrite turns "а сколько он стоит?" into "сколько стоит CRM Silver?" so
     // vector retrieval matches the right chunks even for terse follow-ups.
+    // We ALWAYS rewrite (even for non-platform intents) because a follow-up
+    // like "а что такое баланс вообще?" needs history context to disambiguate
+    // from the prior "подарочный баланс" turn — otherwise the shortcut match
+    // hits the wrong reference.
     const context = this.conversationalContext.build(input.history ?? []);
     const rewriteStartedAt = Date.now();
-    const searchQuery = skipRag
-      ? question
-      : await this.queryRewriter.rewrite(question, context.historyMessages);
+    const searchQuery = await this.queryRewriter.rewrite(
+      question,
+      context.historyMessages,
+    );
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
@@ -505,7 +510,12 @@ export class ChatbotRagService {
       (entry) => entry.score >= this.minRelevanceScore,
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    const shortcut = this.extractReferenceShortcut(rankedByScore);
+    // Meta questions ("что мы обсуждали?") must never take the reference
+    // shortcut — they are about the conversation itself, not about a fact in
+    // the bank, and semantic similarity easily maps them onto the wrong QA.
+    const shortcut = intent === ChatIntent.Meta
+      ? null
+      : this.extractReferenceShortcut(rankedByScore);
     if (shortcut) {
       const top = rankedByScore[0];
       this.logSuccess({
@@ -679,11 +689,14 @@ export class ChatbotRagService {
     }
     const skipRag = intent !== ChatIntent.PlatformQuestion;
 
+    // Always rewrite - see askQuestion for rationale (disambiguates
+    // follow-ups even in greeting/meta/off_topic/sales_question intents).
     const context = this.conversationalContext.build(input.history ?? []);
     const rewriteStartedAt = Date.now();
-    const searchQuery = skipRag
-      ? question
-      : await this.queryRewriter.rewrite(question, context.historyMessages);
+    const searchQuery = await this.queryRewriter.rewrite(
+      question,
+      context.historyMessages,
+    );
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
@@ -723,7 +736,10 @@ export class ChatbotRagService {
       (entry) => entry.score >= this.minRelevanceScore,
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    const shortcut = this.extractReferenceShortcut(rankedByScore);
+    // Meta questions must never take the reference shortcut - see askQuestion.
+    const shortcut = intent === ChatIntent.Meta
+      ? null
+      : this.extractReferenceShortcut(rankedByScore);
     if (shortcut) {
       const top = rankedByScore[0];
       this.logSuccess({
