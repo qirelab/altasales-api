@@ -65,15 +65,36 @@ export const HANDOFF_KEYWORD_PATTERNS: RegExp[] = [
 
 /**
  * RAG refusal reasons that fall into the "we lack the ground truth" bucket.
+ * Only `no_results_in_scope` counts — this is the case where the intent
+ * classifier confirmed the question is about the AltaSales platform, but
+ * the knowledge base had no answer. An unclassified `no_results` alone
+ * (without in-scope confirmation) is NOT a handoff signal — off-topic
+ * questions like "что о политике?" produce `no_results` too and must not
+ * page a human operator.
+ *
+ * `explicit_handoff` is the client's own request routed through the RAG
+ * refusal channel so orchestrator handoff logic stays a single code path.
+ *
  * Everything else (retrieval / generation / oversize failures) is classified
  * as infrastructure error — a distinct signal so downstream can decide
  * whether to alert the operator differently.
  */
 const NO_CONTEXT_REASONS: ReadonlySet<ChatbotRagRefusalReason> =
   new Set<ChatbotRagRefusalReason>([
-    'empty_question',
-    'no_results',
-    'below_threshold',
+    'no_results_in_scope',
+    'explicit_handoff',
+  ]);
+
+/**
+ * Infrastructure failures. These get their own trigger so operators can
+ * distinguish "we broke" from "we don't have the answer."
+ */
+const INFRA_REASONS: ReadonlySet<ChatbotRagRefusalReason> =
+  new Set<ChatbotRagRefusalReason>([
+    'retrieval_failed',
+    'generation_failed',
+    'empty_llm_response',
+    'context_too_large',
   ]);
 
 export type HandoffDetection =
@@ -106,7 +127,14 @@ export class HandoffTriggerService {
     if (NO_CONTEXT_REASONS.has(reason)) {
       return { needsHandoff: true, trigger: ChatHandoffTrigger.RagNoContext };
     }
-    return { needsHandoff: true, trigger: ChatHandoffTrigger.RagInfraError };
+    if (INFRA_REASONS.has(reason)) {
+      return { needsHandoff: true, trigger: ChatHandoffTrigger.RagInfraError };
+    }
+    // Legacy / non-triggering reasons (empty_question, no_results, below_threshold)
+    // reach here. They must not page a human: empty_question means the client
+    // sent nothing; no_results / below_threshold now only surface when the
+    // intent classifier chose NOT to escalate (off-topic questions).
+    return { needsHandoff: false };
   }
 
   private matchesExplicitRequest(message: string): boolean {

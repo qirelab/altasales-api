@@ -2,6 +2,7 @@ import { AgentId } from '../../ai/enums/agent-id.enum';
 import { DataClass } from '../../ai/enums/data-class.enum';
 import { LlmTask } from '../../ai/enums/llm-task.enum';
 import { KnowledgeBasePurpose } from '../../knowledge/enums/knowledge-base-purpose.enum';
+import { ChatIntent } from '../enums/chat-intent.enum';
 import { ChatbotRagService } from './chatbot-rag.service';
 
 function buildResultItem(overrides: Partial<{
@@ -38,6 +39,7 @@ function buildService(overrides: {
   configOverrides?: Record<string, number | string>;
   historyMessages?: { role: 'user' | 'assistant'; content: string }[];
   rewrittenQuery?: string;
+  intent?: ChatIntent;
 } = {}) {
   const knowledgeSearch = {
     search: overrides.searchError
@@ -72,14 +74,30 @@ function buildService(overrides: {
   const configService = overrides.configOverrides
     ? { get: jest.fn((key: string) => overrides.configOverrides?.[key]) }
     : undefined;
+  const clientContext = {
+    buildContextBlock: jest.fn().mockResolvedValue(''),
+  };
+  const intentClassifier = {
+    classify: jest.fn().mockResolvedValue(overrides.intent ?? ChatIntent.PlatformQuestion),
+  };
   const service = new ChatbotRagService(
     knowledgeSearch as never,
     llmProxy as never,
     conversationalContext as never,
     queryRewriter as never,
+    clientContext as never,
+    intentClassifier as never,
     configService as never,
   );
-  return { service, knowledgeSearch, llmProxy, conversationalContext, queryRewriter };
+  return {
+    service,
+    knowledgeSearch,
+    llmProxy,
+    conversationalContext,
+    queryRewriter,
+    clientContext,
+    intentClassifier,
+  };
 }
 
 describe('ChatbotRagService', () => {
@@ -182,42 +200,118 @@ describe('ChatbotRagService', () => {
     expect(chatArg.messages).toHaveLength(2);
   });
 
-  it('refuses with no_results and shows the no-info message when knowledge search returns nothing', async () => {
-    const { service, llmProxy } = buildService({ searchResults: [] });
+  it('for meta intent, skips RAG and calls LLM with the raw question', async () => {
+    const { service, llmProxy, knowledgeSearch } = buildService({
+      intent: ChatIntent.Meta,
+    });
 
-    const result = await service.askQuestion({ question: 'Странный вопрос' });
+    const result = await service.askQuestion({ question: 'Что мы обсуждали?' });
 
-    expect(llmProxy.chat).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    const chatArg = llmProxy.chat.mock.calls[0][0];
+    const userMessage = chatArg.messages[chatArg.messages.length - 1];
+    expect(userMessage.content).toBe('Что мы обсуждали?');
     expect(result.hasContext).toBe(false);
-    expect(result.refusalReason).toBe('no_results');
-    expect(result.answer).toContain('Я не нашёл информации');
-    expect(result.answer).toContain('чат «Помощь»');
+    expect(result.intent).toBe(ChatIntent.Meta);
   });
 
-  it('refuses with below_threshold when all results are below the relevance threshold', async () => {
+  it('for greeting intent, skips RAG entirely', async () => {
+    const { service, llmProxy, knowledgeSearch } = buildService({
+      intent: ChatIntent.Greeting,
+    });
+
+    const result = await service.askQuestion({ question: 'Здравствуйте' });
+
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    expect(result.intent).toBe(ChatIntent.Greeting);
+  });
+
+  it('for off_topic intent, skips RAG entirely (guards false-positive handoff)', async () => {
+    const { service, llmProxy, knowledgeSearch } = buildService({
+      intent: ChatIntent.OffTopic,
+    });
+
+    const result = await service.askQuestion({ question: 'Что ты думаешь о политике?' });
+
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    expect(result.intent).toBe(ChatIntent.OffTopic);
+    expect(result.refusalReason).toBeUndefined();
+  });
+
+  it('for sales_question intent, skips RAG and lets LLM answer from general knowledge', async () => {
+    const { service, llmProxy, knowledgeSearch } = buildService({
+      intent: ChatIntent.SalesQuestion,
+    });
+
+    const result = await service.askQuestion({
+      question: 'Как построить воронку B2B продаж?',
+    });
+
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
+    expect(result.intent).toBe(ChatIntent.SalesQuestion);
+    expect(result.refusalReason).toBeUndefined();
+  });
+
+  it('for platform intent with empty RAG results, refuses with no_results_in_scope and escalates', async () => {
     const { service, llmProxy } = buildService({
+      intent: ChatIntent.PlatformQuestion,
+      searchResults: [],
+    });
+
+    const result = await service.askQuestion({
+      question: 'Какие условия возврата у пакета РОП?',
+    });
+
+    expect(llmProxy.chat).not.toHaveBeenCalled();
+    expect(result.refusalReason).toBe('no_results_in_scope');
+    expect(result.answer).toContain('специалист');
+    expect(result.answer).toContain('AltaSales');
+  });
+
+  it('for platform intent with weak-score RAG results, still refuses with no_results_in_scope', async () => {
+    const { service, llmProxy } = buildService({
+      intent: ChatIntent.PlatformQuestion,
       searchResults: [
         buildResultItem({ score: 0.2 }),
         buildResultItem({ score: 0.1 }),
       ],
     });
 
-    const result = await service.askQuestion({ question: 'Что-то нерелевантное' });
+    const result = await service.askQuestion({ question: 'Есть ли пакет РОП?' });
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
-    expect(result.refusalReason).toBe('below_threshold');
-    expect(result.answer).toContain('Я не нашёл информации');
+    expect(result.refusalReason).toBe('no_results_in_scope');
   });
 
-  it('refuses with empty_question on empty question and skips retrieval', async () => {
-    const { service, knowledgeSearch, llmProxy } = buildService();
+  it('for explicit_handoff intent, returns the handoff message without RAG or LLM', async () => {
+    const { service, knowledgeSearch, llmProxy } = buildService({
+      intent: ChatIntent.ExplicitHandoff,
+    });
 
-    const result = await service.askQuestion({ question: '   ' });
+    const result = await service.askQuestion({ question: 'Позовите менеджера' });
 
     expect(knowledgeSearch.search).not.toHaveBeenCalled();
     expect(llmProxy.chat).not.toHaveBeenCalled();
+    expect(result.refusalReason).toBe('explicit_handoff');
+    expect(result.intent).toBe(ChatIntent.ExplicitHandoff);
+    expect(result.answer).toContain('специалист');
+  });
+
+  it('refuses with empty_question on empty question and skips classifier and retrieval', async () => {
+    const {
+      service, knowledgeSearch, llmProxy, intentClassifier,
+    } = buildService();
+
+    const result = await service.askQuestion({ question: '   ' });
+
+    expect(intentClassifier.classify).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('empty_question');
-    expect(result.answer).toContain('Я не нашёл информации');
   });
 
   it('refuses with empty_llm_response and shows the infra message when the LLM returns whitespace', async () => {
@@ -227,7 +321,7 @@ describe('ChatbotRagService', () => {
 
     expect(result.refusalReason).toBe('empty_llm_response');
     expect(result.hasContext).toBe(false);
-    expect(result.answer).toContain('Сервис временно недоступен');
+    expect(result.answer).toContain('Что-то пошло не так');
   });
 
   it('refuses with retrieval_failed and shows the infra message when knowledge search throws', async () => {
@@ -239,8 +333,8 @@ describe('ChatbotRagService', () => {
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('retrieval_failed');
-    expect(result.answer).toContain('Сервис временно недоступен');
-    expect(result.answer).toContain('Попробуйте задать вопрос ещё раз');
+    expect(result.answer).toContain('Что-то пошло не так');
+    expect(result.answer).toContain('задать вопрос ещё раз');
   });
 
   it('refuses with generation_failed and shows the infra message when LLM proxy throws', async () => {
@@ -251,7 +345,7 @@ describe('ChatbotRagService', () => {
     const result = await service.askQuestion({ question: 'Что такое CRM?' });
 
     expect(result.refusalReason).toBe('generation_failed');
-    expect(result.answer).toContain('Сервис временно недоступен');
+    expect(result.answer).toContain('Что-то пошло не так');
   });
 
   it('picks only strong results but keeps them in original score order', async () => {
@@ -270,8 +364,9 @@ describe('ChatbotRagService', () => {
 
   it('trims oversized context: keeps highest-score chunks under the char budget', async () => {
     const bigText = 'x'.repeat(4000);
+    // Budget: fits system prompt (~4KB) + one 4KB chunk, but not two.
     const { service, llmProxy } = buildService({
-      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 5000 },
+      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 9000 },
       searchResults: [
         buildResultItem({ chunkId: 'top', score: 0.95, chunkIndex: 0, text: bigText }),
         buildResultItem({ chunkId: 'mid', score: 0.85, chunkIndex: 1, text: bigText }),
@@ -285,13 +380,13 @@ describe('ChatbotRagService', () => {
     expect(result.sources).toHaveLength(1);
     expect(result.sources[0].chunkIndex).toBe(0);
     // Only system + augmented user (no history in this scenario).
-    expect(chatArg.messages[1].content.length).toBeLessThan(10_000);
+    expect(chatArg.messages[1].content.length).toBeLessThan(9_000);
   });
 
   it('refuses with context_too_large when the char budget cannot fit any chunk', async () => {
     const { service, llmProxy } = buildService({
-      // System prompt alone is well over 200 chars; a 200-char budget can't fit a chunk.
-      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 200 },
+      // System prompt alone is well over 500 chars; a 500-char budget can't fit a chunk.
+      configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 500 },
       searchResults: [
         buildResultItem({ chunkId: 'top', score: 0.95, text: 'x'.repeat(1000) }),
       ],
@@ -301,7 +396,7 @@ describe('ChatbotRagService', () => {
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('context_too_large');
-    expect(result.answer).toContain('Сервис временно недоступен');
+    expect(result.answer).toContain('Что-то пошло не так');
   });
 
   it('clips an oversize question to the max length before retrieval', async () => {

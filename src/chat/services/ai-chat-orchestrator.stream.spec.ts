@@ -200,7 +200,7 @@ describe('AiChatOrchestratorService.streamReply', () => {
             answer: 'Я не нашёл информации по этому вопросу.',
             hasContext: false,
             sources: [],
-            refusalReason: 'no_results',
+            refusalReason: 'no_results_in_scope',
           },
         },
       ],
@@ -218,7 +218,7 @@ describe('AiChatOrchestratorService.streamReply', () => {
     );
 
     expect(calls.deltas).toHaveLength(0);
-    expect(calls.refusal).toEqual(['ai-msg-1:no_results']);
+    expect(calls.refusal).toEqual(['ai-msg-1:no_results_in_scope']);
     expect(calls.done).toHaveLength(0);
   });
 
@@ -352,17 +352,17 @@ describe('AiChatOrchestratorService.streamReply', () => {
     expect(calls.refusal).toEqual(['ai-msg-1:explicit_request']);
   });
 
-  it('marks rag_no_context handoff after a streamed no_results refusal', async () => {
+  it('marks rag_no_context handoff after a streamed no_results_in_scope refusal', async () => {
     const { orchestrator, conversationRepository, wsGateway } =
       buildOrchestrator({
         ragEvents: [
           {
             type: 'refusal',
             response: {
-              answer: 'Я не нашёл информации по этому вопросу.',
+              answer: 'Не нашёл ответ, зову специалиста AltaSales.',
               hasContext: false,
               sources: [],
-              refusalReason: 'no_results',
+              refusalReason: 'no_results_in_scope',
             },
           },
         ],

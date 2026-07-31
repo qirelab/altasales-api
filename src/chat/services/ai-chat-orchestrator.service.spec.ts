@@ -518,7 +518,7 @@ describe('AiChatOrchestratorService', () => {
       buildOrchestrator({
         historyRows: [clientMsg],
         currentMessage: clientMsg,
-        ragRefusalReason: 'no_results',
+        ragRefusalReason: 'no_results_in_scope',
         ragAnswer: 'Я не нашёл информации',
       });
 
@@ -550,7 +550,7 @@ describe('AiChatOrchestratorService', () => {
         historyRows: [
           makeMessage({ id: 'm1', senderId: clientUserId, text: 'q1' }),
         ],
-        ragRefusalReason: 'no_results',
+        ragRefusalReason: 'no_results_in_scope',
       });
     conversationRepository.conditionalExecute.mockResolvedValueOnce({
       affected: 0,
