@@ -40,6 +40,7 @@ function buildService(overrides: {
   historyMessages?: { role: 'user' | 'assistant'; content: string }[];
   rewrittenQuery?: string;
   intent?: ChatIntent;
+  useReferenceBank?: boolean;
 } = {}) {
   const knowledgeSearch = {
     search: overrides.searchError
@@ -77,8 +78,14 @@ function buildService(overrides: {
   const clientContext = {
     buildContextBlock: jest.fn().mockResolvedValue(''),
   };
+  const intent = overrides.intent ?? ChatIntent.PlatformQuestion;
+  // Bank defaults to true for platform/greeting so the existing shortcut
+  // tests still exercise the shortcut path; other intents default to false
+  // like the real classifier.
+  const useReferenceBank = overrides.useReferenceBank
+    ?? (intent === ChatIntent.PlatformQuestion || intent === ChatIntent.Greeting);
   const intentClassifier = {
-    classify: jest.fn().mockResolvedValue(overrides.intent ?? ChatIntent.PlatformQuestion),
+    classify: jest.fn().mockResolvedValue({ intent, useReferenceBank }),
   };
   const service = new ChatbotRagService(
     knowledgeSearch as never,
@@ -281,6 +288,28 @@ describe('ChatbotRagService', () => {
     expect(result.answer).toBe('Я цифровой эксперт AltaSales.');
     expect(result.hasContext).toBe(true);
     expect(result.intent).toBe(ChatIntent.Greeting);
+  });
+
+  it('does NOT take reference shortcut when classifier says useReferenceBank=false (follow-up turn)', async () => {
+    // High semantic + high lexical overlap - the shortcut would fire on its
+    // own. But the classifier decided this is a conversational follow-up
+    // (e.g. "то есть ты X, да?"), so the FAQ paste must be suppressed and
+    // the pipeline must go through the LLM with history instead.
+    const referenceText = 'Вопрос: С кем я общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI';
+    const { service, llmProxy } = buildService({
+      intent: ChatIntent.PlatformQuestion,
+      useReferenceBank: false,
+      searchResults: [
+        buildResultItem({
+          score: 0.9,
+          text: referenceText,
+          documentTitle: '[Эталон] AI: С кем я общаюсь?',
+        }),
+      ],
+    });
+
+    await service.askQuestion({ question: 'С кем я общаюсь?' });
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT take reference shortcut when lexical overlap is too low, even at high semantic score', async () => {
