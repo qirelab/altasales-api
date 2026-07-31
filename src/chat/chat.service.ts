@@ -505,9 +505,24 @@ export class ChatService {
     }
 
     if (handoffResolved) {
+      // Match the payload shape emitted by AdminChatService.resolve so the
+      // frontend `ChatHandoffResolvedEvent` handlers always receive the
+      // required `handoffStatus` (they use it directly to upsertSession)
+      // and a `resolvedBy` we can display in the transcript.
+      const resolvedBy = await this.requireUserById(userId, 'User not found')
+        .catch(() => null);
       const handoffPayload = {
         sessionId: conversation.id,
         resolvedAt: now,
+        handoffStatus: ChatHandoffStatus.Resolved,
+        resolvedBy: resolvedBy
+          ? {
+            id: resolvedBy.id,
+            name: resolvedBy.name,
+            lastName: resolvedBy.lastName,
+            email: resolvedBy.email,
+          }
+          : null,
       };
       this.wsGateway.emitToUser(
         userId,

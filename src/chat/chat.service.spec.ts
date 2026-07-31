@@ -504,6 +504,15 @@ describe('ChatService.sendPlatformMessage', () => {
       (call) => call[1] === 'chat:handoff_resolved',
     );
     expect(resolvedEvents.length).toBeGreaterThan(0);
+    // Payload must carry handoffStatus (client reducer reads it directly)
+    // and resolvedBy (matches AdminChatService.resolve shape).
+    const payload = resolvedEvents[0][2];
+    expect(payload).toMatchObject({
+      sessionId: 'conv-1',
+      handoffStatus: 'resolved',
+    });
+    expect(payload).toHaveProperty('resolvedAt');
+    expect(payload).toHaveProperty('resolvedBy');
   });
 
   it('does not reset handoff when a client writes (only human replier resolves)', async () => {
