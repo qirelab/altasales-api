@@ -261,14 +261,16 @@ describe('ChatbotRagService', () => {
   });
 
   it('for greeting intent with a strong reference match, returns the reference verbatim without LLM', async () => {
-    const referenceText = 'Вопрос: Кто ты?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI и платформа';
+    // Reference question mirrors the client question so the lexical Jaccard
+    // guard is satisfied — semantic score alone is not enough.
+    const referenceText = 'Вопрос: С кем я сейчас общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI и платформа';
     const { service, llmProxy } = buildService({
       intent: ChatIntent.Greeting,
       searchResults: [
         buildResultItem({
           score: 0.6,
           text: referenceText,
-          documentTitle: '[Эталон] AI и платформа: Кто ты?',
+          documentTitle: '[Эталон] AI и платформа: С кем я общаюсь?',
         }),
       ],
     });
@@ -279,6 +281,26 @@ describe('ChatbotRagService', () => {
     expect(result.answer).toBe('Я цифровой эксперт AltaSales.');
     expect(result.hasContext).toBe(true);
     expect(result.intent).toBe(ChatIntent.Greeting);
+  });
+
+  it('does NOT take reference shortcut when lexical overlap is too low, even at high semantic score', async () => {
+    const referenceText = 'Вопрос: С кем я сейчас общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI';
+    const { service, llmProxy } = buildService({
+      intent: ChatIntent.PlatformQuestion,
+      searchResults: [
+        buildResultItem({
+          score: 0.7,
+          text: referenceText,
+          documentTitle: '[Эталон] AI: С кем я общаюсь?',
+        }),
+      ],
+    });
+
+    // Client asks something totally different lexically. Semantic match still
+    // ranks the reference top but the Jaccard filter should reject shortcut,
+    // pipeline falls through to normal LLM path.
+    await service.askQuestion({ question: 'А какой пример вопросов может быть?' });
+    expect(llmProxy.chat).toHaveBeenCalledTimes(1);
   });
 
   it('for platform intent with empty RAG results, refuses with no_results_in_scope and escalates', async () => {
