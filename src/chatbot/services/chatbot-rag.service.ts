@@ -26,6 +26,21 @@ const DEFAULT_REFERENCE_SHORTCUT_MIN_SCORE = 0.45;
 const REFERENCE_TITLE_PREFIX = '[Эталон]';
 const MAX_QUESTION_CHARS = 2_000;
 
+// Hardcoded fallback for detecting meta questions ("about the dialog itself")
+// when the LLM classifier over-generalises. Backstop only — the classifier
+// still runs; this just prevents such questions from taking the reference
+// shortcut, where they would land on the semantically-closest curated Q/A.
+const META_QUESTION_PATTERNS: readonly RegExp[] = [
+  /\b(о\s*чём|о\s*чем|про\s*что)\b[\s\S]{0,40}(говор|обсужд|общ|спраш|беседов)/i,
+  /\b(что|про\s*что)\b[\s\S]{0,20}(я\s+)?(спраш|обсужд|говор)/i,
+  /\b(повтори|напомн)/i,
+  /(в\s+этом\s+чате|в\s+нашем\s+разговоре|в\s+этом\s+разговоре)/i,
+];
+
+function looksLikeMetaQuestion(question: string): boolean {
+  return META_QUESTION_PATTERNS.some((rx) => rx.test(question));
+}
+
 const NO_INFO_MESSAGE = [
   'Здесь мне лучше не гадать, чтобы не подвести вас с ответом.',
   'Уже позвал специалиста AltaSales, он подключится к этому чату',
@@ -519,7 +534,8 @@ export class ChatbotRagService {
     // rewrite + second retrieval.
     const context = this.conversationalContext.build(input.history ?? []);
 
-    const preflightShortcut = intent !== ChatIntent.Meta
+    const isMetaQuestion = intent === ChatIntent.Meta || looksLikeMetaQuestion(question);
+    const preflightShortcut = !isMetaQuestion
       && context.historyMessages.length > 0
       ? await this.tryReferenceShortcut(question)
       : null;
@@ -586,7 +602,7 @@ export class ChatbotRagService {
       (entry) => entry.score >= this.minRelevanceScore,
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
-    const shortcut = intent === ChatIntent.Meta
+    const shortcut = isMetaQuestion
       ? null
       : this.extractReferenceShortcut(rankedByScore);
     if (shortcut) {
@@ -765,7 +781,8 @@ export class ChatbotRagService {
     // See askQuestion for rationale on preflight + rewrite ordering.
     const context = this.conversationalContext.build(input.history ?? []);
 
-    const preflightShortcut = intent !== ChatIntent.Meta
+    const isMetaQuestion = intent === ChatIntent.Meta || looksLikeMetaQuestion(question);
+    const preflightShortcut = !isMetaQuestion
       && context.historyMessages.length > 0
       ? await this.tryReferenceShortcut(question)
       : null;
@@ -843,7 +860,7 @@ export class ChatbotRagService {
     );
     const rankedByScore = [...strongResults].sort((a, b) => b.score - a.score);
     // Meta questions must never take the reference shortcut - see askQuestion.
-    const shortcut = intent === ChatIntent.Meta
+    const shortcut = isMetaQuestion
       ? null
       : this.extractReferenceShortcut(rankedByScore);
     if (shortcut) {
