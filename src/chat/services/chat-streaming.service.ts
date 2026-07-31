@@ -9,10 +9,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
+import { derivePlatformSessionTitle } from '../chat-session-title.util';
 import { SendPlatformMessageDto } from '../dto/send-platform-message.dto';
-import { ChatConversation } from '../entities/chat-conversation.entity';
-import { ChatConversationParticipant } from '../entities/chat-conversation-participant.entity';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatSession } from '../entities/chat-session.entity';
+import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatParticipantRole } from '../entities/chat-participant-role.enum';
 import {
@@ -29,7 +30,7 @@ export type StreamPlatformMessageHooks = {
 };
 
 export type ValidatedStreamContext = {
-  conversation: ChatConversation;
+  conversation: ChatSession;
   userId: string;
   text: string;
 };
@@ -51,12 +52,12 @@ export class ChatStreamingService {
   private readonly logger = new Logger(ChatStreamingService.name);
 
   constructor(
-    @InjectRepository(ChatConversation)
-    private readonly conversationRepository: Repository<ChatConversation>,
+    @InjectRepository(ChatSession)
+    private readonly conversationRepository: Repository<ChatSession>,
     @InjectRepository(ChatMessage)
     private readonly messageRepository: Repository<ChatMessage>,
-    @InjectRepository(ChatConversationParticipant)
-    private readonly participantRepository: Repository<ChatConversationParticipant>,
+    @InjectRepository(ChatSessionParticipant)
+    private readonly participantRepository: Repository<ChatSessionParticipant>,
     private readonly wsGateway: WebSocketGatewayService,
     private readonly aiOrchestrator: AiChatOrchestratorService,
   ) {}
@@ -71,23 +72,23 @@ export class ChatStreamingService {
    */
   async validate(
     userId: string,
-    conversationId: string,
+    sessionId: string,
     dto: SendPlatformMessageDto,
   ): Promise<ValidatedStreamContext> {
     const conversation = await this.conversationRepository.findOne({
-      where: { id: conversationId },
+      where: { id: sessionId },
     });
     if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      throw new NotFoundException('Session not found');
     }
-    if (conversation.type !== ChatConversationType.Platform) {
+    if (conversation.type !== ChatSessionType.Platform) {
       throw new BadRequestException(
         'This endpoint accepts only platform-type conversations',
       );
     }
 
     const membership = await this.participantRepository.findOne({
-      where: { conversationId: conversation.id, userId },
+      where: { sessionId: conversation.id, userId },
     });
     if (!membership) {
       throw new ForbiddenException(
@@ -108,7 +109,7 @@ export class ChatStreamingService {
       // `runStream` does not thread them through to `filesService.linkToMessage`.
       throw new BadRequestException(
         'File attachments are not supported on the streaming endpoint. ' +
-          'Use POST /chat/conversations/:id/messages instead.',
+          'Use POST /chat/sessions/:id/messages instead.',
       );
     }
 
@@ -133,16 +134,25 @@ export class ChatStreamingService {
     let savedClientMessage: ChatMessage;
     try {
       const clientMessage = this.messageRepository.create({
-        conversationId: conversation.id,
+        sessionId: conversation.id,
         senderId: userId,
         text,
       });
       savedClientMessage = await this.messageRepository.save(clientMessage);
 
       const now = new Date();
-      await this.conversationRepository.update(conversation.id, {
-        updatedAt: now,
-      });
+      // Same auto-title flow as ChatService.sendPlatformMessage — the
+      // streaming path is the production one for client messages, so it
+      // must derive the sidebar title from the first client turn.
+      const newTitle = !conversation.title
+        ? derivePlatformSessionTitle(text)
+        : null;
+      const sessionUpdate: Partial<ChatSession> = { updatedAt: now };
+      if (newTitle) {
+        sessionUpdate.title = newTitle;
+        conversation.title = newTitle;
+      }
+      await this.conversationRepository.update(conversation.id, sessionUpdate);
 
       const otherParticipants = await this.resolveOtherParticipantIds(
         conversation,
@@ -150,7 +160,11 @@ export class ChatStreamingService {
       );
       const clientMessagePayload = {
         message: { ...savedClientMessage, files: [] },
-        conversation: { id: conversation.id, updatedAt: now },
+        session: {
+          id: conversation.id,
+          updatedAt: now,
+          title: conversation.title,
+        },
       };
       // Broadcast the client's message to every other participant AND to a
       // duplicate socket the same user might have open elsewhere. The active
@@ -203,11 +217,11 @@ export class ChatStreamingService {
   }
 
   private async resolveOtherParticipantIds(
-    conversation: ChatConversation,
+    conversation: ChatSession,
     excludeUserId: string,
   ): Promise<string[]> {
     const participants = await this.participantRepository.find({
-      where: { conversationId: conversation.id },
+      where: { sessionId: conversation.id },
     });
     return participants
       .map((p) => p.userId)

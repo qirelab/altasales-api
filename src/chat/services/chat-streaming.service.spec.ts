@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatParticipantRole } from '../entities/chat-participant-role.enum';
 import { ChatStreamingService } from './chat-streaming.service';
 
@@ -21,7 +21,7 @@ function buildService(
       .fn()
       .mockResolvedValue(
         overrides.conversation === undefined
-          ? { id: 'conv-1', type: ChatConversationType.Platform }
+          ? { id: 'conv-1', type: ChatSessionType.Platform }
           : overrides.conversation,
       ),
     update: jest.fn().mockResolvedValue(undefined),
@@ -31,7 +31,7 @@ function buildService(
     save: jest.fn(async (entity) => ({ ...entity })),
   };
   const defaultMembership = {
-    conversationId: 'conv-1',
+    sessionId: 'conv-1',
     userId: 'client-1',
     role: ChatParticipantRole.Client,
   };
@@ -108,7 +108,7 @@ describe('ChatStreamingService.validate', () => {
 
   it('rejects with BadRequest for a non-platform conversation', async () => {
     const { service } = buildService({
-      conversation: { id: 'conv-1', type: ChatConversationType.Expert },
+      conversation: { id: 'conv-1', type: ChatSessionType.Expert },
     });
 
     await expect(
@@ -138,7 +138,7 @@ describe('ChatStreamingService.validate', () => {
   it('rejects with BadRequest when the caller is not a Client', async () => {
     const { service } = buildService({
       membership: {
-        conversationId: 'conv-1',
+        sessionId: 'conv-1',
         userId: 'expert-1',
         role: ChatParticipantRole.Expert,
       },
@@ -185,6 +185,73 @@ describe('ChatStreamingService.runStream', () => {
     const targets = wsGateway.emitToUser.mock.calls.map((call) => call[0]);
     expect(targets.sort()).toEqual(['client-1', 'expert-1'].sort());
     expect(targets).not.toContain(AI_SYSTEM_USER_ID);
+  });
+
+  it('sets session title from the client\'s first message when title is null', async () => {
+    const { service, conversationRepository } = buildService({
+      conversation: {
+        id: 'conv-1',
+        type: ChatSessionType.Platform,
+        title: null,
+      },
+    });
+    const context = await service.validate('client-1', 'conv-1', {
+      text: 'Как настроить отдел продаж?',
+    });
+
+    await service.runStream(context, hooks);
+
+    const updateWithTitle = conversationRepository.update.mock.calls.find(
+      (c) => c[1]?.title !== undefined,
+    );
+    expect(updateWithTitle).toBeDefined();
+    expect(updateWithTitle![1].title).toBe('Как настроить отдел продаж?');
+  });
+
+  it('does NOT overwrite an existing session title on subsequent streaming messages', async () => {
+    const { service, conversationRepository } = buildService({
+      conversation: {
+        id: 'conv-1',
+        type: ChatSessionType.Platform,
+        title: 'Existing topic',
+      },
+    });
+    const context = await service.validate('client-1', 'conv-1', {
+      text: 'follow-up question',
+    });
+
+    await service.runStream(context, hooks);
+
+    const updateWithTitle = conversationRepository.update.mock.calls.find(
+      (c) => c[1]?.title !== undefined,
+    );
+    expect(updateWithTitle).toBeUndefined();
+  });
+
+  it('WS payload uses "session" key with id/updatedAt/title on the streaming path', async () => {
+    const { service, wsGateway } = buildService({
+      conversation: {
+        id: 'conv-1',
+        type: ChatSessionType.Platform,
+        title: null,
+      },
+    });
+    const context = await service.validate('client-1', 'conv-1', {
+      text: 'first message',
+    });
+
+    await service.runStream(context, hooks);
+
+    const newMessageEmits = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:new_message',
+    );
+    expect(newMessageEmits.length).toBeGreaterThan(0);
+    const payload = newMessageEmits[0][2] as {
+      session?: { id?: string; title?: string | null };
+    };
+    expect(payload.session).toBeDefined();
+    expect(payload.session!.id).toBe('conv-1');
+    expect(payload.session!.title).toBe('first message');
   });
 
   it('reports client_message_persist_failed when saving the client message throws', async () => {

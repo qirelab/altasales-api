@@ -1,5 +1,5 @@
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
 import {
@@ -11,7 +11,7 @@ import { ChatHistoryMapperService } from './chat-history-mapper.service';
 function makeMessage(overrides: Record<string, unknown> = {}) {
   return {
     id: overrides.id ?? 'msg-generated',
-    conversationId: 'conv-1',
+    sessionId: 'conv-1',
     senderId: overrides.senderId ?? 'client-1',
     text: overrides.text ?? 'txt',
     isRead: false,
@@ -125,7 +125,7 @@ function makeYieldingRagStream(events: unknown[]) {
 
 const conversation = {
   id: 'conv-1',
-  type: ChatConversationType.Platform,
+  type: ChatSessionType.Platform,
   participantOneId: 'client-1',
   participantTwoId: AI_SYSTEM_USER_ID,
 } as never;
@@ -345,7 +345,7 @@ describe('AiChatOrchestratorService.streamReply', () => {
     expect(handoffEvents.length).toBeGreaterThan(0);
     expect(handoffEvents[0][2]).toEqual(
       expect.objectContaining({
-        conversationId: 'conv-1',
+        sessionId: 'conv-1',
         trigger: ChatHandoffTrigger.UserExplicitRequest,
       }),
     );

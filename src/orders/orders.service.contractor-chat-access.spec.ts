@@ -42,8 +42,8 @@ function makeService(
     })),
   };
   const chatService = {
-    addExpertToClientPlatformChat: jest.fn().mockResolvedValue(undefined),
-    removeExpertFromClientPlatformChat: jest.fn().mockResolvedValue(undefined),
+    addExpertToClientPlatformSessions: jest.fn().mockResolvedValue(undefined),
+    removeExpertFromClientPlatformSessions: jest.fn().mockResolvedValue(undefined),
   };
 
   // OrdersService has 16 constructor deps — we only need order + chat +
@@ -123,7 +123,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: true,
     } as never);
 
-    expect(chatService.addExpertToClientPlatformChat).toHaveBeenCalledWith(
+    expect(chatService.addExpertToClientPlatformSessions).toHaveBeenCalledWith(
       'client-1',
       'expert-1',
     );
@@ -132,7 +132,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     );
     // Order of operations: attach before save so a failure aborts the write.
     const attachCallOrder =
-      chatService.addExpertToClientPlatformChat.mock.invocationCallOrder[0];
+      chatService.addExpertToClientPlatformSessions.mock.invocationCallOrder[0];
     const saveCallOrder = orderRepository.save.mock.invocationCallOrder[0];
     expect(attachCallOrder).toBeLessThan(saveCallOrder);
   });
@@ -141,7 +141,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     const { service, orderRepository, chatService } = makeService({
       order: baseOrder(),
     });
-    chatService.addExpertToClientPlatformChat.mockRejectedValueOnce(
+    chatService.addExpertToClientPlatformSessions.mockRejectedValueOnce(
       new Error('WS gateway down'),
     );
 
@@ -163,7 +163,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: true,
     } as never);
 
-    expect(chatService.addExpertToClientPlatformChat).toHaveBeenCalledWith(
+    expect(chatService.addExpertToClientPlatformSessions).toHaveBeenCalledWith(
       'client-1',
       'expert-1',
     );
@@ -179,7 +179,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: false,
     } as never);
 
-    expect(chatService.removeExpertFromClientPlatformChat).toHaveBeenCalledWith(
+    expect(chatService.removeExpertFromClientPlatformSessions).toHaveBeenCalledWith(
       'client-1',
       'expert-1',
     );
@@ -199,7 +199,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     } as never);
 
     expect(
-      chatService.removeExpertFromClientPlatformChat,
+      chatService.removeExpertFromClientPlatformSessions,
     ).not.toHaveBeenCalled();
     expect(orderRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ contractorChatAccess: false }),
@@ -221,11 +221,11 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
 
     // Grant fired, save failed, compensation must roll the expert back so
     // there's no orphan participant with `contractorChatAccess=false`.
-    expect(chatService.addExpertToClientPlatformChat).toHaveBeenCalledWith(
+    expect(chatService.addExpertToClientPlatformSessions).toHaveBeenCalledWith(
       'client-1',
       'expert-1',
     );
-    expect(chatService.removeExpertFromClientPlatformChat).toHaveBeenCalledWith(
+    expect(chatService.removeExpertFromClientPlatformSessions).toHaveBeenCalledWith(
       'client-1',
       'expert-1',
     );
@@ -245,7 +245,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     ).rejects.toThrow('DB down');
 
     expect(
-      chatService.removeExpertFromClientPlatformChat,
+      chatService.removeExpertFromClientPlatformSessions,
     ).not.toHaveBeenCalled();
   });
 
@@ -260,7 +260,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: true,
     } as never);
 
-    expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+    expect(chatService.addExpertToClientPlatformSessions).not.toHaveBeenCalled();
   });
 
   it('does not touch chat when the order has no resolvable expert', async () => {
@@ -272,7 +272,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: true,
     } as never);
 
-    expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+    expect(chatService.addExpertToClientPlatformSessions).not.toHaveBeenCalled();
   });
 
   it('rejects a fresh grant on a cancelled order (fix #C)', async () => {
@@ -285,7 +285,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
         contractorChatAccess: true,
       } as never),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+    expect(chatService.addExpertToClientPlatformSessions).not.toHaveBeenCalled();
     expect(orderRepository.save).not.toHaveBeenCalled();
   });
 
@@ -306,12 +306,12 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
         contractorChatAccess: true,
       } as never),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(chatService.addExpertToClientPlatformChat).not.toHaveBeenCalled();
+    expect(chatService.addExpertToClientPlatformSessions).not.toHaveBeenCalled();
     expect(orderRepository.save).not.toHaveBeenCalled();
   });
 
   it('attaches the expert INSIDE the advisory-lock transaction (grant race fix)', async () => {
-    // Regression: earlier grant path called addExpertToClientPlatformChat
+    // Regression: earlier grant path called addExpertToClientPlatformSessions
     // BEFORE taking the (client, expert) advisory lock. A concurrent revoke
     // on a sibling order could slip between attach and save, see hasOther
     // still false (this save had not landed), and remove the expert we
@@ -328,7 +328,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
     // The mock manager proxies save to orderRepository, so we assert the
     // attach and save both fired and the attach preceded the save.
     const attachOrder =
-      chatService.addExpertToClientPlatformChat.mock.invocationCallOrder[0];
+      chatService.addExpertToClientPlatformSessions.mock.invocationCallOrder[0];
     const saveOrder = orderRepository.save.mock.invocationCallOrder[0];
     expect(attachOrder).toBeDefined();
     expect(saveOrder).toBeDefined();
@@ -348,7 +348,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
       contractorChatAccess: false,
     } as never);
 
-    expect(chatService.removeExpertFromClientPlatformChat).toHaveBeenCalledWith(
+    expect(chatService.removeExpertFromClientPlatformSessions).toHaveBeenCalledWith(
       'client-1',
       'expert-1',
     );
@@ -373,7 +373,7 @@ describe('OrdersService.updateContractorChatAccessForAdmin', () => {
 
     const saveOrder = orderRepository.save.mock.invocationCallOrder[0];
     const removeOrder =
-      chatService.removeExpertFromClientPlatformChat.mock
+      chatService.removeExpertFromClientPlatformSessions.mock
         .invocationCallOrder[0];
     // save runs BEFORE participant remove so another concurrent revoke
     // acquiring the lock next sees the committed contractorChatAccess=false
