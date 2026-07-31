@@ -146,6 +146,7 @@ export class AiChatOrchestratorService {
     const ragResponse = await this.ragService.askQuestion({
       question: input.question,
       history,
+      clientUserId: input.clientUserId,
     });
 
     // Second detection pass now that we know how RAG went. Explicit-request
@@ -330,6 +331,7 @@ export class AiChatOrchestratorService {
         {
           question: input.question,
           history,
+          clientUserId: input.clientUserId,
         },
         signal,
       );

@@ -1,4 +1,5 @@
 import { KnowledgeBasePurpose } from '../../knowledge/enums/knowledge-base-purpose.enum';
+import { ChatIntent } from '../enums/chat-intent.enum';
 import {
   ChatbotRagService,
   ChatbotRagStreamEvent,
@@ -53,6 +54,7 @@ function buildService(
     searchResults?: ReturnType<typeof buildResultItem>[];
     streamChunks?: string[];
     streamError?: Error;
+    intent?: ChatIntent;
   } = {},
 ) {
   const knowledgeSearch = {
@@ -76,14 +78,22 @@ function buildService(
   const queryRewriter = {
     rewrite: jest.fn(async (question: string) => question),
   };
+  const clientContext = {
+    buildContextBlock: jest.fn().mockResolvedValue(''),
+  };
+  const intentClassifier = {
+    classify: jest.fn().mockResolvedValue(overrides.intent ?? ChatIntent.PlatformQuestion),
+  };
   const service = new ChatbotRagService(
     knowledgeSearch as never,
     llmProxy as never,
     conversationalContext as never,
     queryRewriter as never,
+    clientContext as never,
+    intentClassifier as never,
     undefined,
   );
-  return { service, knowledgeSearch, llmProxy };
+  return { service, knowledgeSearch, llmProxy, intentClassifier };
 }
 
 function makeThrowingStream(error: Error) {
@@ -148,17 +158,62 @@ describe('ChatbotRagService.askQuestionStream', () => {
     });
   });
 
-  it('emits a refusal when retrieval returns no matches', async () => {
-    const { service } = buildService({ searchResults: [] });
+  it('for platform intent with empty RAG results, emits a no_results_in_scope refusal without streaming', async () => {
+    const { service, llmProxy } = buildService({
+      intent: ChatIntent.PlatformQuestion,
+      searchResults: [],
+    });
 
     const events = await collect(
-      service.askQuestionStream({ question: 'unknown topic' }),
+      service.askQuestionStream({ question: 'unknown platform topic' }),
     );
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'refusal',
-      response: expect.objectContaining({ refusalReason: 'no_results' }),
+      response: expect.objectContaining({
+        refusalReason: 'no_results_in_scope',
+      }),
+    });
+    expect(llmProxy.chatStream).not.toHaveBeenCalled();
+  });
+
+  it('for meta intent, streams from LLM without RAG augmentation', async () => {
+    const { service, llmProxy, knowledgeSearch } = buildService({
+      intent: ChatIntent.Meta,
+      streamChunks: ['Мы обсуждали ', 'пакет CRM.'],
+    });
+
+    const events = await collect(
+      service.askQuestionStream({ question: 'Что мы обсуждали?' }),
+    );
+
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(events[events.length - 1].type).toBe('done');
+    expect(llmProxy.chatStream).toHaveBeenCalledTimes(1);
+    const streamArg = llmProxy.chatStream.mock.calls[0][0];
+    const lastMsg = streamArg.messages[streamArg.messages.length - 1];
+    expect(lastMsg.content).toBe('Что мы обсуждали?');
+  });
+
+  it('for explicit_handoff intent, emits handoff refusal without any LLM call', async () => {
+    const { service, llmProxy, knowledgeSearch } = buildService({
+      intent: ChatIntent.ExplicitHandoff,
+    });
+
+    const events = await collect(
+      service.askQuestionStream({ question: 'Позовите менеджера' }),
+    );
+
+    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(llmProxy.chatStream).not.toHaveBeenCalled();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'refusal',
+      response: expect.objectContaining({
+        refusalReason: 'explicit_handoff',
+        intent: ChatIntent.ExplicitHandoff,
+      }),
     });
   });
 

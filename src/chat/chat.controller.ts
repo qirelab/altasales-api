@@ -14,12 +14,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { SessionGuard } from '../auth/guards/session.guard';
 import {
   CurrentUser,
   type CurrentUserData,
 } from '../auth/decorators/current-user.decorator';
+import { SessionGuard } from '../auth/guards/session.guard';
+import { ChatThrottlerGuard } from './guards/chat-throttler.guard';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { GetSessionsQueryDto } from './dto/get-sessions-query.dto';
@@ -86,6 +88,8 @@ export class ChatController {
 
   @Post('sessions/platform')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary: 'Create a new platform (AI) session for the current client',
   })
@@ -95,6 +99,8 @@ export class ChatController {
 
   @Post('sessions/:id/messages')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
       'Send a message inside a platform session. Client messages trigger ' +
@@ -109,6 +115,8 @@ export class ChatController {
   }
 
   @Post('sessions/:id/messages/stream')
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
       'Send a client message and stream the AI reply as Server-Sent Events. ' +
