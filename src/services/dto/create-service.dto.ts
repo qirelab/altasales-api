@@ -14,7 +14,9 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
+import { RopTariff } from '../../rop/rop-tariff.enum';
 import { ServiceType } from '../entities/service-type.enum';
 
 const SERVICE_MAX_DESCRIPTION_LENGTH = 5000;
@@ -89,6 +91,18 @@ export class CreateServiceDto {
   @IsOptional()
   @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
   externalUrl?: string;
+
+  @ApiPropertyOptional({
+    enum: RopTariff,
+    example: RopTariff.Trainer,
+    nullable: true,
+    description:
+      'ROP Sharing tariff for this service (null = do not notify ROP API)',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsEnum(RopTariff)
+  ropTariff?: RopTariff | null;
 
   @ApiProperty({
     example: ['AmoCRM', 'Bitrix24', 'API'],

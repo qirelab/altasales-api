@@ -1,5 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateIf,
+} from 'class-validator';
+import { RopTariff } from '../../rop/rop-tariff.enum';
 
 export class CreatePackageDto {
   @ApiProperty({ example: 'CRM Start Pack', description: 'Package name' })
@@ -44,6 +55,18 @@ export class CreatePackageDto {
   @IsOptional()
   @IsBoolean()
   isHidden?: boolean;
+
+  @ApiPropertyOptional({
+    enum: RopTariff,
+    example: RopTariff.Hos,
+    nullable: true,
+    description:
+      'ROP Sharing tariff for this package (null = do not notify ROP API)',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsEnum(RopTariff)
+  ropTariff?: RopTariff | null;
 
   @ApiPropertyOptional({
     example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg',

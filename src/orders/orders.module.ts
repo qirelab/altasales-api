@@ -10,6 +10,7 @@ import { ServicePackage } from '../packages/entities/package.entity';
 import { Service } from '../services/entities/service.entity';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
+import { RopModule } from '../rop/rop.module';
 import { ExpertProfile } from '../experts/entities/expert-profile.entity';
 import { ExpertPositionOffering } from '../experts/entities/expert-position-offering.entity';
 import { OrderItemSubItem } from './entities/order-item-sub-item.entity';
@@ -39,6 +40,7 @@ import { OrdersController } from './orders.controller';
     ExpertsModule,
     OrderNotificationsModule,
     RecommendationsModule,
+    RopModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],
