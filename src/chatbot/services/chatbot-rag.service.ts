@@ -432,7 +432,11 @@ export class ChatbotRagService {
     if (top.score < this.referenceShortcutMinScore) return null;
     const title = top.document.title ?? top.document.originalFileName ?? '';
     if (!title.startsWith(REFERENCE_TITLE_PREFIX)) return null;
-    const match = /Ответ:\s*([\s\S]*?)(?:\nТема:|$)/m.exec(top.text);
+    // No `m` flag on purpose: with multi-line mode `$` matches end of every
+    // line, and the lazy `*?` would stop at the first newline, cutting the
+    // answer to just its opening sentence. Without `m`, `$` is end-of-text
+    // only, so the lazy quantifier extends until it finds `\nТема:` or EOF.
+    const match = /Ответ:\s*([\s\S]*?)(?:\nТема:|$)/.exec(top.text);
     const body = match?.[1]?.trim();
     return body && body.length > 0 ? body : null;
   }
@@ -466,20 +470,26 @@ export class ChatbotRagService {
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
+    // Always search knowledge, even for greeting/meta/off_topic/sales_question.
+    // A curated reference answer may match those intents too (e.g. "С кем я
+    // общаюсь?" is classified as greeting but has a reference in the bank),
+    // and the shortcut below returns it verbatim without invoking the LLM.
     const retrievalStartedAt = Date.now();
     let results: KnowledgeSearchResultItem[] = [];
-    if (!skipRag) {
-      try {
-        const searchResponse = await this.knowledgeSearch.search({
-          purpose: KnowledgeBasePurpose.QA_CHATBOT,
-          query: searchQuery,
-          limit: this.retrievalLimit,
-        });
-        results = searchResponse.results;
-      } catch (error) {
-        this.logger.error(
-          `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
-        );
+    try {
+      const searchResponse = await this.knowledgeSearch.search({
+        purpose: KnowledgeBasePurpose.QA_CHATBOT,
+        query: searchQuery,
+        limit: this.retrievalLimit,
+      });
+      results = searchResponse.results;
+    } catch (error) {
+      this.logger.error(
+        `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
+      );
+      // For non-platform intents a search failure should not refuse the
+      // whole turn — the LLM can still greet or answer meta without RAG.
+      if (!skipRag) {
         return this.buildRefusal('retrieval_failed', startedAt, {
           retrievalMs: Date.now() - retrievalStartedAt,
           totalResults: 0,
@@ -677,20 +687,23 @@ export class ChatbotRagService {
     const rewriteMs = Date.now() - rewriteStartedAt;
     const queryRewritten = searchQuery !== question ? 1 : 0;
 
+    // Always search - see askQuestion for rationale. Curated references may
+    // match greeting/meta questions too, and the shortcut below returns them
+    // verbatim without ever invoking the LLM.
     const retrievalStartedAt = Date.now();
     let results: KnowledgeSearchResultItem[] = [];
-    if (!skipRag) {
-      try {
-        const searchResponse = await this.knowledgeSearch.search({
-          purpose: KnowledgeBasePurpose.QA_CHATBOT,
-          query: searchQuery,
-          limit: this.retrievalLimit,
-        });
-        results = searchResponse.results;
-      } catch (error) {
-        this.logger.error(
-          `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
-        );
+    try {
+      const searchResponse = await this.knowledgeSearch.search({
+        purpose: KnowledgeBasePurpose.QA_CHATBOT,
+        query: searchQuery,
+        limit: this.retrievalLimit,
+      });
+      results = searchResponse.results;
+    } catch (error) {
+      this.logger.error(
+        `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
+      );
+      if (!skipRag) {
         yield {
           type: 'refusal',
           response: this.buildRefusal('retrieval_failed', startedAt, {

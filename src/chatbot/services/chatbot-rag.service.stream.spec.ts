@@ -178,9 +178,10 @@ describe('ChatbotRagService.askQuestionStream', () => {
     expect(llmProxy.chatStream).not.toHaveBeenCalled();
   });
 
-  it('for meta intent, streams from LLM without RAG augmentation', async () => {
+  it('for meta intent with no reference match, searches then streams raw question through LLM', async () => {
     const { service, llmProxy, knowledgeSearch } = buildService({
       intent: ChatIntent.Meta,
+      searchResults: [],
       streamChunks: ['Мы обсуждали ', 'пакет CRM.'],
     });
 
@@ -188,7 +189,7 @@ describe('ChatbotRagService.askQuestionStream', () => {
       service.askQuestionStream({ question: 'Что мы обсуждали?' }),
     );
 
-    expect(knowledgeSearch.search).not.toHaveBeenCalled();
+    expect(knowledgeSearch.search).toHaveBeenCalledTimes(1);
     expect(events[events.length - 1].type).toBe('done');
     expect(llmProxy.chatStream).toHaveBeenCalledTimes(1);
     const streamArg = llmProxy.chatStream.mock.calls[0][0];
