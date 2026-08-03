@@ -2,8 +2,26 @@ import { extname } from 'path';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import mammoth from 'mammoth';
-import { PDFParse } from 'pdf-parse';
 import { KnowledgeOcrService } from './knowledge-ocr.service';
+
+type PdfParseFn = (
+  buffer: Buffer,
+) => Promise<{ text?: string }>;
+
+let pdfParseLoader: Promise<PdfParseFn> | null = null;
+
+async function loadPdfParse(): Promise<PdfParseFn> {
+  if (!pdfParseLoader) {
+    pdfParseLoader = import('pdf-parse').then((module) => {
+      const parser = (module as { default?: PdfParseFn }).default ?? module;
+      if (typeof parser !== 'function') {
+        throw new Error('pdf-parse module did not export a parser function');
+      }
+      return parser as PdfParseFn;
+    });
+  }
+  return pdfParseLoader;
+}
 
 export type KnowledgeExtractedTextBlock = {
   text: string;
@@ -110,13 +128,9 @@ export class KnowledgeExtractionService {
   }
 
   private async extractPdf(buffer: Buffer): Promise<string> {
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const result = await parser.getText();
-      return typeof result.text === 'string' ? result.text : '';
-    } finally {
-      await parser.destroy();
-    }
+    const pdfParse = await loadPdfParse();
+    const result = await pdfParse(buffer);
+    return typeof result.text === 'string' ? result.text : '';
   }
 
   private async extractPdfBlocks(
