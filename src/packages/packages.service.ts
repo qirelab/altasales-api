@@ -32,6 +32,7 @@ export interface AdminPackageListItem {
   image: string | null;
   imageOriginal: string | null;
   isHidden: boolean;
+  ropTariff: string | null;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   categoryIds: string[];
@@ -430,6 +431,7 @@ export class PackagesService {
       image: pkg.image,
       imageOriginal: pkg.imageOriginal,
       isHidden: pkg.isHidden,
+      ropTariff: pkg.ropTariff,
       categoryId: first?.id ?? null,
       category: first
         ? { id: first.id, name: first.name, slug: first.slug }

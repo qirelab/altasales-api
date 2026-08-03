@@ -474,4 +474,63 @@ export class RopService {
 
     return response.json() as Promise<RopMeetingRecord>;
   }
+
+  async activateSubscription(payload: {
+    email: string;
+    projectId: string;
+    tariff: string;
+  }): Promise<void> {
+    this.ensureConfigured();
+
+    const projectId = Number(payload.projectId);
+    const body = {
+      email: payload.email,
+      project_id: Number.isFinite(projectId) ? projectId : payload.projectId,
+      tariff: payload.tariff,
+    };
+
+    const response = await fetch(`${this.apiUrl}/users/subscription/activate`, {
+      method: 'POST',
+      headers: this.jsonHeaders,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('activate subscription', response, error);
+      throw new InternalServerErrorException(
+        'Failed to activate ROP subscription',
+      );
+    }
+  }
+
+  async deactivateSubscription(payload: {
+    email: string;
+    projectId: string;
+  }): Promise<void> {
+    this.ensureConfigured();
+
+    const projectId = Number(payload.projectId);
+    const body = {
+      email: payload.email,
+      project_id: Number.isFinite(projectId) ? projectId : payload.projectId,
+    };
+
+    const response = await fetch(
+      `${this.apiUrl}/users/subscription/deactivate`,
+      {
+        method: 'POST',
+        headers: this.jsonHeaders,
+        body: JSON.stringify(body),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('deactivate subscription', response, error);
+      throw new InternalServerErrorException(
+        'Failed to deactivate ROP subscription',
+      );
+    }
+  }
 }
