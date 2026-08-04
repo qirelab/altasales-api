@@ -116,4 +116,25 @@ export default [
       ],
     },
   },
+  // Turns off ESLint stylistic rules that conflict with Prettier (indent, etc.).
+  // Without this, `eslint --fix` and `prettier --write` fight.
+  ...compat.extends("prettier"),
+  // Re-enable project rules that prettier turns off but we still want.
+  // (max-len: prettier won't wrap long comments/strings the way we require;
+  // quotes stays off — prettier singleQuote + avoidEscape handles them.)
+  {
+    files: ["**/*.ts", "**/*.tsx", "**/*.js"],
+    rules: {
+      "max-len": [
+        "error",
+        {
+          code: 130,
+          ignoreComments: true,
+          ignoreStrings: false,
+          ignoreTemplateLiterals: false,
+          ignoreUrls: true,
+        },
+      ],
+    },
+  },
 ];
