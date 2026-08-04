@@ -84,9 +84,18 @@ export class AdminChatService {
   async listOperatorSessions(
     filter: OperatorSessionFilter,
   ): Promise<OperatorSessionView[]> {
-    const where = filter === 'resolved'
-      ? { type: ChatSessionType.Platform, handoffStatus: ChatHandoffStatus.Resolved }
-      : { type: ChatSessionType.Platform, handoffStatus: In(ACTIVE_STATUSES as unknown as ChatHandoffStatus[]) };
+    const where =
+      filter === 'resolved'
+        ? {
+            type: ChatSessionType.Platform,
+            handoffStatus: ChatHandoffStatus.Resolved,
+          }
+        : {
+            type: ChatSessionType.Platform,
+            handoffStatus: In(
+              ACTIVE_STATUSES as unknown as ChatHandoffStatus[],
+            ),
+          };
     const rows = await this.sessionRepository.find({
       where,
       relations: ['participantOne', 'participantTwo', 'assignedOperator'],
@@ -103,23 +112,25 @@ export class AdminChatService {
       .map((r) => pickClient(r)?.id)
       .filter((id): id is string => Boolean(id));
 
-    const lastMessages = sessionIds.length > 0
-      ? await this.messageRepository
-        .createQueryBuilder('m')
-        .distinctOn(['m."sessionId"'])
-        .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
-        .orderBy('m."sessionId"')
-        .addOrderBy('m."createdAt"', 'DESC')
-        .getMany()
-      : [];
+    const lastMessages =
+      sessionIds.length > 0
+        ? await this.messageRepository
+            .createQueryBuilder('m')
+            .distinctOn(['m."sessionId"'])
+            .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
+            .orderBy('m."sessionId"')
+            .addOrderBy('m."createdAt"', 'DESC')
+            .getMany()
+        : [];
     const lastMessageBySession = new Map<string, ChatMessage>();
     for (const m of lastMessages) lastMessageBySession.set(m.sessionId, m);
 
-    const questionnaires = clientIds.length > 0
-      ? await this.questionnaireRepository.find({
-        where: { userId: In(clientIds) },
-      })
-      : [];
+    const questionnaires =
+      clientIds.length > 0
+        ? await this.questionnaireRepository.find({
+            where: { userId: In(clientIds) },
+          })
+        : [];
     const companyByUserId = new Map<string, string | null>();
     for (const q of questionnaires) {
       const raw = q.answers?.companyName;
@@ -127,17 +138,23 @@ export class AdminChatService {
       companyByUserId.set(q.userId, trimmed.length > 0 ? trimmed : null);
     }
 
-    return rows.map((row) => this.toView(
-      row,
-      lastMessageBySession.get(row.id) ?? null,
-      companyByUserId.get(pickClient(row)?.id ?? '') ?? null,
-    ));
+    return rows.map((row) =>
+      this.toView(
+        row,
+        lastMessageBySession.get(row.id) ?? null,
+        companyByUserId.get(pickClient(row)?.id ?? '') ?? null,
+      ),
+    );
   }
 
-  async claim(operatorId: string, sessionId: string): Promise<OperatorSessionView> {
+  async claim(
+    operatorId: string,
+    sessionId: string,
+  ): Promise<OperatorSessionView> {
     const session = await this.loadPlatformSession(sessionId);
     if (session.handoffStatus === ChatHandoffStatus.InProgress) {
-      if (session.assignedOperatorId === operatorId) return this.loadSingleView(session);
+      if (session.assignedOperatorId === operatorId)
+        return this.loadSingleView(session);
       throw new ConflictException(
         'Session is already being handled by another operator',
       );
@@ -170,9 +187,11 @@ export class AdminChatService {
         );
       }
 
-      const existing = await manager.getRepository(ChatSessionParticipant).findOne({
-        where: { sessionId, userId: operatorId },
-      });
+      const existing = await manager
+        .getRepository(ChatSessionParticipant)
+        .findOne({
+          where: { sessionId, userId: operatorId },
+        });
       if (!existing) {
         await manager.getRepository(ChatSessionParticipant).save(
           manager.getRepository(ChatSessionParticipant).create({
@@ -222,7 +241,9 @@ export class AdminChatService {
     const saved = await this.messageRepository.save(announcement);
     // Bump session.updatedAt to the announcement time so sidebar listings
     // (which order by updatedAt DESC) surface the new message immediately.
-    await this.sessionRepository.update(session.id, { updatedAt: saved.createdAt });
+    await this.sessionRepository.update(session.id, {
+      updatedAt: saved.createdAt,
+    });
     const payload = {
       message: { ...saved, files: [] },
       session: {
@@ -249,7 +270,10 @@ export class AdminChatService {
         'Only sessions in progress can be resolved',
       );
     }
-    if (session.assignedOperatorId && session.assignedOperatorId !== operatorId) {
+    if (
+      session.assignedOperatorId &&
+      session.assignedOperatorId !== operatorId
+    ) {
       throw new ForbiddenException(
         'This session is assigned to another operator',
       );
@@ -341,12 +365,12 @@ export class AdminChatService {
       participant: pickUser(client, companyName),
       lastMessage: lastMessage
         ? {
-          id: lastMessage.id,
-          text: lastMessage.text,
-          senderId: lastMessage.senderId,
-          isAiGenerated: lastMessage.isAiGenerated,
-          createdAt: lastMessage.createdAt,
-        }
+            id: lastMessage.id,
+            text: lastMessage.text,
+            senderId: lastMessage.senderId,
+            isAiGenerated: lastMessage.isAiGenerated,
+            createdAt: lastMessage.createdAt,
+          }
         : null,
       needsHumanHandoff: session.needsHumanHandoff,
       handoffStatus: session.handoffStatus,
@@ -358,7 +382,9 @@ export class AdminChatService {
     };
   }
 
-  private async loadSingleView(session: ChatSession): Promise<OperatorSessionView> {
+  private async loadSingleView(
+    session: ChatSession,
+  ): Promise<OperatorSessionView> {
     const client = pickClient(session);
     const [lastMessage, companyName] = await Promise.all([
       this.messageRepository.findOne({
@@ -370,7 +396,9 @@ export class AdminChatService {
     return this.toView(session, lastMessage, companyName);
   }
 
-  private async loadCompanyName(userId: string | undefined): Promise<string | null> {
+  private async loadCompanyName(
+    userId: string | undefined,
+  ): Promise<string | null> {
     if (!userId) return null;
     const questionnaire = await this.questionnaireRepository.findOne({
       where: { userId },
@@ -386,10 +414,16 @@ function pickClient(session: ChatSession): User | null {
   // Platform sessions: one participant is the AI system user, the other is
   // the client. Legacy expert sessions: both are real users; we surface
   // whichever is NOT the AI (defaults to participantOne).
-  if (session.participantOne && session.participantOne.id !== AI_SYSTEM_USER_ID) {
+  if (
+    session.participantOne &&
+    session.participantOne.id !== AI_SYSTEM_USER_ID
+  ) {
     return session.participantOne;
   }
-  if (session.participantTwo && session.participantTwo.id !== AI_SYSTEM_USER_ID) {
+  if (
+    session.participantTwo &&
+    session.participantTwo.id !== AI_SYSTEM_USER_ID
+  ) {
     return session.participantTwo;
   }
   return null;

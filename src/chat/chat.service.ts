@@ -455,16 +455,18 @@ export class ChatService {
     const files = await this.linkFilesToMessage(dto.fileIds, savedMessage.id);
     const now = new Date();
 
-    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+    await this.conversationRepository.update(conversation.id, {
+      updatedAt: now,
+    });
 
     // Fire-and-forget AI-generated session title on the client's first
     // message. Doesn't block the reply pipeline — the sidebar picks up
     // the new title via the `chat:session_updated` WS event.
-    if (
-      membership.role === ChatParticipantRole.Client
-      && !conversation.title
-    ) {
-      void this.sessionTitleService.generateAndAssign(conversation.id, dto.text);
+    if (membership.role === ChatParticipantRole.Client && !conversation.title) {
+      void this.sessionTitleService.generateAndAssign(
+        conversation.id,
+        dto.text,
+      );
     }
 
     // Handoff lifecycle ends only via AdminChatService.resolve (claim →
@@ -488,8 +490,8 @@ export class ChatService {
     }
 
     const aiPaused =
-      conversation.handoffStatus === ChatHandoffStatus.Awaiting
-      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
+      conversation.handoffStatus === ChatHandoffStatus.Awaiting ||
+      conversation.handoffStatus === ChatHandoffStatus.InProgress;
     if (membership.role === ChatParticipantRole.Client && !aiPaused) {
       // Only client turns trigger an AI reply. Expert / operator turns are
       // human-authored answers to the client and must not spawn an AI echo.

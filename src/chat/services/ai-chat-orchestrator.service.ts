@@ -406,14 +406,8 @@ export class AiChatOrchestratorService {
     refusalReason?: string;
     startedAt: number;
   }): Promise<void> {
-    const {
-      input,
-      answerText,
-      handoff,
-      hooks,
-      refusalReason,
-      startedAt,
-    } = args;
+    const { input, answerText, handoff, hooks, refusalReason, startedAt } =
+      args;
 
     let savedAnswer: ChatMessage;
     let handoffRegistered = false;

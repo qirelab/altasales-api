@@ -119,8 +119,7 @@ function buildService(
             (entity as { constructor?: { name?: string } })?.constructor?.name;
           if (name === 'ChatSession') return conversationRepository;
           if (name === 'ChatMessage') return messageRepository;
-          if (name === 'ChatSessionParticipant')
-            return participantRepository;
+          if (name === 'ChatSessionParticipant') return participantRepository;
           return { create: jest.fn(), save: jest.fn() };
         },
       };
@@ -361,7 +360,7 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(arg.question).toBe('q?');
   });
 
-  it('schedules AI title generation on the client\'s first message when title is null', async () => {
+  it("schedules AI title generation on the client's first message when title is null", async () => {
     const {
       service,
       conversationRepository,
@@ -600,7 +599,10 @@ describe('ChatService.removeExpertFromClientPlatformSessions', () => {
       existingSessions: [],
     });
 
-    await service.removeExpertFromClientPlatformSessions('client-1', 'expert-99');
+    await service.removeExpertFromClientPlatformSessions(
+      'client-1',
+      'expert-99',
+    );
 
     expect(participantRepository.delete).not.toHaveBeenCalled();
   });
@@ -614,7 +616,10 @@ describe('ChatService.removeExpertFromClientPlatformSessions', () => {
       existingSessions: sessions,
     });
 
-    await service.removeExpertFromClientPlatformSessions('client-1', 'expert-99');
+    await service.removeExpertFromClientPlatformSessions(
+      'client-1',
+      'expert-99',
+    );
 
     expect(participantRepository.delete).toHaveBeenCalledTimes(2);
     for (const call of participantRepository.delete.mock.calls) {

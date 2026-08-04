@@ -143,7 +143,9 @@ export class ChatStreamingService {
       savedClientMessage = await this.messageRepository.save(clientMessage);
 
       const now = new Date();
-      await this.conversationRepository.update(conversation.id, { updatedAt: now });
+      await this.conversationRepository.update(conversation.id, {
+        updatedAt: now,
+      });
 
       // Fire-and-forget AI-generated session title on the first client turn.
       // Doesn't block the streaming pipeline — the sidebar picks up the new
@@ -193,8 +195,8 @@ export class ChatStreamingService {
     // Skip the AI turn while operator handoff owns the thread. The client
     // message is already persisted and broadcast above so the operator sees it.
     if (
-      conversation.handoffStatus === ChatHandoffStatus.Awaiting
-      || conversation.handoffStatus === ChatHandoffStatus.InProgress
+      conversation.handoffStatus === ChatHandoffStatus.Awaiting ||
+      conversation.handoffStatus === ChatHandoffStatus.InProgress
     ) {
       hooks.onDone(savedClientMessage);
       return;

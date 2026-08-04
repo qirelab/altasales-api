@@ -46,10 +46,15 @@ export const HANDOFF_NO_CONTEXT_MESSAGE =
 export const HANDOFF_INFRA_ERROR_MESSAGE =
   HANDOFF_ANNOUNCE_BY_TRIGGER[ChatHandoffTrigger.RagInfraError];
 
-export function formatParticipantDisplayName(person: {
-  name?: string | null;
-  lastName?: string | null;
-} | null | undefined): string {
+export function formatParticipantDisplayName(
+  person:
+    | {
+        name?: string | null;
+        lastName?: string | null;
+      }
+    | null
+    | undefined,
+): string {
   if (!person) return 'специалист AltaSales';
   const parts = [person.name, person.lastName]
     .filter((part): part is string => Boolean(part && part.trim().length > 0))
