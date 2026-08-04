@@ -11,7 +11,12 @@ import { DataSource, In, Not, Repository } from 'typeorm';
 import { Questionnaire } from '../../questionnaires/entities/questionnaire.entity';
 import { User } from '../../users/entities/user.entity';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
-import { AI_SYSTEM_USER_ID } from '../chat.constants';
+import {
+  AI_SYSTEM_USER_ID,
+  formatHandoffResolvedAnnouncement,
+  formatOperatorJoinedAnnouncement,
+  formatParticipantDisplayName,
+} from '../chat.constants';
 import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatParticipantRole } from '../entities/chat-participant-role.enum';
@@ -180,7 +185,13 @@ export class AdminChatService {
     });
 
     const fresh = await this.loadPlatformSession(sessionId);
-    await this.postClaimAnnouncement(fresh, claimedAt);
+    await this.postAiAnnouncement(
+      fresh,
+      formatOperatorJoinedAnnouncement(
+        formatParticipantDisplayName(fresh.assignedOperator),
+      ),
+      claimedAt,
+    );
     this.broadcast(fresh, operatorId, 'chat:handoff_claimed', {
       sessionId: fresh.id,
       operatorId,
@@ -191,22 +202,22 @@ export class AdminChatService {
     return this.loadSingleView(fresh);
   }
 
-  private async postClaimAnnouncement(
+  /**
+   * Persist a natural AI bubble and fan out `chat:new_message` to every
+   * participant. Used for claim / resolve so the client transcript shows
+   * handoff transitions as normal AI replies, not gray service lines.
+   */
+  private async postAiAnnouncement(
     session: ChatSession,
-    claimedAt: Date,
+    text: string,
+    at: Date,
   ): Promise<void> {
-    const operator = session.assignedOperator;
-    if (!operator) return;
-    const parts = [operator.name, operator.lastName]
-      .filter((part) => Boolean(part && part.trim().length > 0));
-    const fullName = parts.join(' ').trim() || 'AltaSales';
-    const text = `К чату подключился оператор ${fullName}. Дальше вам ответит он в этом же чате.`;
     const announcement = this.messageRepository.create({
       sessionId: session.id,
       senderId: AI_SYSTEM_USER_ID,
       text,
       isAiGenerated: true,
-      createdAt: claimedAt,
+      createdAt: at,
     });
     const saved = await this.messageRepository.save(announcement);
     // Bump session.updatedAt to the announcement time so sidebar listings
@@ -266,6 +277,13 @@ export class AdminChatService {
     }
 
     const fresh = await this.loadPlatformSession(sessionId);
+    await this.postAiAnnouncement(
+      fresh,
+      formatHandoffResolvedAnnouncement(
+        formatParticipantDisplayName(fresh.assignedOperator),
+      ),
+      resolvedAt,
+    );
     this.broadcast(fresh, operatorId, 'chat:handoff_resolved', {
       sessionId: fresh.id,
       resolvedAt,

@@ -42,7 +42,11 @@ export class ChatSessionParticipant {
     enum: ChatParticipantRole,
     description: 'Role of the participant inside the session',
   })
-  @Column({ type: 'enum', enum: ChatParticipantRole })
+  @Column({
+    type: 'enum',
+    enum: ChatParticipantRole,
+    enumName: 'chat_participant_role_enum',
+  })
   role: ChatParticipantRole;
 
   @ApiProperty({ description: 'Date the participant joined the session' })

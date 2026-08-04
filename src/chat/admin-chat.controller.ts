@@ -92,7 +92,8 @@ export class AdminChatController {
     description:
       'Only the operator who claimed the session (or any admin, if the ' +
       'session was claimed by nobody) can resolve. Clears the handoff ' +
-      'flags, records the timestamp, and emits `chat:handoff_resolved`.',
+      'flags, posts an AI "back online" announcement into the transcript, ' +
+      'records the timestamp, and emits `chat:handoff_resolved`.',
   })
   @ApiResponse({ status: 200 })
   @ApiResponse({ status: 403, description: 'Assigned to another operator.' })

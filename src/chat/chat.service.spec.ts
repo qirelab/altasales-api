@@ -480,7 +480,7 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(aiOrchestrator.scheduleReply).not.toHaveBeenCalled();
   });
 
-  it('resolves a pending handoff when an operator writes into the session', async () => {
+  it('does NOT auto-resolve handoff when an operator writes (resolve is explicit)', async () => {
     const {
       service,
       conversationRepository,
@@ -488,7 +488,10 @@ describe('ChatService.sendPlatformMessage', () => {
       wsGateway,
     } = buildService({ conditionalUpdateAffected: 1 });
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeSession({ needsHumanHandoff: true }),
+      makeSession({
+        needsHumanHandoff: true,
+        handoffStatus: 'in_progress',
+      }),
     );
     participantRepository.findOne.mockResolvedValueOnce({
       sessionId: 'conv-1',
@@ -500,22 +503,14 @@ describe('ChatService.sendPlatformMessage', () => {
       text: 'Hello, I am the manager',
     } as never);
 
+    expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
     );
-    expect(resolvedEvents.length).toBeGreaterThan(0);
-    // Payload must carry handoffStatus (client reducer reads it directly)
-    // and resolvedBy (matches AdminChatService.resolve shape).
-    const payload = resolvedEvents[0][2];
-    expect(payload).toMatchObject({
-      sessionId: 'conv-1',
-      handoffStatus: 'resolved',
-    });
-    expect(payload).toHaveProperty('resolvedAt');
-    expect(payload).toHaveProperty('resolvedBy');
+    expect(resolvedEvents).toHaveLength(0);
   });
 
-  it('does not reset handoff when a client writes (only human replier resolves)', async () => {
+  it('does not reset handoff when a client writes during an active handoff', async () => {
     const {
       service,
       conversationRepository,
@@ -523,7 +518,7 @@ describe('ChatService.sendPlatformMessage', () => {
       wsGateway,
     } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeSession({ needsHumanHandoff: true }),
+      makeSession({ needsHumanHandoff: true, handoffStatus: 'awaiting' }),
     );
     participantRepository.findOne.mockResolvedValueOnce({
       sessionId: 'conv-1',
@@ -536,33 +531,6 @@ describe('ChatService.sendPlatformMessage', () => {
     } as never);
 
     expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
-    const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
-      (call) => call[1] === 'chat:handoff_resolved',
-    );
-    expect(resolvedEvents).toHaveLength(0);
-  });
-
-  it('does not emit handoff_resolved when the conditional UPDATE affects zero rows', async () => {
-    const {
-      service,
-      conversationRepository,
-      participantRepository,
-      wsGateway,
-    } = buildService({ conditionalUpdateAffected: 0 });
-    conversationRepository.findOne.mockResolvedValueOnce(
-      makeSession({ needsHumanHandoff: false }),
-    );
-    participantRepository.findOne.mockResolvedValueOnce({
-      sessionId: 'conv-1',
-      userId: 'op-1',
-      role: ChatParticipantRole.Operator,
-    });
-
-    await service.sendPlatformMessage('op-1', 'conv-1', {
-      text: 'checking in',
-    } as never);
-
-    expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
     );

@@ -14,6 +14,7 @@ import { Order } from '../orders/entities/order.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
 import { ChatSessionType } from './entities/chat-session-type.enum';
+import { ChatHandoffStatus } from './entities/chat-handoff-status.enum';
 import { ChatSessionParticipant } from './entities/chat-session-participant.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatSession } from './entities/chat-session.entity';
@@ -22,7 +23,6 @@ import { GetSessionsQueryDto } from './dto/get-sessions-query.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { StartSessionDto } from './dto/start-session.dto';
 import { AI_SYSTEM_USER_ID } from './chat.constants';
-import { ChatHandoffStatus } from './entities/chat-handoff-status.enum';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
 import { SessionTitleService } from './services/session-title.service';
@@ -311,6 +311,8 @@ export class ChatService {
       needsHumanHandoff: session.needsHumanHandoff,
       handoffTrigger: session.handoffTrigger,
       handoffRequestedAt: session.handoffRequestedAt,
+      handoffStatus: session.handoffStatus,
+      assignedOperatorId: session.assignedOperatorId,
     };
   }
 
@@ -414,9 +416,10 @@ export class ChatService {
    * Send a message inside a platform conversation.
    *
    * When the client sends → we persist the message and schedule an async AI
-   * reply through AiChatOrchestratorService. When an expert or operator (a
-   * joined participant) sends → we persist and broadcast, but do NOT trigger
-   * the AI: the human is answering directly. Non-participants get 403.
+   * reply through AiChatOrchestratorService (unless a handoff is awaiting /
+   * in_progress — AI stays paused until AdminChatService.resolve).
+   * When an expert or operator sends → we persist and broadcast only; handoff
+   * stays open until the operator explicitly resolves. Non-participants get 403.
    */
   async sendPlatformMessage(
     userId: string,
@@ -452,10 +455,6 @@ export class ChatService {
     const files = await this.linkFilesToMessage(dto.fileIds, savedMessage.id);
     const now = new Date();
 
-    const isHumanReplierTurn =
-      membership.role !== ChatParticipantRole.Client &&
-      membership.role !== ChatParticipantRole.Ai;
-
     await this.conversationRepository.update(conversation.id, { updatedAt: now });
 
     // Fire-and-forget AI-generated session title on the client's first
@@ -468,27 +467,11 @@ export class ChatService {
       void this.sessionTitleService.generateAndAssign(conversation.id, dto.text);
     }
 
-    let handoffResolved = false;
-    if (isHumanReplierTurn) {
-      const result = await this.conversationRepository
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({
-          needsHumanHandoff: false,
-          handoffTrigger: null,
-          handoffRequestedAt: null,
-          // Keep handoffStatus in sync — otherwise the operator inbox
-          // (filtered by handoffStatus IN awaiting/in_progress) keeps
-          // showing the chat as active and the explicit /resolve endpoint
-          // would emit a duplicate chat:handoff_resolved event.
-          handoffStatus: ChatHandoffStatus.Resolved,
-          handoffResolvedAt: now,
-        })
-        .where('id = :id', { id: conversation.id })
-        .andWhere('"needsHumanHandoff" = true')
-        .execute();
-      handoffResolved = (result.affected ?? 0) > 0;
-    }
+    // Handoff lifecycle ends only via AdminChatService.resolve (claim →
+    // human replies → explicit resolve + AI "back online" announce).
+    // Do NOT auto-resolve on the first operator/expert message — that
+    // dropped chats from the operator inbox mid-conversation and skipped
+    // the resolve announcement the client needs.
 
     const recipientIds = await this.getRecipientIds(conversation, userId);
     const payload = {
@@ -504,49 +487,13 @@ export class ChatService {
       this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
     }
 
-    if (handoffResolved) {
-      // Match the payload shape emitted by AdminChatService.resolve so the
-      // frontend `ChatHandoffResolvedEvent` handlers always receive the
-      // required `handoffStatus` (they use it directly to upsertSession)
-      // and a `resolvedBy` we can display in the transcript.
-      const resolvedBy = await this.requireUserById(userId, 'User not found')
-        .catch(() => null);
-      const handoffPayload = {
-        sessionId: conversation.id,
-        resolvedAt: now,
-        handoffStatus: ChatHandoffStatus.Resolved,
-        resolvedBy: resolvedBy
-          ? {
-            id: resolvedBy.id,
-            name: resolvedBy.name,
-            lastName: resolvedBy.lastName,
-            email: resolvedBy.email,
-          }
-          : null,
-      };
-      this.wsGateway.emitToUser(
-        userId,
-        'chat:handoff_resolved',
-        handoffPayload,
-      );
-      for (const recipientId of recipientIds) {
-        this.wsGateway.emitToUser(
-          recipientId,
-          'chat:handoff_resolved',
-          handoffPayload,
-        );
-      }
-    }
-
-    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
+    const aiPaused =
+      conversation.handoffStatus === ChatHandoffStatus.Awaiting
       || conversation.handoffStatus === ChatHandoffStatus.InProgress;
-    if (membership.role === ChatParticipantRole.Client && !handoffPaused) {
+    if (membership.role === ChatParticipantRole.Client && !aiPaused) {
       // Only client turns trigger an AI reply. Expert / operator turns are
       // human-authored answers to the client and must not spawn an AI echo.
-      // Skip AI while a handoff is active (awaiting or in_progress): the
-      // client explicitly needs a human and the operator is either about
-      // to answer or already replying, an AI turn on top would race with
-      // them. AI resumes once the operator resolves the handoff.
+      // Skip AI while operator handoff owns the thread.
       this.aiOrchestrator.scheduleReply({
         conversation,
         clientUserId: userId,

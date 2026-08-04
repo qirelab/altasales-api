@@ -190,14 +190,12 @@ export class ChatStreamingService {
       return;
     }
 
-    // Skip the AI turn entirely while a human handoff is active — the
-    // operator is either about to answer (awaiting) or already replying
-    // (in_progress). AI resumes once resolved / null. The client message
-    // is already persisted and broadcast above so the operator inbox sees
-    // it in real time.
-    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
-      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
-    if (handoffPaused) {
+    // Skip the AI turn while operator handoff owns the thread. The client
+    // message is already persisted and broadcast above so the operator sees it.
+    if (
+      conversation.handoffStatus === ChatHandoffStatus.Awaiting
+      || conversation.handoffStatus === ChatHandoffStatus.InProgress
+    ) {
       hooks.onDone(savedClientMessage);
       return;
     }

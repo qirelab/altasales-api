@@ -255,7 +255,7 @@ export class AiChatOrchestratorService {
       `AI reply delivered for conversation ${input.conversation.id} in ${
         Date.now() - startedAt
       }ms (refusalReason=${refusalReason}, handoff=${
-        handoff.needsHandoff ? handoff.trigger : 'none'
+        handoffRegistered ? handoffTriggerType : 'none'
       })`,
     );
   }
@@ -406,8 +406,14 @@ export class AiChatOrchestratorService {
     refusalReason?: string;
     startedAt: number;
   }): Promise<void> {
-    const { input, answerText, handoff, hooks, refusalReason, startedAt } =
-      args;
+    const {
+      input,
+      answerText,
+      handoff,
+      hooks,
+      refusalReason,
+      startedAt,
+    } = args;
 
     let savedAnswer: ChatMessage;
     let handoffRegistered = false;

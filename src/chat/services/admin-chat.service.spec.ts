@@ -157,6 +157,8 @@ describe('AdminChatService', () => {
         isAiGenerated: true,
       });
       expect(savedMessages[0].text).toContain('Максим Оператор');
+      expect(savedMessages[0].text).toMatch(/^Оператор /);
+      expect(savedMessages[0].text).toMatch(/принял ваш запрос/);
     });
 
     it('throws ConflictException when the session is claimed by another operator', async () => {
@@ -198,10 +200,13 @@ describe('AdminChatService', () => {
 
   describe('resolve', () => {
     it('resolves an in_progress session claimed by the same operator', async () => {
-      const { service, wsGateway } = buildService({
+      const { service, wsGateway, savedMessages } = buildService({
         session: makeSession({
           handoffStatus: ChatHandoffStatus.InProgress,
           assignedOperatorId: 'op-1',
+          assignedOperator: {
+            id: 'op-1', name: 'Максим', lastName: 'Оператор', email: 'op@x',
+          },
         }),
       });
 
@@ -209,6 +214,14 @@ describe('AdminChatService', () => {
 
       const emittedEvents = wsGateway.emitToUser.mock.calls.map((c) => c[1]);
       expect(emittedEvents).toContain('chat:handoff_resolved');
+      expect(emittedEvents).toContain('chat:new_message');
+      expect(savedMessages).toHaveLength(1);
+      expect(savedMessages[0]).toMatchObject({
+        senderId: '00000000-0000-0000-0000-00000000a1a1',
+        isAiGenerated: true,
+      });
+      expect(savedMessages[0].text).toContain('Максим Оператор');
+      expect(savedMessages[0].text).toMatch(/снова на связи/);
     });
 
     it('throws ForbiddenException when a different operator tries to resolve', async () => {
