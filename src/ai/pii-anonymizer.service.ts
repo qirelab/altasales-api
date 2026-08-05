@@ -45,7 +45,7 @@ const PII_PATTERNS: Record<Exclude<PiiKind, 'bank_card'>, RegExp> = {
   phone: /(?:\+7|8)\s*(?:\(\d{3}\)|\d{3})[\s-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}/g,
   inn: /\b\d{10}(?:\d{2})?\b/g,
   snils: /\b\d{3}-\d{3}-\d{3}\s?\d{2}\b/g,
-  passport: /(?:passport|паспорт)\D{0,20}\b\d{2}\s?\d{2}\s?\d{6}\b/giu,
+  passport: /(?:passport|паспорт)\D{0,20}(?:\b\d{2}\s?\d{2}[\s-]?\d{6}\b|\b\d{6,10}\b)/giu,
   birth_date:
     // eslint-disable-next-line max-len -- keep the audited PII expression intact.
     /(?:birth(?:\s+date)?|date\s+of\s+birth|дата\s+рождения|родил[асься]*|рождени[ея]).{0,40}\b(?:\d{2}[./-]\d{2}[./-]\d{4}|\d{4}[./-]\d{2}[./-]\d{2})\b/giu,
