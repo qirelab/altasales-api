@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import {
   Injectable,
   InternalServerErrorException,
@@ -10,9 +11,23 @@ import {
   RopTaskListFilters,
   RopTaskRecord,
 } from './rop.types';
+
 export interface RopProject {
   id: string;
   name: string;
+}
+
+export interface RopUser {
+  id: string;
+  email: string;
+}
+
+export interface CreateRopUserPayload {
+  email: string;
+  password: string;
+  projectId: string;
+  firstName?: string | null;
+  lastName?: string | null;
 }
 
 export interface RopDocument {
@@ -95,6 +110,56 @@ export class RopService {
     return {
       id: this.normalizeId(data.id),
       name: data.name,
+    };
+  }
+
+  generateUserPassword(): string {
+    return randomBytes(24).toString('base64url');
+  }
+
+  async createUser(payload: CreateRopUserPayload): Promise<RopUser | null> {
+    this.ensureConfigured();
+
+    const projectId = Number(payload.projectId);
+    const body: Record<string, unknown> = {
+      email: payload.email.trim(),
+      password: payload.password,
+      role: 'api_client',
+      project_id: Number.isFinite(projectId) ? projectId : payload.projectId,
+    };
+    if (payload.firstName?.trim()) {
+      body.first_name = payload.firstName.trim();
+    }
+    if (payload.lastName?.trim()) {
+      body.last_name = payload.lastName.trim();
+    }
+
+    const response = await fetch(`${this.apiUrl}/users`, {
+      method: 'POST',
+      headers: this.jsonHeaders,
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 409) {
+      this.logger.warn(
+        `ROP user already exists for email ${payload.email.trim()}`,
+      );
+      return null;
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      this.logRopFailure('create user', response, error);
+      throw new InternalServerErrorException('Failed to create user in ROP');
+    }
+
+    const data = (await response.json()) as {
+      id: string | number;
+      email: string;
+    };
+    return {
+      id: this.normalizeId(data.id),
+      email: data.email,
     };
   }
 
@@ -524,6 +589,13 @@ export class RopService {
         body: JSON.stringify(body),
       },
     );
+
+    if (response.status === 404) {
+      this.logger.warn(
+        `ROP deactivate skipped: user/project not found for ${payload.email}`,
+      );
+      return;
+    }
 
     if (!response.ok) {
       const error = await response.text();

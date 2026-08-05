@@ -75,7 +75,7 @@ export class RopSubscriptionService {
       return;
     }
 
-    const projectId = await this.ropProvisioningService.ensureProjectForUser(
+    const projectId = await this.ropProvisioningService.ensureProvisionedForUser(
       userId,
     );
     if (!projectId) {
@@ -95,6 +95,13 @@ export class RopSubscriptionService {
       await this.ropService.activateSubscription({ ...payload, tariff });
       this.logger.log(
         `Activated ROP tariff "${tariff}" for user ${userId} (project ${projectId})`,
+      );
+      return;
+    }
+
+    if (!(await this.hasAnyTariffProductOrder(userId))) {
+      this.logger.log(
+        `ROP subscription sync: no tariff for user ${userId}, skip deactivate`,
       );
       return;
     }
@@ -124,6 +131,17 @@ export class RopSubscriptionService {
     return pickHighestTariff(tariffs);
   }
 
+  private async hasAnyTariffProductOrder(userId: string): Promise<boolean> {
+    const orders = await this.orderRepository.find({
+      where: { userId },
+      relations: [...ORDER_SUBSCRIPTION_RELATIONS],
+    });
+
+    return orders.some((order) =>
+      this.collectTariffsFromOrder(order).some((tariff) => Boolean(tariff)),
+    );
+  }
+
   private collectTariffsFromOrder(
     order: Order,
   ): Array<RopTariffKey | null | undefined> {
@@ -132,8 +150,6 @@ export class RopSubscriptionService {
       return [];
     }
 
-    // Only the purchased product (service or package) decides the tariff.
-    // Nested package services are ignored — set ropTariff on the package itself.
     return [item.service?.ropTariff, item.package?.ropTariff];
   }
 }

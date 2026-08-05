@@ -60,6 +60,14 @@ export class User {
   ropProjectId: string | null;
 
   @ApiPropertyOptional({
+    example: '12',
+    description: 'ROP user ID created via External API',
+    nullable: true,
+  })
+  @Column({ type: 'varchar', nullable: true })
+  ropUserId: string | null;
+
+  @ApiPropertyOptional({
     example: 12,
     description: 'Years of professional experience (for expert role)',
     nullable: true,
