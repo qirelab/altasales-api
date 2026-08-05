@@ -11,6 +11,7 @@ import { ChatSession } from '../entities/chat-session.entity';
 import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
 
 const TITLE_MAX_LENGTH = 60;
+const FALLBACK_TITLE = 'Разговор с AI-консультантом';
 const TITLE_SYSTEM_PROMPT =
   'Ты — генератор заголовков для чат-сессий. Верни ровно короткий заголовок ' +
   'на русском языке в 3–6 слов, отражающий тему первого сообщения пользователя. ' +
@@ -37,7 +38,8 @@ export class SessionTitleService {
   // Fire-and-forget from the two client-send paths. Generates a short AI
   // title from the very first client message, persists it, and pushes a
   // `chat:session_updated` WS event so open sidebars refresh without waiting
-  // for the next full sessions refetch.
+  // for the next full sessions refetch. If the LLM is unavailable, assigns a
+  // deterministic fallback from the first message so the UI never spins forever.
   async generateAndAssign(sessionId: string, firstMessageText: string): Promise<void> {
     const trimmed = firstMessageText.trim();
     if (!trimmed) return;
@@ -45,47 +47,79 @@ export class SessionTitleService {
     this.inFlight.add(sessionId);
 
     try {
-      const response = await this.llm.chat({
-        agentId: AgentId.Chatbot,
-        task: LlmTask.Summarize,
-        declaredDataClass: DataClass.RawPii,
-        messages: [
-          { role: 'system', content: TITLE_SYSTEM_PROMPT },
-          { role: 'user', content: trimmed },
-        ],
-      });
-
-      const title = this.sanitize(response.content);
-      if (!title) return;
-
-      // Conditional UPDATE — do not overwrite a title someone else already set
-      // (concurrent race between sendPlatformMessage and streaming endpoints).
-      const result = await this.sessionRepository
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({ title })
-        .where('id = :id', { id: sessionId })
-        .andWhere('"title" IS NULL')
-        .execute();
-      if ((result.affected ?? 0) === 0) return;
-
-      const participants = await this.participantRepository.find({
-        where: { sessionId },
-      });
-      const payload = { sessionId, title };
-      for (const p of participants) {
-        if (p.userId === AI_SYSTEM_USER_ID) continue;
-        this.wsGateway.emitToUser(p.userId, 'chat:session_updated', payload);
+      let title = await this.generateAiTitle(trimmed);
+      if (!title) {
+        title = this.fallbackFromMessage(trimmed);
       }
+      await this.persistAndBroadcast(sessionId, title);
     } catch (error) {
       this.logger.warn(
         `Failed to generate session title for ${sessionId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      try {
+        await this.persistAndBroadcast(
+          sessionId,
+          this.fallbackFromMessage(trimmed),
+        );
+      } catch (fallbackError) {
+        this.logger.warn(
+          `Failed to assign fallback session title for ${sessionId}: ${
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : String(fallbackError)
+          }`,
+        );
+      }
     } finally {
       this.inFlight.delete(sessionId);
     }
+  }
+
+  private async generateAiTitle(trimmed: string): Promise<string> {
+    const response = await this.llm.chat({
+      agentId: AgentId.Chatbot,
+      task: LlmTask.Summarize,
+      declaredDataClass: DataClass.RawPii,
+      messages: [
+        { role: 'system', content: TITLE_SYSTEM_PROMPT },
+        { role: 'user', content: trimmed },
+      ],
+    });
+    return this.sanitize(response.content);
+  }
+
+  private async persistAndBroadcast(
+    sessionId: string,
+    title: string,
+  ): Promise<void> {
+    // Conditional UPDATE — do not overwrite a title someone else already set
+    // (concurrent race between sendPlatformMessage and streaming endpoints).
+    const result = await this.sessionRepository
+      .createQueryBuilder()
+      .update(ChatSession)
+      .set({ title })
+      .where('id = :id', { id: sessionId })
+      .andWhere('"title" IS NULL')
+      .execute();
+    if ((result.affected ?? 0) === 0) return;
+
+    const participants = await this.participantRepository.find({
+      where: { sessionId },
+    });
+    const payload = { sessionId, title };
+    for (const p of participants) {
+      if (p.userId === AI_SYSTEM_USER_ID) continue;
+      this.wsGateway.emitToUser(p.userId, 'chat:session_updated', payload);
+    }
+  }
+
+  private fallbackFromMessage(text: string): string {
+    const collapsed = text.replace(/\s+/g, ' ').trim();
+    if (!collapsed) return FALLBACK_TITLE;
+    if (collapsed.length <= TITLE_MAX_LENGTH) return collapsed;
+    return `${collapsed.slice(0, TITLE_MAX_LENGTH - 1).trimEnd()}…`;
   }
 
   private sanitize(raw: string): string {
