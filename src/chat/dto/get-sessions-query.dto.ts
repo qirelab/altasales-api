@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsInt, Min, Max } from 'class-validator';
+import { IsEnum, IsOptional, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 
 export class GetSessionsQueryDto {
   @ApiPropertyOptional({ example: 0, default: 0, minimum: 0 })
@@ -17,4 +18,12 @@ export class GetSessionsQueryDto {
   @Min(1)
   @Max(100)
   limit?: number = 20;
+
+  @ApiPropertyOptional({
+    enum: ChatSessionType,
+    description: 'Filter by session type (platform or expert)',
+  })
+  @IsOptional()
+  @IsEnum(ChatSessionType)
+  type?: ChatSessionType;
 }

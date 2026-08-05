@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { ChatService } from '../chat/chat.service';
 import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
@@ -38,6 +39,7 @@ export class OrderNotificationService {
     private readonly mailService: MailService,
     private readonly websocketGateway: WebSocketGatewayService,
     private readonly configService: ConfigService,
+    private readonly chatService: ChatService,
   ) {}
 
   async notifyOrderPaid(orderIds: string[]): Promise<void> {
@@ -45,6 +47,17 @@ export class OrderNotificationService {
       `notifyOrderPaid invoked for orders: ${orderIds.join(', ')}`,
     );
     if (!orderIds.length) return;
+
+    try {
+      await this.chatService.ensureExpertSessionsForPaidOrders(orderIds);
+    } catch (error) {
+      this.logger.error(
+        `ensureExpertSessionsForPaidOrders failed for ${orderIds.join(', ')}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
 
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },

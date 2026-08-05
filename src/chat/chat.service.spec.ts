@@ -119,8 +119,7 @@ function buildService(
             (entity as { constructor?: { name?: string } })?.constructor?.name;
           if (name === 'ChatSession') return conversationRepository;
           if (name === 'ChatMessage') return messageRepository;
-          if (name === 'ChatSessionParticipant')
-            return participantRepository;
+          if (name === 'ChatSessionParticipant') return participantRepository;
           return { create: jest.fn(), save: jest.fn() };
         },
       };
@@ -130,6 +129,15 @@ function buildService(
 
   const sessionTitleService = {
     generateAndAssign: jest.fn().mockResolvedValue(undefined),
+  };
+  const handoffService = {
+    isAiPausedByHandoff: jest.fn(
+      (session: { handoffStatus?: string | null }) =>
+        session.handoffStatus === 'awaiting' ||
+        session.handoffStatus === 'in_progress',
+    ),
+    autoClaimOnExpertReply: jest.fn().mockResolvedValue(false),
+    ensureExpertActiveOnReply: jest.fn().mockResolvedValue('noop'),
   };
   const service = new ChatService(
     conversationRepository as never,
@@ -141,6 +149,7 @@ function buildService(
     filesService as never,
     aiOrchestrator as never,
     sessionTitleService as never,
+    handoffService as never,
     dataSource as never,
   );
 
@@ -151,6 +160,7 @@ function buildService(
     messageRepository,
     participantRepository,
     userRepository,
+    orderRepository,
     wsGateway,
     aiOrchestrator,
     dataSource,
@@ -298,16 +308,36 @@ describe('ChatService.sendPlatformMessage', () => {
     };
   }
 
-  it('rejects with 400 when session is not platform-type', async () => {
-    const { service, conversationRepository } = buildService();
+  it('accepts expert-type sessions and schedules AI for the client', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      aiOrchestrator,
+    } = buildService({
+      existingParticipant: {
+        userId: 'client-1',
+        role: ChatParticipantRole.Client,
+      },
+    });
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeSession({ type: ChatSessionType.Expert }),
+      makeSession({
+        type: ChatSessionType.Expert,
+        orderId: 'order-1',
+        participantOneId: 'client-1',
+        participantTwoId: 'expert-1',
+      }),
     );
-    await expect(
-      service.sendPlatformMessage('client-1', 'conv-1', {
-        text: 'hi',
-      } as never),
-    ).rejects.toThrow(BadRequestException);
+    participantRepository.findOne.mockResolvedValueOnce({
+      userId: 'client-1',
+      role: ChatParticipantRole.Client,
+    });
+
+    await service.sendPlatformMessage('client-1', 'conv-1', {
+      text: 'hi',
+    } as never);
+
+    expect(aiOrchestrator.scheduleReply).toHaveBeenCalled();
   });
 
   it('rejects with 403 when user is not a member', async () => {
@@ -361,7 +391,7 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(arg.question).toBe('q?');
   });
 
-  it('schedules AI title generation on the client\'s first message when title is null', async () => {
+  it("schedules AI title generation on the client's first message when title is null", async () => {
     const {
       service,
       conversationRepository,
@@ -632,7 +662,10 @@ describe('ChatService.removeExpertFromClientPlatformSessions', () => {
       existingSessions: [],
     });
 
-    await service.removeExpertFromClientPlatformSessions('client-1', 'expert-99');
+    await service.removeExpertFromClientPlatformSessions(
+      'client-1',
+      'expert-99',
+    );
 
     expect(participantRepository.delete).not.toHaveBeenCalled();
   });
@@ -646,7 +679,10 @@ describe('ChatService.removeExpertFromClientPlatformSessions', () => {
       existingSessions: sessions,
     });
 
-    await service.removeExpertFromClientPlatformSessions('client-1', 'expert-99');
+    await service.removeExpertFromClientPlatformSessions(
+      'client-1',
+      'expert-99',
+    );
 
     expect(participantRepository.delete).toHaveBeenCalledTimes(2);
     for (const call of participantRepository.delete.mock.calls) {
@@ -657,5 +693,119 @@ describe('ChatService.removeExpertFromClientPlatformSessions', () => {
         }),
       );
     }
+  });
+});
+
+describe('ChatService.ensureExpertServiceSession', () => {
+  it('creates an expert session with client, AI and expert participants', async () => {
+    const { service, conversationRepository, dataSource } = buildService({
+      users: {
+        'client-1': makeUser({ id: 'client-1' }),
+        'expert-1': makeUser({ id: 'expert-1', role: UserRole.EXPERT }),
+      },
+    });
+
+    const session = await service.ensureExpertServiceSession(
+      'client-1',
+      'expert-1',
+      'order-1',
+      'Аудит воронки',
+    );
+
+    expect(session.type).toBe(ChatSessionType.Expert);
+    expect(session.orderId).toBe('order-1');
+    expect(session.title).toBe('Аудит воронки');
+    expect(dataSource.transaction).toHaveBeenCalled();
+    expect(conversationRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: ChatSessionType.Expert,
+        orderId: 'order-1',
+      }),
+    );
+  });
+
+  it('is idempotent when the session already exists', async () => {
+    const existing = {
+      id: 'existing-expert-sess',
+      type: ChatSessionType.Expert,
+      orderId: 'order-1',
+      title: 'Аудит воронки',
+      participantOneId: 'client-1',
+      participantTwoId: 'expert-1',
+    };
+    const { service, dataSource, participantRepository } = buildService({
+      existingSession: existing,
+    });
+
+    const session = await service.ensureExpertServiceSession(
+      'client-1',
+      'expert-1',
+      'order-1',
+      'Аудит воронки',
+    );
+
+    expect(session.id).toBe('existing-expert-sess');
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(participantRepository.save).toHaveBeenCalled();
+  });
+
+  it('skips AI reply when expert order is completed', async () => {
+    const { service, aiOrchestrator, orderRepository, participantRepository } =
+      buildService({
+        existingSession: {
+          id: 'expert-sess',
+          type: ChatSessionType.Expert,
+          orderId: 'order-1',
+          title: 'Аудит',
+          handoffStatus: null,
+        },
+        existingParticipant: {
+          userId: 'client-1',
+          role: ChatParticipantRole.Client,
+        },
+        users: { 'client-1': makeUser() },
+      });
+    orderRepository.findOne.mockResolvedValue({
+      id: 'order-1',
+      status: 'completed',
+    });
+
+    await service.sendPlatformMessage('client-1', 'expert-sess', {
+      text: 'Вопрос по аудиту',
+    });
+
+    expect(aiOrchestrator.scheduleReply).not.toHaveBeenCalled();
+    expect(participantRepository.findOne).toHaveBeenCalled();
+  });
+
+  it('ensureExpertSessionsForUser creates sessions for prior paid purchases', async () => {
+    const order = {
+      id: 'legacy-order',
+      userId: 'client-1',
+      status: 'planned',
+      item: {
+        executorUserId: 'expert-1',
+        service: { name: 'Аудит воронки', description: 'desc' },
+      },
+    };
+    const { service, orderRepository, dataSource } = buildService({
+      users: {
+        'client-1': makeUser({ id: 'client-1' }),
+        'expert-1': makeUser({ id: 'expert-1', role: UserRole.EXPERT }),
+      },
+    });
+    const qb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn(),
+    };
+    // First call = asClient, second = asExpert
+    qb.getMany.mockResolvedValueOnce([order]).mockResolvedValueOnce([]);
+    orderRepository.createQueryBuilder = jest.fn(() => qb);
+
+    await service.ensureExpertSessionsForUser('client-1');
+
+    expect(dataSource.transaction).toHaveBeenCalled();
   });
 });

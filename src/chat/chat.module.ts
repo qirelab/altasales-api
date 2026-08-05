@@ -11,9 +11,12 @@ import { ChatSession } from './entities/chat-session.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { ChatSessionParticipant } from './entities/chat-session-participant.entity';
 import { AdminChatController } from './admin-chat.controller';
+import { ExpertChatController } from './expert-chat.controller';
 import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { AdminChatService } from './services/admin-chat.service';
+import { ExpertChatService } from './services/expert-chat.service';
+import { HandoffService } from './services/handoff.service';
 import { ChatHistoryMapperService } from './services/chat-history-mapper.service';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { ChatStreamingService } from './services/chat-streaming.service';
@@ -34,15 +37,17 @@ import { SessionTitleService } from './services/session-title.service';
     FilesModule,
     ChatbotModule,
   ],
-  controllers: [ChatController, AdminChatController],
+  controllers: [ChatController, AdminChatController, ExpertChatController],
   providers: [
     ChatService,
     AdminChatService,
+    ExpertChatService,
+    HandoffService,
     ChatHistoryMapperService,
     AiChatOrchestratorService,
     ChatStreamingService,
     SessionTitleService,
   ],
-  exports: [ChatService, AdminChatService],
+  exports: [ChatService, AdminChatService, ExpertChatService],
 })
 export class ChatModule {}

@@ -128,12 +128,17 @@ describe('AiChatOrchestratorService', () => {
     const wsGateway = {
       emitToUser: jest.fn(),
     };
+    const orderRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      find: jest.fn().mockResolvedValue([]),
+    };
     const historyMapper = new ChatHistoryMapperService();
     const handoffTrigger = new HandoffTriggerService();
     const orchestrator = new AiChatOrchestratorService(
       messageRepository as never,
       conversationRepository as never,
       participantRepository as never,
+      orderRepository as never,
       ragService as never,
       historyMapper,
       wsGateway as never,

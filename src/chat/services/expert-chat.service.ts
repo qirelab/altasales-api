@@ -4,19 +4,22 @@ import { In, Repository } from 'typeorm';
 import { Questionnaire } from '../../questionnaires/entities/questionnaire.entity';
 import { User } from '../../users/entities/user.entity';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
+import { ChatService } from '../chat.service';
 import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatParticipantRole } from '../entities/chat-participant-role.enum';
 import { ChatSession } from '../entities/chat-session.entity';
+import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
 import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { HandoffService } from './handoff.service';
 
-export type OperatorSessionFilter = 'active' | 'resolved';
+export type ExpertSessionFilter = 'all' | 'active' | 'resolved';
 
-export type OperatorSessionView = {
+export type ExpertSessionView = {
   id: string;
   type: string;
   title: string | null;
+  orderId: string | null;
   updatedAt: Date;
   participant: {
     id: string;
@@ -37,8 +40,8 @@ export type OperatorSessionView = {
   handoffRequestedAt: Date | null;
   handoffClaimedAt: Date | null;
   handoffResolvedAt: Date | null;
-  assignedOperatorId: string | null;
-  assignedOperator: {
+  assignedExpertId: string | null;
+  assignedExpert: {
     id: string;
     name: string;
     lastName: string;
@@ -53,7 +56,7 @@ const ACTIVE_STATUSES = [
 ] as const;
 
 @Injectable()
-export class AdminChatService {
+export class ExpertChatService {
   constructor(
     @InjectRepository(ChatSession)
     private readonly sessionRepository: Repository<ChatSession>,
@@ -62,46 +65,57 @@ export class AdminChatService {
     @InjectRepository(Questionnaire)
     private readonly questionnaireRepository: Repository<Questionnaire>,
     private readonly handoffService: HandoffService,
+    private readonly chatService: ChatService,
   ) {}
 
-  async listOperatorSessions(
-    filter: OperatorSessionFilter,
-  ): Promise<OperatorSessionView[]> {
-    const where =
-      filter === 'resolved'
-        ? {
-            type: ChatSessionType.Platform,
-            handoffStatus: ChatHandoffStatus.Resolved,
-          }
-        : {
-            type: ChatSessionType.Platform,
-            handoffStatus: In(
-              ACTIVE_STATUSES as unknown as ChatHandoffStatus[],
-            ),
-          };
-    const rows = await this.sessionRepository.find({
-      where,
-      relations: ['participantOne', 'participantTwo', 'assignedOperator'],
-      order: { updatedAt: 'DESC' },
-      take: 200,
-    });
+  async listExpertSessions(
+    expertId: string,
+    filter: ExpertSessionFilter,
+  ): Promise<ExpertSessionView[]> {
+    // Purchases made before the feature still need sessions.
+    await this.chatService.ensureExpertSessionsForUser(expertId);
+
+    const qb = this.sessionRepository
+      .createQueryBuilder('s')
+      .innerJoin(
+        ChatSessionParticipant,
+        'p',
+        'p."sessionId" = s.id AND p."userId" = :expertId AND p.role = :expertRole',
+        { expertId, expertRole: ChatParticipantRole.Expert },
+      )
+      .leftJoinAndSelect('s.participantOne', 'p1')
+      .leftJoinAndSelect('s.participantTwo', 'p2')
+      .leftJoinAndSelect('s.assignedOperator', 'assignee')
+      .where('s.type = :type', { type: ChatSessionType.Expert })
+      .orderBy('s.updatedAt', 'DESC')
+      .take(200);
+
+    if (filter === 'resolved') {
+      qb.andWhere('s."handoffStatus" = :resolved', {
+        resolved: ChatHandoffStatus.Resolved,
+      });
+    } else if (filter === 'active') {
+      qb.andWhere('s."handoffStatus" IN (:...active)', {
+        active: [...ACTIVE_STATUSES],
+      });
+    }
+    // filter === 'all' → no handoffStatus constraint (all purchased-service chats)
+
+    const rows = await qb.getMany();
     if (rows.length === 0) return [];
 
     const sessionIds = rows.map((r) => r.id);
     const clientIds = rows
-      .map((r) => pickClient(r)?.id)
+      .map((r) => pickClient(r, expertId)?.id)
       .filter((id): id is string => Boolean(id));
 
-    const lastMessages =
-      sessionIds.length > 0
-        ? await this.messageRepository
-            .createQueryBuilder('m')
-            .distinctOn(['m."sessionId"'])
-            .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
-            .orderBy('m."sessionId"')
-            .addOrderBy('m."createdAt"', 'DESC')
-            .getMany()
-        : [];
+    const lastMessages = await this.messageRepository
+      .createQueryBuilder('m')
+      .distinctOn(['m."sessionId"'])
+      .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
+      .orderBy('m."sessionId"')
+      .addOrderBy('m."createdAt"', 'DESC')
+      .getMany();
     const lastMessageBySession = new Map<string, ChatMessage>();
     for (const m of lastMessages) lastMessageBySession.set(m.sessionId, m);
 
@@ -121,49 +135,49 @@ export class AdminChatService {
     return rows.map((row) =>
       this.toView(
         row,
+        expertId,
         lastMessageBySession.get(row.id) ?? null,
-        companyByUserId.get(pickClient(row)?.id ?? '') ?? null,
+        companyByUserId.get(pickClient(row, expertId)?.id ?? '') ?? null,
       ),
     );
   }
 
-  async claim(
-    operatorId: string,
-    sessionId: string,
-  ): Promise<OperatorSessionView> {
+  async claim(expertId: string, sessionId: string): Promise<ExpertSessionView> {
     const session = await this.handoffService.claim({
       sessionId,
-      assigneeId: operatorId,
-      expectedType: ChatSessionType.Platform,
-      participantRole: ChatParticipantRole.Operator,
-      roleLabel: 'operator',
+      assigneeId: expertId,
+      expectedType: ChatSessionType.Expert,
+      participantRole: ChatParticipantRole.Expert,
+      roleLabel: 'expert',
     });
-    return this.loadSingleView(session);
+    return this.loadSingleView(session, expertId);
   }
 
   async resolve(
-    operatorId: string,
+    expertId: string,
     sessionId: string,
-  ): Promise<OperatorSessionView> {
+  ): Promise<ExpertSessionView> {
     const session = await this.handoffService.resolve({
       sessionId,
-      resolverId: operatorId,
-      expectedType: ChatSessionType.Platform,
-      roleLabel: 'operator',
+      resolverId: expertId,
+      expectedType: ChatSessionType.Expert,
+      roleLabel: 'expert',
     });
-    return this.loadSingleView(session);
+    return this.loadSingleView(session, expertId);
   }
 
   private toView(
     session: ChatSession,
+    expertId: string,
     lastMessage: ChatMessage | null,
     companyName: string | null,
-  ): OperatorSessionView {
-    const client = pickClient(session);
+  ): ExpertSessionView {
+    const client = pickClient(session, expertId);
     return {
       id: session.id,
       type: session.type,
       title: session.title,
+      orderId: session.orderId,
       updatedAt: session.updatedAt,
       participant: pickUser(client, companyName),
       lastMessage: lastMessage
@@ -180,15 +194,16 @@ export class AdminChatService {
       handoffRequestedAt: session.handoffRequestedAt,
       handoffClaimedAt: session.handoffClaimedAt,
       handoffResolvedAt: session.handoffResolvedAt,
-      assignedOperatorId: session.assignedOperatorId,
-      assignedOperator: pickUser(session.assignedOperator, null),
+      assignedExpertId: session.assignedOperatorId,
+      assignedExpert: pickUser(session.assignedOperator, null),
     };
   }
 
   private async loadSingleView(
     session: ChatSession,
-  ): Promise<OperatorSessionView> {
-    const client = pickClient(session);
+    expertId: string,
+  ): Promise<ExpertSessionView> {
+    const client = pickClient(session, expertId);
     const [lastMessage, companyName] = await Promise.all([
       this.messageRepository.findOne({
         where: { sessionId: session.id },
@@ -196,7 +211,7 @@ export class AdminChatService {
       }),
       this.loadCompanyName(client?.id),
     ]);
-    return this.toView(session, lastMessage, companyName);
+    return this.toView(session, expertId, lastMessage, companyName);
   }
 
   private async loadCompanyName(
@@ -213,16 +228,18 @@ export class AdminChatService {
   }
 }
 
-function pickClient(session: ChatSession): User | null {
+function pickClient(session: ChatSession, expertId: string): User | null {
   if (
     session.participantOne &&
-    session.participantOne.id !== AI_SYSTEM_USER_ID
+    session.participantOne.id !== AI_SYSTEM_USER_ID &&
+    session.participantOne.id !== expertId
   ) {
     return session.participantOne;
   }
   if (
     session.participantTwo &&
-    session.participantTwo.id !== AI_SYSTEM_USER_ID
+    session.participantTwo.id !== AI_SYSTEM_USER_ID &&
+    session.participantTwo.id !== expertId
   ) {
     return session.participantTwo;
   }
