@@ -29,6 +29,13 @@ import { ChatThrottlerGuard } from './guards/chat-throttler.guard';
 import { ExpertChatService } from './services/expert-chat.service';
 import type { ExpertSessionFilter } from './services/expert-chat.service';
 
+const expertSessionFilterQuery = () =>
+  Query(
+    'filter',
+    new DefaultValuePipe('all'),
+    new ParseEnumPipe(['all', 'active', 'resolved']),
+  );
+
 @ApiTags('chat-expert')
 @ApiCookieAuth('session')
 @UseGuards(SessionGuard, RolesGuard)
@@ -53,12 +60,7 @@ export class ExpertChatController {
   })
   listSessions(
     @CurrentUser() user: CurrentUserData,
-    @Query(
-      'filter',
-      new DefaultValuePipe('all'),
-      new ParseEnumPipe(['all', 'active', 'resolved']),
-    )
-      filter: ExpertSessionFilter,
+    @expertSessionFilterQuery() filter: ExpertSessionFilter,
   ) {
     return this.expertChatService.listExpertSessions(user.id, filter);
   }

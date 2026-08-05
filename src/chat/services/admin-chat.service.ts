@@ -67,18 +67,21 @@ export class AdminChatService {
   async listOperatorSessions(
     filter: OperatorSessionFilter,
   ): Promise<OperatorSessionView[]> {
-    const where =
-      filter === 'resolved'
-        ? {
-          type: ChatSessionType.Platform,
-          handoffStatus: ChatHandoffStatus.Resolved,
-        }
-        : {
-          type: ChatSessionType.Platform,
-          handoffStatus: In(
-              ACTIVE_STATUSES as unknown as ChatHandoffStatus[],
-          ),
-        };
+    let where: {
+      type: ChatSessionType;
+      handoffStatus: ChatHandoffStatus | ReturnType<typeof In>;
+    };
+    if (filter === 'resolved') {
+      where = {
+        type: ChatSessionType.Platform,
+        handoffStatus: ChatHandoffStatus.Resolved,
+      };
+    } else {
+      where = {
+        type: ChatSessionType.Platform,
+        handoffStatus: In(ACTIVE_STATUSES as unknown as ChatHandoffStatus[]),
+      };
+    }
     const rows = await this.sessionRepository.find({
       where,
       relations: ['participantOne', 'participantTwo', 'assignedOperator'],
@@ -92,25 +95,25 @@ export class AdminChatService {
       .map((r) => pickClient(r)?.id)
       .filter((id): id is string => Boolean(id));
 
-    const lastMessages =
-      sessionIds.length > 0
-        ? await this.messageRepository
-          .createQueryBuilder('m')
-          .distinctOn(['m."sessionId"'])
-          .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
-          .orderBy('m."sessionId"')
-          .addOrderBy('m."createdAt"', 'DESC')
-          .getMany()
-        : [];
+    let lastMessages: ChatMessage[] = [];
+    if (sessionIds.length > 0) {
+      lastMessages = await this.messageRepository
+        .createQueryBuilder('m')
+        .distinctOn(['m."sessionId"'])
+        .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
+        .orderBy('m."sessionId"')
+        .addOrderBy('m."createdAt"', 'DESC')
+        .getMany();
+    }
     const lastMessageBySession = new Map<string, ChatMessage>();
     for (const m of lastMessages) lastMessageBySession.set(m.sessionId, m);
 
-    const questionnaires =
-      clientIds.length > 0
-        ? await this.questionnaireRepository.find({
-          where: { userId: In(clientIds) },
-        })
-        : [];
+    let questionnaires: Questionnaire[] = [];
+    if (clientIds.length > 0) {
+      questionnaires = await this.questionnaireRepository.find({
+        where: { userId: In(clientIds) },
+      });
+    }
     const companyByUserId = new Map<string, string | null>();
     for (const q of questionnaires) {
       const raw = q.answers?.companyName;
@@ -166,15 +169,7 @@ export class AdminChatService {
       title: session.title,
       updatedAt: session.updatedAt,
       participant: pickUser(client, companyName),
-      lastMessage: lastMessage
-        ? {
-          id: lastMessage.id,
-          text: lastMessage.text,
-          senderId: lastMessage.senderId,
-          isAiGenerated: lastMessage.isAiGenerated,
-          createdAt: lastMessage.createdAt,
-        }
-        : null,
+      lastMessage: pickLastMessage(lastMessage),
       needsHumanHandoff: session.needsHumanHandoff,
       handoffStatus: session.handoffStatus,
       handoffRequestedAt: session.handoffRequestedAt,
@@ -246,5 +241,22 @@ function pickUser(
     lastName: user.lastName,
     email: user.email,
     companyName,
+  };
+}
+
+function pickLastMessage(lastMessage: ChatMessage | null): {
+  id: string;
+  text: string;
+  senderId: string;
+  isAiGenerated: boolean;
+  createdAt: Date;
+} | null {
+  if (!lastMessage) return null;
+  return {
+    id: lastMessage.id,
+    text: lastMessage.text,
+    senderId: lastMessage.senderId,
+    isAiGenerated: lastMessage.isAiGenerated,
+    createdAt: lastMessage.createdAt,
   };
 }

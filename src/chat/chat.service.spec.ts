@@ -391,7 +391,7 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(arg.question).toBe('q?');
   });
 
-  it('schedules AI title generation on the client\'s first message when title is null', async () => {
+  it('schedules AI title generation on the first client message when title is null', async () => {
     const {
       service,
       conversationRepository,

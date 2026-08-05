@@ -545,14 +545,7 @@ export class ChatService {
         sessionId: conversation.id,
         resolvedAt: now,
         handoffStatus: ChatHandoffStatus.Resolved,
-        resolvedBy: resolvedBy
-          ? {
-            id: resolvedBy.id,
-            name: resolvedBy.name,
-            lastName: resolvedBy.lastName,
-            email: resolvedBy.email,
-          }
-          : null,
+        resolvedBy: pickParticipant(resolvedBy),
       };
       this.wsGateway.emitToUser(
         userId,

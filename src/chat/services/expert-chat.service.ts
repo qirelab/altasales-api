@@ -119,12 +119,12 @@ export class ExpertChatService {
     const lastMessageBySession = new Map<string, ChatMessage>();
     for (const m of lastMessages) lastMessageBySession.set(m.sessionId, m);
 
-    const questionnaires =
-      clientIds.length > 0
-        ? await this.questionnaireRepository.find({
-          where: { userId: In(clientIds) },
-        })
-        : [];
+    let questionnaires: Questionnaire[] = [];
+    if (clientIds.length > 0) {
+      questionnaires = await this.questionnaireRepository.find({
+        where: { userId: In(clientIds) },
+      });
+    }
     const companyByUserId = new Map<string, string | null>();
     for (const q of questionnaires) {
       const raw = q.answers?.companyName;
@@ -180,15 +180,7 @@ export class ExpertChatService {
       orderId: session.orderId,
       updatedAt: session.updatedAt,
       participant: pickUser(client, companyName),
-      lastMessage: lastMessage
-        ? {
-          id: lastMessage.id,
-          text: lastMessage.text,
-          senderId: lastMessage.senderId,
-          isAiGenerated: lastMessage.isAiGenerated,
-          createdAt: lastMessage.createdAt,
-        }
-        : null,
+      lastMessage: pickLastMessage(lastMessage),
       needsHumanHandoff: session.needsHumanHandoff,
       handoffStatus: session.handoffStatus,
       handoffRequestedAt: session.handoffRequestedAt,
@@ -263,5 +255,22 @@ function pickUser(
     lastName: user.lastName,
     email: user.email,
     companyName,
+  };
+}
+
+function pickLastMessage(lastMessage: ChatMessage | null): {
+  id: string;
+  text: string;
+  senderId: string;
+  isAiGenerated: boolean;
+  createdAt: Date;
+} | null {
+  if (!lastMessage) return null;
+  return {
+    id: lastMessage.id,
+    text: lastMessage.text,
+    senderId: lastMessage.senderId,
+    isAiGenerated: lastMessage.isAiGenerated,
+    createdAt: lastMessage.createdAt,
   };
 }
