@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 import { User } from '../../users/entities/user.entity';
-import { ChatConversation } from './chat-conversation.entity';
+import { ChatSession } from './chat-session.entity';
 
 @Entity()
 export class ChatMessage {
@@ -17,16 +17,16 @@ export class ChatMessage {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ApiProperty({ description: 'Conversation ID' })
+  @ApiProperty({ description: 'Session ID' })
   @Index()
   @Column({ type: 'uuid' })
-  conversationId: string;
+  sessionId: string;
 
-  @ManyToOne(() => ChatConversation, (conversation) => conversation.messages, {
+  @ManyToOne(() => ChatSession, (session) => session.messages, {
     onDelete: 'CASCADE',
   })
-  @JoinColumn({ name: 'conversationId' })
-  conversation: ChatConversation;
+  @JoinColumn({ name: 'sessionId' })
+  session: ChatSession;
 
   @ApiProperty({ description: 'Sender user ID' })
   @Column({ type: 'uuid' })

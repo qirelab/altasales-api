@@ -225,6 +225,7 @@ export class ServicesService {
       createdAt: Date;
       userId: string | null;
       giftEligible: boolean;
+      ropTariff: string | null;
       contractorRatePerHour: number | null;
       contractorExperienceYears: number | null;
       ordersCount: number;
@@ -273,6 +274,7 @@ export class ServicesService {
       .addSelect('s."isHidden"', 'isHidden')
       .addSelect('s.skills', 'skills')
       .addSelect('s."giftEligible"', 'giftEligible')
+      .addSelect('s."ropTariff"', 'ropTariff')
       .addSelect('s."createdAt"', 'createdAt')
       .addSelect('s."userId"', 'userId')
       .addSelect('COUNT(oi.id)', 'ordersCount')
@@ -296,6 +298,7 @@ export class ServicesService {
         createdAt: Date;
         userId: string | null;
         giftEligible: boolean;
+        ropTariff: string | null;
         ordersCount: string;
       }>();
 
@@ -317,6 +320,7 @@ export class ServicesService {
         createdAt: row.createdAt,
         userId: row.userId,
         giftEligible: row.giftEligible,
+        ropTariff: row.ropTariff,
         contractorRatePerHour: null,
         contractorExperienceYears: null,
         ordersCount: Number(row.ordersCount),
@@ -753,6 +757,7 @@ export class ServicesService {
       image: expertProfile?.image ?? null,
       imageOriginal: expertProfile?.imageOriginal ?? null,
       externalUrl: null,
+      ropTariff: null,
       skills: expertProfile?.skills ?? [],
       contractorRatePerHour: null,
       contractorExperienceYears: expertProfile?.experienceYears ?? null,

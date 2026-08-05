@@ -10,15 +10,17 @@ import { Repository } from 'typeorm';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import { AI_SYSTEM_USER_ID } from '../chat.constants';
 import { SendPlatformMessageDto } from '../dto/send-platform-message.dto';
-import { ChatConversation } from '../entities/chat-conversation.entity';
-import { ChatConversationParticipant } from '../entities/chat-conversation-participant.entity';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
+import { ChatSession } from '../entities/chat-session.entity';
+import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatParticipantRole } from '../entities/chat-participant-role.enum';
 import {
   AiChatOrchestratorService,
   StreamReplyHooks,
 } from './ai-chat-orchestrator.service';
+import { SessionTitleService } from './session-title.service';
 
 export type StreamPlatformMessageHooks = {
   onClientMessage: (_message: ChatMessage) => void;
@@ -29,7 +31,7 @@ export type StreamPlatformMessageHooks = {
 };
 
 export type ValidatedStreamContext = {
-  conversation: ChatConversation;
+  conversation: ChatSession;
   userId: string;
   text: string;
 };
@@ -51,14 +53,15 @@ export class ChatStreamingService {
   private readonly logger = new Logger(ChatStreamingService.name);
 
   constructor(
-    @InjectRepository(ChatConversation)
-    private readonly conversationRepository: Repository<ChatConversation>,
+    @InjectRepository(ChatSession)
+    private readonly conversationRepository: Repository<ChatSession>,
     @InjectRepository(ChatMessage)
     private readonly messageRepository: Repository<ChatMessage>,
-    @InjectRepository(ChatConversationParticipant)
-    private readonly participantRepository: Repository<ChatConversationParticipant>,
+    @InjectRepository(ChatSessionParticipant)
+    private readonly participantRepository: Repository<ChatSessionParticipant>,
     private readonly wsGateway: WebSocketGatewayService,
     private readonly aiOrchestrator: AiChatOrchestratorService,
+    private readonly sessionTitleService: SessionTitleService,
   ) {}
 
   /**
@@ -71,23 +74,23 @@ export class ChatStreamingService {
    */
   async validate(
     userId: string,
-    conversationId: string,
+    sessionId: string,
     dto: SendPlatformMessageDto,
   ): Promise<ValidatedStreamContext> {
     const conversation = await this.conversationRepository.findOne({
-      where: { id: conversationId },
+      where: { id: sessionId },
     });
     if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      throw new NotFoundException('Session not found');
     }
-    if (conversation.type !== ChatConversationType.Platform) {
+    if (conversation.type !== ChatSessionType.Platform) {
       throw new BadRequestException(
         'This endpoint accepts only platform-type conversations',
       );
     }
 
     const membership = await this.participantRepository.findOne({
-      where: { conversationId: conversation.id, userId },
+      where: { sessionId: conversation.id, userId },
     });
     if (!membership) {
       throw new ForbiddenException(
@@ -108,7 +111,7 @@ export class ChatStreamingService {
       // `runStream` does not thread them through to `filesService.linkToMessage`.
       throw new BadRequestException(
         'File attachments are not supported on the streaming endpoint. ' +
-          'Use POST /chat/conversations/:id/messages instead.',
+          'Use POST /chat/sessions/:id/messages instead.',
       );
     }
 
@@ -133,16 +136,21 @@ export class ChatStreamingService {
     let savedClientMessage: ChatMessage;
     try {
       const clientMessage = this.messageRepository.create({
-        conversationId: conversation.id,
+        sessionId: conversation.id,
         senderId: userId,
         text,
       });
       savedClientMessage = await this.messageRepository.save(clientMessage);
 
       const now = new Date();
-      await this.conversationRepository.update(conversation.id, {
-        updatedAt: now,
-      });
+      await this.conversationRepository.update(conversation.id, { updatedAt: now });
+
+      // Fire-and-forget AI-generated session title on the first client turn.
+      // Doesn't block the streaming pipeline — the sidebar picks up the new
+      // title via the `chat:session_updated` WS event once it lands.
+      if (!conversation.title) {
+        void this.sessionTitleService.generateAndAssign(conversation.id, text);
+      }
 
       const otherParticipants = await this.resolveOtherParticipantIds(
         conversation,
@@ -150,7 +158,11 @@ export class ChatStreamingService {
       );
       const clientMessagePayload = {
         message: { ...savedClientMessage, files: [] },
-        conversation: { id: conversation.id, updatedAt: now },
+        session: {
+          id: conversation.id,
+          updatedAt: now,
+          title: conversation.title,
+        },
       };
       // Broadcast the client's message to every other participant AND to a
       // duplicate socket the same user might have open elsewhere. The active
@@ -175,6 +187,18 @@ export class ChatStreamingService {
         }`,
       );
       hooks.onError('client_message_persist_failed');
+      return;
+    }
+
+    // Skip the AI turn entirely while a human handoff is active — the
+    // operator is either about to answer (awaiting) or already replying
+    // (in_progress). AI resumes once resolved / null. The client message
+    // is already persisted and broadcast above so the operator inbox sees
+    // it in real time.
+    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
+      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
+    if (handoffPaused) {
+      hooks.onDone(savedClientMessage);
       return;
     }
 
@@ -203,11 +227,11 @@ export class ChatStreamingService {
   }
 
   private async resolveOtherParticipantIds(
-    conversation: ChatConversation,
+    conversation: ChatSession,
     excludeUserId: string,
   ): Promise<string[]> {
     const participants = await this.participantRepository.find({
-      where: { conversationId: conversation.id },
+      where: { sessionId: conversation.id },
     });
     return participants
       .map((p) => p.userId)

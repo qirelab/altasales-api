@@ -1,9 +1,8 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { QueryFailedError } from 'typeorm';
 import { UserRole } from '../users/entities/user-role.enum';
-import { AI_SYSTEM_USER_ID, AI_WELCOME_MESSAGE } from './chat.constants';
+import { AI_SYSTEM_USER_ID } from './chat.constants';
 import { ChatService } from './chat.service';
-import { ChatConversationType } from './entities/chat-conversation-type.enum';
+import { ChatSessionType } from './entities/chat-session-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
 
 function makeUser(
@@ -26,9 +25,11 @@ function makeUser(
 
 function buildService(
   opts: {
-    existingConversation?: unknown;
+    existingSession?: unknown;
+    existingSessions?: unknown[];
     existingParticipant?: unknown;
-    saveConversationThrows?: Error;
+    activeExpertIds?: string[];
+    saveSessionThrows?: Error;
     transactionThrows?: Error;
     users?: Record<string, unknown>;
     historyMessages?: unknown[];
@@ -40,7 +41,8 @@ function buildService(
     affected: opts.conditionalUpdateAffected ?? 1,
   });
   const conversationRepository = {
-    findOne: jest.fn().mockResolvedValue(opts.existingConversation ?? null),
+    findOne: jest.fn().mockResolvedValue(opts.existingSession ?? null),
+    find: jest.fn().mockResolvedValue(opts.existingSessions ?? []),
     createQueryBuilder: jest.fn(() => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -69,9 +71,20 @@ function buildService(
     create: jest.fn((entity) => ({ ...entity, id: 'msg-1' })),
     save: jest.fn(async (entity) => ({ ...entity, id: entity.id ?? 'msg-1' })),
   };
+  const activeExpertRows = (opts.activeExpertIds ?? []).map((userId) => ({
+    userId,
+  }));
   const participantRepository = {
     findOne: jest.fn().mockResolvedValue(opts.existingParticipant ?? null),
     find: jest.fn().mockResolvedValue([]),
+    delete: jest.fn().mockResolvedValue({ affected: 1 }),
+    createQueryBuilder: jest.fn(() => ({
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue(activeExpertRows),
+    })),
     create: jest.fn((entity) => entity),
     save: jest.fn(async (entity) => entity),
   };
@@ -104,9 +117,9 @@ function buildService(
           const name =
             (entity as { name?: string })?.name ??
             (entity as { constructor?: { name?: string } })?.constructor?.name;
-          if (name === 'ChatConversation') return conversationRepository;
+          if (name === 'ChatSession') return conversationRepository;
           if (name === 'ChatMessage') return messageRepository;
-          if (name === 'ChatConversationParticipant')
+          if (name === 'ChatSessionParticipant')
             return participantRepository;
           return { create: jest.fn(), save: jest.fn() };
         },
@@ -115,6 +128,9 @@ function buildService(
     });
   }
 
+  const sessionTitleService = {
+    generateAndAssign: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new ChatService(
     conversationRepository as never,
     messageRepository as never,
@@ -124,11 +140,13 @@ function buildService(
     wsGateway as never,
     filesService as never,
     aiOrchestrator as never,
+    sessionTitleService as never,
     dataSource as never,
   );
 
   return {
     service,
+    sessionTitleService,
     conversationRepository,
     messageRepository,
     participantRepository,
@@ -139,27 +157,29 @@ function buildService(
   };
 }
 
-describe('ChatService.openPlatformConversation', () => {
+describe('ChatService.openPlatformSession', () => {
   it('rejects a non-USER role with 403', async () => {
     const { service } = buildService({
       users: {
         'expert-1': makeUser({ id: 'expert-1', role: UserRole.EXPERT }),
       },
     });
-    await expect(service.openPlatformConversation('expert-1')).rejects.toThrow(
+    await expect(service.openPlatformSession('expert-1')).rejects.toThrow(
       ForbiddenException,
     );
   });
 
-  it('returns existing conversation without touching the DB writer path', async () => {
+  it('always creates a NEW session even if the client already has one', async () => {
+    // Multi-session: openPlatformSession must not reuse an existing session.
     const existing = {
       id: 'existing-conv',
-      type: ChatConversationType.Platform,
+      type: ChatSessionType.Platform,
+      title: 'Previous topic',
       orderId: null,
       updatedAt: new Date(),
     };
-    const { service, dataSource } = buildService({
-      existingConversation: existing,
+    const { service, dataSource, conversationRepository } = buildService({
+      existingSession: existing,
       users: {
         'client-1': makeUser(),
         [AI_SYSTEM_USER_ID]: makeUser({
@@ -169,28 +189,15 @@ describe('ChatService.openPlatformConversation', () => {
         }),
       },
     });
-    const result = await service.openPlatformConversation('client-1');
-    expect(result.id).toBe('existing-conv');
-    expect(dataSource.transaction).not.toHaveBeenCalled();
+    const result = await service.openPlatformSession('client-1');
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    // Result is the freshly-created row, not the existing one.
+    expect(result.id).toBe('new-conv');
+    expect(conversationRepository.save).toHaveBeenCalled();
   });
 
-  it('re-reads the conversation on unique-constraint race (23505)', async () => {
-    const raced = {
-      id: 'raced-conv',
-      type: ChatConversationType.Platform,
-      orderId: null,
-      updatedAt: new Date(),
-    };
-    // findOne is called twice: first pre-check (null → try transaction), and
-    // then after 23505 catch (returns the concurrent writer's row).
-    const conversationFindOne = jest
-      .fn()
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(raced);
-    const uniqueViolation = new QueryFailedError('', [], new Error('dup'));
-    (uniqueViolation as unknown as { code: string }).code = '23505';
-    const { service, conversationRepository } = buildService({
-      transactionThrows: uniqueViolation,
+  it('registers client + AI participants and seeds NO welcome message on new session', async () => {
+    const { service, participantRepository, messageRepository } = buildService({
       users: {
         'client-1': makeUser(),
         [AI_SYSTEM_USER_ID]: makeUser({
@@ -200,11 +207,68 @@ describe('ChatService.openPlatformConversation', () => {
         }),
       },
     });
-    conversationRepository.findOne = conversationFindOne;
+    await service.openPlatformSession('client-1');
 
-    const result = await service.openPlatformConversation('client-1');
-    expect(result.id).toBe('raced-conv');
-    expect(conversationFindOne).toHaveBeenCalledTimes(2);
+    // No message rows are persisted at session creation — the first turn
+    // must come from the client and the AI reply is scheduled via
+    // sendPlatformMessage / stream endpoint.
+    expect(messageRepository.save).not.toHaveBeenCalled();
+
+    const savedParticipants = participantRepository.save.mock.calls
+      .flat()
+      .flat();
+    const roles = savedParticipants.map((p: { role: string }) => p.role);
+    expect(roles).toEqual(
+      expect.arrayContaining([
+        ChatParticipantRole.Client,
+        ChatParticipantRole.Ai,
+      ]),
+    );
+  });
+
+  it('auto-joins existing active experts into the newly created session', async () => {
+    // A client with an active expert relationship should get that expert
+    // added to every new platform session automatically.
+    const { service, participantRepository } = buildService({
+      activeExpertIds: ['expert-42'],
+      users: {
+        'client-1': makeUser(),
+        [AI_SYSTEM_USER_ID]: makeUser({
+          id: AI_SYSTEM_USER_ID,
+          role: UserRole.SYSTEM_AI,
+          name: 'AI',
+        }),
+      },
+    });
+    await service.openPlatformSession('client-1');
+
+    const savedParticipants = participantRepository.save.mock.calls
+      .flat()
+      .flat();
+    const expertRecord = savedParticipants.find(
+      (p: { userId: string }) => p.userId === 'expert-42',
+    );
+    expect(expertRecord).toEqual(
+      expect.objectContaining({
+        userId: 'expert-42',
+        role: ChatParticipantRole.Expert,
+      }),
+    );
+  });
+
+  it('returned session shape includes null title (client has not written yet)', async () => {
+    const { service } = buildService({
+      users: {
+        'client-1': makeUser(),
+        [AI_SYSTEM_USER_ID]: makeUser({
+          id: AI_SYSTEM_USER_ID,
+          role: UserRole.SYSTEM_AI,
+          name: 'AI',
+        }),
+      },
+    });
+    const result = await service.openPlatformSession('client-1');
+    expect(result.title).toBeNull();
   });
 });
 
@@ -221,10 +285,11 @@ describe('ChatService.sendMessage — legacy endpoint guardrails', () => {
 });
 
 describe('ChatService.sendPlatformMessage', () => {
-  function makeConversation(overrides: Record<string, unknown> = {}) {
+  function makeSession(overrides: Record<string, unknown> = {}) {
     return {
       id: 'conv-1',
-      type: ChatConversationType.Platform,
+      type: ChatSessionType.Platform,
+      title: null,
       participantOneId: AI_SYSTEM_USER_ID,
       participantTwoId: 'client-1',
       orderId: null,
@@ -233,10 +298,10 @@ describe('ChatService.sendPlatformMessage', () => {
     };
   }
 
-  it('rejects with 400 when conversation is not platform-type', async () => {
+  it('rejects with 400 when session is not platform-type', async () => {
     const { service, conversationRepository } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeConversation({ type: ChatConversationType.Expert }),
+      makeSession({ type: ChatSessionType.Expert }),
     );
     await expect(
       service.sendPlatformMessage('client-1', 'conv-1', {
@@ -248,7 +313,7 @@ describe('ChatService.sendPlatformMessage', () => {
   it('rejects with 403 when user is not a member', async () => {
     const { service, conversationRepository, participantRepository } =
       buildService();
-    conversationRepository.findOne.mockResolvedValueOnce(makeConversation());
+    conversationRepository.findOne.mockResolvedValueOnce(makeSession());
     participantRepository.findOne.mockResolvedValueOnce(null);
     await expect(
       service.sendPlatformMessage('someone-else', 'conv-1', {
@@ -265,9 +330,9 @@ describe('ChatService.sendPlatformMessage', () => {
       aiOrchestrator,
       messageRepository,
     } = buildService();
-    conversationRepository.findOne.mockResolvedValueOnce(makeConversation());
+    conversationRepository.findOne.mockResolvedValueOnce(makeSession());
     participantRepository.findOne.mockResolvedValueOnce({
-      conversationId: 'conv-1',
+      sessionId: 'conv-1',
       userId: 'client-1',
       role: ChatParticipantRole.Client,
     });
@@ -277,7 +342,7 @@ describe('ChatService.sendPlatformMessage', () => {
     ]);
     messageRepository.save.mockResolvedValueOnce({
       id: 'client-msg-42',
-      conversationId: 'conv-1',
+      sessionId: 'conv-1',
       senderId: 'client-1',
       text: 'q?',
       isAiGenerated: false,
@@ -294,10 +359,106 @@ describe('ChatService.sendPlatformMessage', () => {
     expect(arg.clientMessageId).toBe('client-msg-42');
     expect(arg.clientUserId).toBe('client-1');
     expect(arg.question).toBe('q?');
-    // Recipients are resolved by the orchestrator at emit time so a revoke
-    // during AI generation cuts off delivery — they are no longer part of
-    // the scheduleReply payload.
-    expect(arg.recipientIds).toBeUndefined();
+  });
+
+  it('schedules AI title generation on the client\'s first message when title is null', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      sessionTitleService,
+    } = buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(makeSession());
+    participantRepository.findOne.mockResolvedValueOnce({
+      sessionId: 'conv-1',
+      userId: 'client-1',
+      role: ChatParticipantRole.Client,
+    });
+
+    await service.sendPlatformMessage('client-1', 'conv-1', {
+      text: 'Как настроить отдел продаж?',
+    } as never);
+
+    expect(sessionTitleService.generateAndAssign).toHaveBeenCalledWith(
+      'conv-1',
+      'Как настроить отдел продаж?',
+    );
+  });
+
+  it('does NOT trigger AI title generation when the session already has a title', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      sessionTitleService,
+    } = buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeSession({ title: 'Existing topic' }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      sessionId: 'conv-1',
+      userId: 'client-1',
+      role: ChatParticipantRole.Client,
+    });
+
+    await service.sendPlatformMessage('client-1', 'conv-1', {
+      text: 'follow-up question',
+    } as never);
+
+    expect(sessionTitleService.generateAndAssign).not.toHaveBeenCalled();
+  });
+
+  it('does NOT trigger AI title generation on messages from an expert (only clients seed the title)', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      sessionTitleService,
+    } = buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(makeSession());
+    participantRepository.findOne.mockResolvedValueOnce({
+      sessionId: 'conv-1',
+      userId: 'expert-1',
+      role: ChatParticipantRole.Expert,
+    });
+
+    await service.sendPlatformMessage('expert-1', 'conv-1', {
+      text: 'Let me jump in',
+    } as never);
+
+    expect(sessionTitleService.generateAndAssign).not.toHaveBeenCalled();
+  });
+
+  it('WS payload uses "session" key with id/updatedAt/title', async () => {
+    const {
+      service,
+      conversationRepository,
+      participantRepository,
+      wsGateway,
+    } = buildService();
+    conversationRepository.findOne.mockResolvedValueOnce(
+      makeSession({ title: 'Preset' }),
+    );
+    participantRepository.findOne.mockResolvedValueOnce({
+      sessionId: 'conv-1',
+      userId: 'client-1',
+      role: ChatParticipantRole.Client,
+    });
+
+    await service.sendPlatformMessage('client-1', 'conv-1', {
+      text: 'msg',
+    } as never);
+
+    const newMessageEmits = wsGateway.emitToUser.mock.calls.filter(
+      (call) => call[1] === 'chat:new_message',
+    );
+    expect(newMessageEmits.length).toBeGreaterThan(0);
+    const payload = newMessageEmits[0][2] as {
+      session?: { id?: string; title?: string | null };
+    };
+    expect(payload.session).toBeDefined();
+    expect(payload.session!.id).toBe('conv-1');
+    expect(payload.session!.title).toBe('Preset');
   });
 
   it('expert message does NOT trigger the AI orchestrator', async () => {
@@ -307,24 +468,19 @@ describe('ChatService.sendPlatformMessage', () => {
       participantRepository,
       aiOrchestrator,
     } = buildService();
-    conversationRepository.findOne.mockResolvedValueOnce(makeConversation());
+    conversationRepository.findOne.mockResolvedValueOnce(makeSession());
     participantRepository.findOne.mockResolvedValueOnce({
-      conversationId: 'conv-1',
+      sessionId: 'conv-1',
       userId: 'expert-1',
       role: ChatParticipantRole.Expert,
     });
-    participantRepository.find.mockResolvedValueOnce([
-      { userId: 'client-1', role: ChatParticipantRole.Client },
-      { userId: 'expert-1', role: ChatParticipantRole.Expert },
-      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
-    ]);
     await service.sendPlatformMessage('expert-1', 'conv-1', {
       text: 'Let me help',
     } as never);
     expect(aiOrchestrator.scheduleReply).not.toHaveBeenCalled();
   });
 
-  it('resolves a pending handoff when an operator writes into the conversation', async () => {
+  it('resolves a pending handoff when an operator writes into the session', async () => {
     const {
       service,
       conversationRepository,
@@ -332,31 +488,31 @@ describe('ChatService.sendPlatformMessage', () => {
       wsGateway,
     } = buildService({ conditionalUpdateAffected: 1 });
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeConversation({ needsHumanHandoff: true }),
+      makeSession({ needsHumanHandoff: true }),
     );
     participantRepository.findOne.mockResolvedValueOnce({
-      conversationId: 'conv-1',
+      sessionId: 'conv-1',
       userId: 'op-1',
       role: ChatParticipantRole.Operator,
     });
-    participantRepository.find.mockResolvedValueOnce([
-      { userId: 'client-1', role: ChatParticipantRole.Client },
-      { userId: 'op-1', role: ChatParticipantRole.Operator },
-      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
-    ]);
 
     await service.sendPlatformMessage('op-1', 'conv-1', {
       text: 'Hello, I am the manager',
     } as never);
 
-    // Conditional UPDATE was issued to clear the flag atomically.
-    expect(conversationRepository.createQueryBuilder).toHaveBeenCalled();
-    // Every recipient (sender + client) got a handoff_resolved event
-    // because the mocked conditional UPDATE reports affected=1.
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
     );
     expect(resolvedEvents.length).toBeGreaterThan(0);
+    // Payload must carry handoffStatus (client reducer reads it directly)
+    // and resolvedBy (matches AdminChatService.resolve shape).
+    const payload = resolvedEvents[0][2];
+    expect(payload).toMatchObject({
+      sessionId: 'conv-1',
+      handoffStatus: 'resolved',
+    });
+    expect(payload).toHaveProperty('resolvedAt');
+    expect(payload).toHaveProperty('resolvedBy');
   });
 
   it('does not reset handoff when a client writes (only human replier resolves)', async () => {
@@ -367,23 +523,18 @@ describe('ChatService.sendPlatformMessage', () => {
       wsGateway,
     } = buildService();
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeConversation({ needsHumanHandoff: true }),
+      makeSession({ needsHumanHandoff: true }),
     );
     participantRepository.findOne.mockResolvedValueOnce({
-      conversationId: 'conv-1',
+      sessionId: 'conv-1',
       userId: 'client-1',
       role: ChatParticipantRole.Client,
     });
-    participantRepository.find.mockResolvedValueOnce([
-      { userId: 'client-1', role: ChatParticipantRole.Client },
-      { userId: AI_SYSTEM_USER_ID, role: ChatParticipantRole.Ai },
-    ]);
 
     await service.sendPlatformMessage('client-1', 'conv-1', {
       text: 'follow-up',
     } as never);
 
-    // A client turn never issues the conditional resolve UPDATE.
     expect(conversationRepository.conditionalExecute).not.toHaveBeenCalled();
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
@@ -392,9 +543,6 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 
   it('does not emit handoff_resolved when the conditional UPDATE affects zero rows', async () => {
-    // Simulates the race where orchestrator has not yet flipped the flag
-    // (or another operator already cleared it) — conditional UPDATE reports
-    // affected=0, so we must NOT broadcast a false-positive resolved event.
     const {
       service,
       conversationRepository,
@@ -402,24 +550,18 @@ describe('ChatService.sendPlatformMessage', () => {
       wsGateway,
     } = buildService({ conditionalUpdateAffected: 0 });
     conversationRepository.findOne.mockResolvedValueOnce(
-      makeConversation({ needsHumanHandoff: false }),
+      makeSession({ needsHumanHandoff: false }),
     );
     participantRepository.findOne.mockResolvedValueOnce({
-      conversationId: 'conv-1',
+      sessionId: 'conv-1',
       userId: 'op-1',
       role: ChatParticipantRole.Operator,
     });
-    participantRepository.find.mockResolvedValueOnce([
-      { userId: 'client-1', role: ChatParticipantRole.Client },
-      { userId: 'op-1', role: ChatParticipantRole.Operator },
-    ]);
 
     await service.sendPlatformMessage('op-1', 'conv-1', {
       text: 'checking in',
     } as never);
 
-    // The conditional UPDATE was attempted, but affected=0 means no state
-    // actually transitioned — we stay silent on the WS channel.
     expect(conversationRepository.conditionalExecute).toHaveBeenCalledTimes(1);
     const resolvedEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_resolved',
@@ -428,9 +570,10 @@ describe('ChatService.sendPlatformMessage', () => {
   });
 });
 
-describe('ChatService.addExpertToClientPlatformChat', () => {
-  it('creates the client conversation (with welcome) if missing, then adds the expert as participant', async () => {
+describe('ChatService.addExpertToClientPlatformSessions', () => {
+  it('creates the initial session and adds the expert when client has no sessions yet', async () => {
     const { service, participantRepository, messageRepository } = buildService({
+      existingSessions: [],
       users: {
         'client-1': makeUser(),
         [AI_SYSTEM_USER_ID]: makeUser({
@@ -441,67 +584,78 @@ describe('ChatService.addExpertToClientPlatformChat', () => {
       },
     });
 
-    await service.addExpertToClientPlatformChat('client-1', 'expert-99');
+    await service.addExpertToClientPlatformSessions('client-1', 'expert-99');
 
-    // Welcome message was written by the transaction manager.
-    const savedTexts = messageRepository.save.mock.calls.map((c) => c[0].text);
-    expect(savedTexts).toContain(AI_WELCOME_MESSAGE);
+    // createPlatformSession no longer seeds a welcome message.
+    expect(messageRepository.save).not.toHaveBeenCalled();
 
-    // Expert was registered as a participant with role expert.
-    const expertParticipant = participantRepository.save.mock.calls
+    const savedParticipants = participantRepository.save.mock.calls
       .flat()
-      .find((entity: { userId?: string }) => entity?.userId === 'expert-99');
-    expect(expertParticipant).toEqual(
+      .flat();
+    const expert = savedParticipants.find(
+      (p: { userId?: string }) => p?.userId === 'expert-99',
+    );
+    expect(expert).toEqual(
       expect.objectContaining({
         userId: 'expert-99',
         role: ChatParticipantRole.Expert,
       }),
     );
   });
+
+  it('adds the expert as participant to every existing platform session', async () => {
+    const sessions = [
+      { id: 'sess-a', type: ChatSessionType.Platform, orderId: null },
+      { id: 'sess-b', type: ChatSessionType.Platform, orderId: null },
+    ];
+    const { service, participantRepository } = buildService({
+      existingSessions: sessions,
+    });
+
+    await service.addExpertToClientPlatformSessions('client-1', 'expert-99');
+
+    // ensureParticipant runs one save per session where the expert is absent.
+    // participantRepository.findOne resolves null → ensureParticipant persists.
+    expect(participantRepository.save).toHaveBeenCalledTimes(2);
+    const savedSessionIds = participantRepository.save.mock.calls.map(
+      (c) => (c[0] as { sessionId: string }).sessionId,
+    );
+    expect(savedSessionIds).toEqual(
+      expect.arrayContaining(['sess-a', 'sess-b']),
+    );
+  });
 });
 
-describe('ChatService.removeExpertFromClientPlatformChat', () => {
-  it('is a no-op when the client has no platform conversation yet', async () => {
+describe('ChatService.removeExpertFromClientPlatformSessions', () => {
+  it('is a no-op when the client has no platform sessions yet', async () => {
     const { service, participantRepository } = buildService({
-      existingConversation: null,
+      existingSessions: [],
     });
 
-    await service.removeExpertFromClientPlatformChat('client-1', 'expert-99');
+    await service.removeExpertFromClientPlatformSessions('client-1', 'expert-99');
 
-    expect(participantRepository.save).not.toHaveBeenCalled();
+    expect(participantRepository.delete).not.toHaveBeenCalled();
   });
 
-  it('deletes only the expert participant when the conversation exists', async () => {
-    const conversationRow = {
-      id: 'conv-1',
-      type: ChatConversationType.Platform,
-      participantOneId: AI_SYSTEM_USER_ID,
-      participantTwoId: 'client-1',
-      orderId: null,
-    };
-    const { service, participantRepository, conversationRepository } =
-      buildService({
-        existingConversation: conversationRow,
-      });
-    (participantRepository as unknown as { delete: jest.Mock }).delete = jest
-      .fn()
-      .mockResolvedValue({ affected: 1 });
-
-    await service.removeExpertFromClientPlatformChat('client-1', 'expert-99');
-
-    expect(conversationRepository.findOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          type: ChatConversationType.Platform,
-        }),
-      }),
-    );
-    expect(
-      (participantRepository as unknown as { delete: jest.Mock }).delete,
-    ).toHaveBeenCalledWith({
-      conversationId: 'conv-1',
-      userId: 'expert-99',
-      role: ChatParticipantRole.Expert,
+  it('deletes the expert participant from every existing platform session', async () => {
+    const sessions = [
+      { id: 'sess-a', type: ChatSessionType.Platform, orderId: null },
+      { id: 'sess-b', type: ChatSessionType.Platform, orderId: null },
+    ];
+    const { service, participantRepository } = buildService({
+      existingSessions: sessions,
     });
+
+    await service.removeExpertFromClientPlatformSessions('client-1', 'expert-99');
+
+    expect(participantRepository.delete).toHaveBeenCalledTimes(2);
+    for (const call of participantRepository.delete.mock.calls) {
+      expect(call[0]).toEqual(
+        expect.objectContaining({
+          userId: 'expert-99',
+          role: ChatParticipantRole.Expert,
+        }),
+      );
+    }
   });
 });

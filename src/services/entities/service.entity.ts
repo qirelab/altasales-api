@@ -11,6 +11,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Category } from '../../categories/entities/category.entity';
 import { ServicePackage } from '../../packages/entities/package.entity';
 import { User } from '../../users/entities/user.entity';
+import { RopTariff } from '../../rop/rop-tariff.enum';
 import { ServiceType } from './service-type.enum';
 
 @Entity()
@@ -68,6 +69,16 @@ export class Service {
   })
   @Column({ type: 'varchar', nullable: true })
   externalUrl: string | null;
+
+  @ApiPropertyOptional({
+    enum: RopTariff,
+    example: RopTariff.Trainer,
+    nullable: true,
+    description:
+      'ROP Sharing tariff activated for the buyer while this service order is active',
+  })
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  ropTariff: RopTariff | null;
 
   @ApiProperty({
     example: ['AmoCRM', 'Bitrix24', 'API'],

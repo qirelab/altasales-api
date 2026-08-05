@@ -1,7 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import ExcelJS from 'exceljs';
 import { PDFDocument } from 'pdf-lib';
 import { getFileExtension } from './rop-analyze-upload-profile';
+import { decodeMulterOriginalName } from './rop-filename.util';
+import {
+  extractXlsxSheetBuffer,
+  listXlsxSheetNames,
+} from './rop-xlsx-sheet-extract.util';
 
 export type DashboardFilePartType = 'page' | 'sheet' | 'file';
 
@@ -109,27 +113,19 @@ export class RopDashboardFilePartsService {
   private async inspectXlsx(
     buffer: Buffer,
   ): Promise<DashboardFileInspectResult> {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(this.toArrayBuffer(buffer));
-    const sheets = workbook.worksheets.filter((sheet) => sheet.name);
+    const sheetNames = await listXlsxSheetNames(buffer);
 
-    if (sheets.length <= 1) {
-      const sheet = sheets[0];
+    if (sheetNames.length <= 1) {
       return {
-        parts: [
-          {
-            id: 'sheet:0',
-            label: sheet?.name ?? 'Лист 1',
-          },
-        ],
-        partType: 'sheet',
+        parts: [WHOLE_FILE_PART],
+        partType: 'file',
       };
     }
 
     return {
-      parts: sheets.map((sheet, index) => ({
+      parts: sheetNames.map((name, index) => ({
         id: `sheet:${index}`,
-        label: sheet.name || `Лист ${index + 1}`,
+        label: name || `Лист ${index + 1}`,
       })),
       partType: 'sheet',
     };
@@ -153,7 +149,9 @@ export class RopDashboardFilePartsService {
     target.addPage(page);
 
     const bytes = await target.save();
-    const baseName = file.originalname.replace(/\.pdf$/i, '') || 'dashboard';
+    const baseName =
+      decodeMulterOriginalName(file.originalname).replace(/\.pdf$/i, '') ||
+      'dashboard';
 
     return this.toMulterFile(
       Buffer.from(bytes),
@@ -166,41 +164,23 @@ export class RopDashboardFilePartsService {
     file: Express.Multer.File,
     sheetIndex: number,
   ): Promise<Express.Multer.File> {
-    const source = new ExcelJS.Workbook();
-    await source.xlsx.load(this.toArrayBuffer(file.buffer));
-    const sourceSheet = source.worksheets[sheetIndex];
-
-    if (!sourceSheet) {
+    const sheetNames = await listXlsxSheetNames(file.buffer);
+    const sheetName = sheetNames[sheetIndex];
+    if (!sheetName) {
       throw new BadRequestException('Лист не найден');
     }
 
-    const target = new ExcelJS.Workbook();
-    const targetSheet = target.addWorksheet(sourceSheet.name);
-
-    sourceSheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-        targetSheet.getCell(rowNumber, colNumber).value = cell.value;
-      });
-    });
-
-    targetSheet.columns = sourceSheet.columns.map((column) => ({ ...column }));
-
-    const bytes = await target.xlsx.writeBuffer();
-    const baseName = file.originalname.replace(/\.xlsx$/i, '') || 'dashboard';
-    const safeSheetName = sourceSheet.name.replace(/[^\wа-яА-ЯёЁ.-]+/gu, '_');
+    const bytes = await extractXlsxSheetBuffer(file.buffer, sheetIndex);
+    const baseName =
+      decodeMulterOriginalName(file.originalname).replace(/\.xlsx$/i, '') ||
+      'dashboard';
+    const safeSheetName = sheetName.replace(/[^\wа-яА-ЯёЁ.-]+/gu, '_');
 
     return this.toMulterFile(
-      Buffer.from(bytes),
+      bytes,
       `${baseName}-${safeSheetName}.xlsx`,
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-  }
-
-  private toArrayBuffer(buffer: Buffer): ArrayBuffer {
-    return buffer.buffer.slice(
-      buffer.byteOffset,
-      buffer.byteOffset + buffer.byteLength,
-    ) as ArrayBuffer;
   }
 
   private toMulterFile(

@@ -28,6 +28,11 @@ function buildRepositoryMock() {
       return saved;
     }),
     findOne: jest.fn(async ({ where }) => store.get(where.id) ?? null),
+    update: jest.fn(async (id, patch) => {
+      const existing = store.get(id);
+      if (existing) store.set(id, { ...existing, ...patch });
+      return { affected: existing ? 1 : 0 };
+    }),
     qb,
   };
 }
@@ -47,16 +52,25 @@ function buildDocumentRepoMock(exists = true) {
   };
 }
 
+function buildPublisherMock() {
+  return {
+    publish: jest.fn().mockResolvedValue('doc-published-1'),
+    unpublish: jest.fn().mockResolvedValue(undefined),
+  };
+}
+
 function buildService(hasPii = false, documentExists = true) {
   const repository = buildRepositoryMock();
   const documentRepository = buildDocumentRepoMock(documentExists);
   const scanner = buildScannerMock(hasPii);
+  const publisher = buildPublisherMock();
   const service = new ChatbotReferenceAnswersService(
     repository as never,
     documentRepository as never,
     scanner as never,
+    publisher as never,
   );
-  return { service, repository, documentRepository, scanner };
+  return { service, repository, documentRepository, scanner, publisher };
 }
 
 const validDto = () => ({

@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { FilesService } from '../files/files.service';
 import { User } from '../users/entities/user.entity';
@@ -13,27 +13,29 @@ import { UserRole } from '../users/entities/user-role.enum';
 import { Order } from '../orders/entities/order.entity';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
-import { ChatConversationType } from './entities/chat-conversation-type.enum';
-import { ChatConversationParticipant } from './entities/chat-conversation-participant.entity';
+import { ChatSessionType } from './entities/chat-session-type.enum';
+import { ChatSessionParticipant } from './entities/chat-session-participant.entity';
 import { ChatMessage } from './entities/chat-message.entity';
-import { ChatConversation } from './entities/chat-conversation.entity';
+import { ChatSession } from './entities/chat-session.entity';
 import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
-import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
+import { GetSessionsQueryDto } from './dto/get-sessions-query.dto';
 import { SendMessageDto } from './dto/send-message.dto';
-import { StartConversationDto } from './dto/start-conversation.dto';
-import { AI_SYSTEM_USER_ID, AI_WELCOME_MESSAGE } from './chat.constants';
+import { StartSessionDto } from './dto/start-session.dto';
+import { AI_SYSTEM_USER_ID } from './chat.constants';
+import { ChatHandoffStatus } from './entities/chat-handoff-status.enum';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
+import { SessionTitleService } from './services/session-title.service';
 
 @Injectable()
 export class ChatService {
   constructor(
-    @InjectRepository(ChatConversation)
-    private readonly conversationRepository: Repository<ChatConversation>,
+    @InjectRepository(ChatSession)
+    private readonly conversationRepository: Repository<ChatSession>,
     @InjectRepository(ChatMessage)
     private readonly messageRepository: Repository<ChatMessage>,
-    @InjectRepository(ChatConversationParticipant)
-    private readonly participantRepository: Repository<ChatConversationParticipant>,
+    @InjectRepository(ChatSessionParticipant)
+    private readonly participantRepository: Repository<ChatSessionParticipant>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Order)
@@ -41,10 +43,11 @@ export class ChatService {
     private readonly wsGateway: WebSocketGatewayService,
     private readonly filesService: FilesService,
     private readonly aiOrchestrator: AiChatOrchestratorService,
+    private readonly sessionTitleService: SessionTitleService,
     private readonly dataSource: DataSource,
   ) {}
 
-  async getConversations(userId: string, query: GetConversationsQueryDto) {
+  async getSessions(userId: string, query: GetSessionsQueryDto) {
     const { offset = 0, limit = 20 } = query;
 
     // Return conversations where user is a legacy participantOne/Two OR a
@@ -54,12 +57,13 @@ export class ChatService {
       .createQueryBuilder('conv')
       .leftJoinAndSelect('conv.participantOne', 'p1')
       .leftJoinAndSelect('conv.participantTwo', 'p2')
+      .leftJoinAndSelect('conv.assignedOperator', 'op')
       .where((sub) => {
         const memberSub = sub
           .subQuery()
           .select('1')
-          .from(ChatConversationParticipant, 'part')
-          .where('part."conversationId" = conv.id')
+          .from(ChatSessionParticipant, 'part')
+          .where('part."sessionId" = conv.id')
           .andWhere('part."userId" = :userId')
           .getQuery();
         return (
@@ -80,7 +84,7 @@ export class ChatService {
         const otherUser = this.pickOtherParticipant(conv, userId);
 
         const lastMessage = await this.messageRepository.findOne({
-          where: { conversationId: conv.id },
+          where: { sessionId: conv.id },
           order: { createdAt: 'DESC' },
         });
 
@@ -91,6 +95,7 @@ export class ChatService {
         return {
           id: conv.id,
           type: conv.type,
+          title: conv.title,
           orderId: conv.orderId,
           participant,
           lastMessage: lastMessagePreview,
@@ -99,6 +104,11 @@ export class ChatService {
           needsHumanHandoff: conv.needsHumanHandoff,
           handoffTrigger: conv.handoffTrigger,
           handoffRequestedAt: conv.handoffRequestedAt,
+          handoffStatus: conv.handoffStatus,
+          handoffClaimedAt: conv.handoffClaimedAt,
+          handoffResolvedAt: conv.handoffResolvedAt,
+          assignedOperatorId: conv.assignedOperatorId,
+          assignedOperator: pickParticipant(conv.assignedOperator),
         };
       }),
     );
@@ -108,23 +118,23 @@ export class ChatService {
 
   async getMessages(
     userId: string,
-    conversationId: string,
+    sessionId: string,
     query: GetMessagesQueryDto,
   ) {
     const { offset = 0, limit = 50 } = query;
 
     const conversation = await this.conversationRepository.findOne({
-      where: { id: conversationId },
+      where: { id: sessionId },
     });
 
     if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      throw new NotFoundException('Session not found');
     }
 
     await this.assertConversationAccess(userId, conversation);
 
     const [messages, total] = await this.messageRepository.findAndCount({
-      where: { conversationId },
+      where: { sessionId },
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -167,7 +177,7 @@ export class ChatService {
     const otherRecipients = await this.getRecipientIds(conversation, userId);
     for (const recipient of otherRecipients) {
       this.wsGateway.emitToUser(recipient, 'chat:messages_read', {
-        conversationId,
+        sessionId,
         readBy: userId,
       });
     }
@@ -181,8 +191,8 @@ export class ChatService {
     }
     if (dto.recipientId === AI_SYSTEM_USER_ID) {
       throw new BadRequestException(
-        'Use POST /chat/conversations/platform to open the AI-консультант chat, ' +
-          'then POST /chat/conversations/:id/messages to send messages there.',
+        'Use POST /chat/sessions/platform to open the AI-консультант chat, ' +
+          'then POST /chat/sessions/:id/messages to send messages there.',
       );
     }
 
@@ -211,7 +221,7 @@ export class ChatService {
         participantOneId,
         participantTwoId,
         orderId: normalizedOrderId,
-        type: ChatConversationType.Expert,
+        type: ChatSessionType.Expert,
       });
       conversation = await this.conversationRepository.save(conversation);
       const [oneUser, twoUser] =
@@ -233,7 +243,7 @@ export class ChatService {
     }
 
     const savedMessage = await this.persistMessage({
-      conversationId: conversation.id,
+      sessionId: conversation.id,
       senderId: userId,
       text: dto.text,
     });
@@ -245,9 +255,10 @@ export class ChatService {
 
     const payload = {
       message: { ...savedMessage, files },
-      conversation: {
+      session: {
         id: conversation.id,
         updatedAt: new Date(),
+        title: conversation.title,
       },
     };
 
@@ -258,14 +269,17 @@ export class ChatService {
   }
 
   /**
-   * Open (or return the existing) platform conversation for the given client.
-   * On first creation seeds a welcome message authored by the AI so the client
-   * never sees an empty chat window.
+   * Create a new platform (AI) session for the given client.
    *
-   * Returns the same shape as {@link findOrCreateConversation} so the
-   * frontend can consume both endpoints uniformly.
+   * Always creates a new session — clients can have any number of platform
+   * sessions to keep different conversation topics separate. On creation
+   * client + AI + all currently-active experts of this client join as
+   * participants, so a purchased expert stays reachable across every new
+   * session the client starts. No welcome message is seeded: the first
+   * visible turn is the client's own message, and the AI reply follows via
+   * the orchestrator.
    */
-  async openPlatformConversation(userId: string) {
+  async openPlatformSession(userId: string) {
     const user = await this.requireUserById(userId, 'User not found');
     if (user.role !== UserRole.USER) {
       throw new ForbiddenException(
@@ -273,118 +287,127 @@ export class ChatService {
       );
     }
 
-    const conversation = await this.findOrCreatePlatformConversation(userId);
+    const session = await this.createPlatformSession(userId);
     const aiUser = await this.userRepository.findOne({
       where: { id: AI_SYSTEM_USER_ID },
     });
     const lastMessage = await this.messageRepository.findOne({
-      where: { conversationId: conversation.id },
+      where: { sessionId: session.id },
       order: { createdAt: 'DESC' },
     });
-    const unreadCount = await this.computeUnreadCount(conversation, userId);
+    const unreadCount = await this.computeUnreadCount(session, userId);
 
     const participant = pickParticipant(aiUser);
     const lastMessagePreview = pickLastMessagePreview(lastMessage);
     return {
-      id: conversation.id,
-      type: conversation.type,
+      id: session.id,
+      type: session.type,
+      title: session.title,
       participant,
       lastMessage: lastMessagePreview,
       unreadCount,
-      orderId: conversation.orderId,
-      updatedAt: conversation.updatedAt,
-      needsHumanHandoff: conversation.needsHumanHandoff,
-      handoffTrigger: conversation.handoffTrigger,
-      handoffRequestedAt: conversation.handoffRequestedAt,
+      orderId: session.orderId,
+      updatedAt: session.updatedAt,
+      needsHumanHandoff: session.needsHumanHandoff,
+      handoffTrigger: session.handoffTrigger,
+      handoffRequestedAt: session.handoffRequestedAt,
     };
   }
 
   /**
-   * Idempotent primitive that opens the client's single platform-type
-   * conversation. Safe to call from `openPlatformConversation` (endpoint) and
-   * from `addExpertToClientPlatformChat` (orders hook) without the caller
-   * having to worry about roles or ordering.
-   *
-   * Race handling: two parallel requests can race past the `findOne` check.
-   * We catch the resulting unique-constraint violation (participantOneId,
-   * participantTwoId, orderId) and re-read the row the other request wrote,
-   * so both callers converge on the same conversation.
+   * Physically create a new platform-type ChatSession for a client. Called by
+   * `openPlatformSession` (endpoint) and `addExpertToClientPlatformSessions`
+   * (orders hook when the client has no sessions yet).
    */
-  private async findOrCreatePlatformConversation(
+  private async createPlatformSession(
     clientUserId: string,
-  ): Promise<ChatConversation> {
+  ): Promise<ChatSession> {
     const [participantOneId, participantTwoId] =
       AI_SYSTEM_USER_ID < clientUserId
         ? [AI_SYSTEM_USER_ID, clientUserId]
         : [clientUserId, AI_SYSTEM_USER_ID];
 
-    const existing = await this.conversationRepository.findOne({
+    const activeExpertIds = await this.getClientActiveExpertIds(clientUserId);
+
+    return await this.dataSource.transaction(async (manager) => {
+      const session = manager.getRepository(ChatSession).create({
+        participantOneId,
+        participantTwoId,
+        orderId: null,
+        type: ChatSessionType.Platform,
+        title: null,
+      });
+      const savedSession = await manager
+        .getRepository(ChatSession)
+        .save(session);
+
+      const participants = [
+        manager.getRepository(ChatSessionParticipant).create({
+          sessionId: savedSession.id,
+          userId: clientUserId,
+          role: ChatParticipantRole.Client,
+        }),
+        manager.getRepository(ChatSessionParticipant).create({
+          sessionId: savedSession.id,
+          userId: AI_SYSTEM_USER_ID,
+          role: ChatParticipantRole.Ai,
+        }),
+        ...activeExpertIds.map((expertId) =>
+          manager.getRepository(ChatSessionParticipant).create({
+            sessionId: savedSession.id,
+            userId: expertId,
+            role: ChatParticipantRole.Expert,
+          }),
+        ),
+      ];
+      await manager.getRepository(ChatSessionParticipant).save(participants);
+
+      return savedSession;
+    });
+  }
+
+  /**
+   * All existing platform sessions of the given client. Used both to sync
+   * expert access across sessions and to compute the set of active experts
+   * when a new session is created.
+   */
+  private async getClientPlatformSessions(
+    clientUserId: string,
+  ): Promise<ChatSession[]> {
+    const [participantOneId, participantTwoId] =
+      AI_SYSTEM_USER_ID < clientUserId
+        ? [AI_SYSTEM_USER_ID, clientUserId]
+        : [clientUserId, AI_SYSTEM_USER_ID];
+    return this.conversationRepository.find({
       where: {
         participantOneId,
         participantTwoId,
         orderId: IsNull(),
-        type: ChatConversationType.Platform,
+        type: ChatSessionType.Platform,
       },
     });
-    if (existing) {
-      return existing;
-    }
+  }
 
-    try {
-      return await this.dataSource.transaction(async (manager) => {
-        const conv = manager.getRepository(ChatConversation).create({
-          participantOneId,
-          participantTwoId,
-          orderId: null,
-          type: ChatConversationType.Platform,
-        });
-        const savedConv = await manager
-          .getRepository(ChatConversation)
-          .save(conv);
-
-        await manager.getRepository(ChatConversationParticipant).save([
-          manager.getRepository(ChatConversationParticipant).create({
-            conversationId: savedConv.id,
-            userId: clientUserId,
-            role: ChatParticipantRole.Client,
-          }),
-          manager.getRepository(ChatConversationParticipant).create({
-            conversationId: savedConv.id,
-            userId: AI_SYSTEM_USER_ID,
-            role: ChatParticipantRole.Ai,
-          }),
-        ]);
-
-        await manager.getRepository(ChatMessage).save(
-          manager.getRepository(ChatMessage).create({
-            conversationId: savedConv.id,
-            senderId: AI_SYSTEM_USER_ID,
-            text: AI_WELCOME_MESSAGE,
-            isAiGenerated: true,
-          }),
-        );
-
-        return savedConv;
-      });
-    } catch (error) {
-      // 23505 = unique_violation. Another concurrent request created the same
-      // (participantOneId, participantTwoId, orderId) row a beat before us.
-      if (
-        error instanceof QueryFailedError &&
-        (error as QueryFailedError & { code?: string }).code === '23505'
-      ) {
-        const raced = await this.conversationRepository.findOne({
-          where: {
-            participantOneId,
-            participantTwoId,
-            orderId: IsNull(),
-            type: ChatConversationType.Platform,
-          },
-        });
-        if (raced) return raced;
-      }
-      throw error;
-    }
+  /**
+   * Distinct expert user IDs currently participating in ANY of the client's
+   * platform sessions. New sessions auto-join every listed expert so a
+   * purchased expert never has to be re-added session-by-session.
+   */
+  private async getClientActiveExpertIds(
+    clientUserId: string,
+  ): Promise<string[]> {
+    const rows = await this.participantRepository
+      .createQueryBuilder('p')
+      .innerJoin(ChatSession, 's', 's.id = p."sessionId"')
+      .where('s.type = :type', { type: ChatSessionType.Platform })
+      .andWhere(
+        '(s."participantOneId" = :clientId OR s."participantTwoId" = :clientId)',
+        { clientId: clientUserId },
+      )
+      .andWhere('p.role = :role', { role: ChatParticipantRole.Expert })
+      .select('DISTINCT p."userId"', 'userId')
+      .getRawMany<{ userId: string }>();
+    return rows.map((r) => r.userId);
   }
 
   /**
@@ -397,23 +420,23 @@ export class ChatService {
    */
   async sendPlatformMessage(
     userId: string,
-    conversationId: string,
+    sessionId: string,
     dto: SendPlatformMessageDto,
   ) {
     const conversation = await this.conversationRepository.findOne({
-      where: { id: conversationId },
+      where: { id: sessionId },
     });
     if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      throw new NotFoundException('Session not found');
     }
-    if (conversation.type !== ChatConversationType.Platform) {
+    if (conversation.type !== ChatSessionType.Platform) {
       throw new BadRequestException(
         'This endpoint accepts only platform-type conversations',
       );
     }
 
     const membership = await this.participantRepository.findOne({
-      where: { conversationId: conversation.id, userId },
+      where: { sessionId: conversation.id, userId },
     });
     if (!membership) {
       throw new ForbiddenException(
@@ -422,7 +445,7 @@ export class ChatService {
     }
 
     const savedMessage = await this.persistMessage({
-      conversationId: conversation.id,
+      sessionId: conversation.id,
       senderId: userId,
       text: dto.text,
     });
@@ -433,19 +456,33 @@ export class ChatService {
       membership.role !== ChatParticipantRole.Client &&
       membership.role !== ChatParticipantRole.Ai;
 
-    await this.conversationRepository.update(conversation.id, {
-      updatedAt: now,
-    });
+    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+
+    // Fire-and-forget AI-generated session title on the client's first
+    // message. Doesn't block the reply pipeline — the sidebar picks up
+    // the new title via the `chat:session_updated` WS event.
+    if (
+      membership.role === ChatParticipantRole.Client
+      && !conversation.title
+    ) {
+      void this.sessionTitleService.generateAndAssign(conversation.id, dto.text);
+    }
 
     let handoffResolved = false;
     if (isHumanReplierTurn) {
       const result = await this.conversationRepository
         .createQueryBuilder()
-        .update(ChatConversation)
+        .update(ChatSession)
         .set({
           needsHumanHandoff: false,
           handoffTrigger: null,
           handoffRequestedAt: null,
+          // Keep handoffStatus in sync — otherwise the operator inbox
+          // (filtered by handoffStatus IN awaiting/in_progress) keeps
+          // showing the chat as active and the explicit /resolve endpoint
+          // would emit a duplicate chat:handoff_resolved event.
+          handoffStatus: ChatHandoffStatus.Resolved,
+          handoffResolvedAt: now,
         })
         .where('id = :id', { id: conversation.id })
         .andWhere('"needsHumanHandoff" = true')
@@ -456,7 +493,11 @@ export class ChatService {
     const recipientIds = await this.getRecipientIds(conversation, userId);
     const payload = {
       message: { ...savedMessage, files },
-      conversation: { id: conversation.id, updatedAt: now },
+      session: {
+        id: conversation.id,
+        updatedAt: now,
+        title: conversation.title,
+      },
     };
     this.wsGateway.emitToUser(userId, 'chat:new_message', payload);
     for (const recipientId of recipientIds) {
@@ -464,9 +505,24 @@ export class ChatService {
     }
 
     if (handoffResolved) {
+      // Match the payload shape emitted by AdminChatService.resolve so the
+      // frontend `ChatHandoffResolvedEvent` handlers always receive the
+      // required `handoffStatus` (they use it directly to upsertSession)
+      // and a `resolvedBy` we can display in the transcript.
+      const resolvedBy = await this.requireUserById(userId, 'User not found')
+        .catch(() => null);
       const handoffPayload = {
-        conversationId: conversation.id,
+        sessionId: conversation.id,
         resolvedAt: now,
+        handoffStatus: ChatHandoffStatus.Resolved,
+        resolvedBy: resolvedBy
+          ? {
+            id: resolvedBy.id,
+            name: resolvedBy.name,
+            lastName: resolvedBy.lastName,
+            email: resolvedBy.email,
+          }
+          : null,
       };
       this.wsGateway.emitToUser(
         userId,
@@ -482,11 +538,15 @@ export class ChatService {
       }
     }
 
-    if (membership.role === ChatParticipantRole.Client) {
+    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
+      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
+    if (membership.role === ChatParticipantRole.Client && !handoffPaused) {
       // Only client turns trigger an AI reply. Expert / operator turns are
       // human-authored answers to the client and must not spawn an AI echo.
-      // Orchestrator re-reads participants at emit time so a revoke during
-      // AI generation stops delivery to the revoked user.
+      // Skip AI while a handoff is active (awaiting or in_progress): the
+      // client explicitly needs a human and the operator is either about
+      // to answer or already replying, an AI turn on top would race with
+      // them. AI resumes once the operator resolves the handoff.
       this.aiOrchestrator.scheduleReply({
         conversation,
         clientUserId: userId,
@@ -499,72 +559,70 @@ export class ChatService {
   }
 
   /**
-   * Add an expert as a participant of the given client's platform conversation.
+   * Add an expert as a participant of ALL of the client's existing platform
+   * sessions.
    *
-   * Called by OrdersService when contractorChatAccess is granted. If the
-   * client has no platform conversation yet (opened lazily), we create it —
-   * so the expert always gets a chat to work with regardless of when the
-   * client first opens the widget.
+   * Called by OrdersService when contractorChatAccess is granted. Multi-session
+   * means the expert needs to see every current topic the client has open;
+   * future sessions the client creates will auto-include this expert via
+   * {@link getClientActiveExpertIds}.
    */
-  async addExpertToClientPlatformChat(
+  async addExpertToClientPlatformSessions(
     clientUserId: string,
     expertUserId: string,
   ): Promise<void> {
-    // Skip the client-role check that openPlatformConversation enforces —
-    // this call originates from the admin flow (contractorChatAccess=true)
-    // and just needs the conversation to exist so the expert can be added.
-    const conversation =
-      await this.findOrCreatePlatformConversation(clientUserId);
-    await this.ensureParticipant(
-      conversation.id,
-      expertUserId,
-      ChatParticipantRole.Expert,
-    );
+    const sessions = await this.getClientPlatformSessions(clientUserId);
+    if (sessions.length === 0) {
+      // Client has not opened any platform session yet. Create the initial
+      // one so the expert has somewhere to be — future sessions will then
+      // auto-include this expert via getClientActiveExpertIds. This mirrors
+      // the pre-multi-session behavior where addExpertToClientPlatformChat
+      // would find-or-create.
+      const created = await this.createPlatformSession(clientUserId);
+      await this.ensureParticipant(
+        created.id,
+        expertUserId,
+        ChatParticipantRole.Expert,
+      );
+      return;
+    }
+    for (const session of sessions) {
+      await this.ensureParticipant(
+        session.id,
+        expertUserId,
+        ChatParticipantRole.Expert,
+      );
+    }
   }
 
   /**
-   * Remove an expert from the given client's platform conversation.
+   * Remove an expert from ALL of the client's platform sessions.
    *
    * Called by OrdersService when contractorChatAccess is revoked (and no
-   * other active grant keeps the expert entitled). Idempotent: if the client
-   * has no platform conversation yet, or the expert was never a participant,
-   * this is a no-op — nothing to detach.
+   * other active grant keeps the expert entitled). Idempotent: silently
+   * detaches from every session where the expert is present.
    */
-  async removeExpertFromClientPlatformChat(
+  async removeExpertFromClientPlatformSessions(
     clientUserId: string,
     expertUserId: string,
   ): Promise<void> {
-    const [participantOneId, participantTwoId] =
-      AI_SYSTEM_USER_ID < clientUserId
-        ? [AI_SYSTEM_USER_ID, clientUserId]
-        : [clientUserId, AI_SYSTEM_USER_ID];
-
-    const conversation = await this.conversationRepository.findOne({
-      where: {
-        participantOneId,
-        participantTwoId,
-        orderId: IsNull(),
-        type: ChatConversationType.Platform,
-      },
-    });
-    if (!conversation) {
-      return;
+    const sessions = await this.getClientPlatformSessions(clientUserId);
+    for (const session of sessions) {
+      await this.participantRepository.delete({
+        sessionId: session.id,
+        userId: expertUserId,
+        role: ChatParticipantRole.Expert,
+      });
     }
-
-    await this.participantRepository.delete({
-      conversationId: conversation.id,
-      userId: expertUserId,
-      role: ChatParticipantRole.Expert,
-    });
   }
 
-  async markAsRead(userId: string, conversationId: string) {
+  async markAsRead(userId: string, sessionId: string) {
     const conversation = await this.conversationRepository.findOne({
-      where: { id: conversationId },
+      where: { id: sessionId },
     });
 
     if (!conversation) {
-      throw new NotFoundException('Conversation not found');
+      throw new NotFoundException('Session not found');
     }
 
     await this.assertConversationAccess(userId, conversation);
@@ -574,7 +632,7 @@ export class ChatService {
     const recipients = await this.getRecipientIds(conversation, userId);
     for (const recipient of recipients) {
       this.wsGateway.emitToUser(recipient, 'chat:messages_read', {
-        conversationId,
+        sessionId,
         readBy: userId,
       });
     }
@@ -582,7 +640,7 @@ export class ChatService {
     return { success: true };
   }
 
-  async findOrCreateConversation(userId: string, dto: StartConversationDto) {
+  async findOrCreateSession(userId: string, dto: StartSessionDto) {
     if (userId === dto.recipientId) {
       throw new BadRequestException(
         'Cannot start a conversation with yourself',
@@ -590,7 +648,7 @@ export class ChatService {
     }
     if (dto.recipientId === AI_SYSTEM_USER_ID) {
       throw new BadRequestException(
-        'Use POST /chat/conversations/platform to open the AI-консультант chat.',
+        'Use POST /chat/sessions/platform to open the AI-консультант chat.',
       );
     }
 
@@ -619,7 +677,7 @@ export class ChatService {
         participantOneId,
         participantTwoId,
         orderId: normalizedOrderId,
-        type: ChatConversationType.Expert,
+        type: ChatSessionType.Expert,
       });
       conversation = await this.conversationRepository.save(conversation);
       const [oneUser, twoUser] =
@@ -657,12 +715,12 @@ export class ChatService {
   // ── private helpers ───────────────────────────────────────────────
 
   private async persistMessage(input: {
-    conversationId: string;
+    sessionId: string;
     senderId: string;
     text: string;
   }): Promise<ChatMessage> {
     const message = this.messageRepository.create({
-      conversationId: input.conversationId,
+      sessionId: input.sessionId,
       senderId: input.senderId,
       text: input.text,
     });
@@ -685,16 +743,16 @@ export class ChatService {
   }
 
   private async ensureParticipant(
-    conversationId: string,
+    sessionId: string,
     userId: string,
     role: ChatParticipantRole,
   ): Promise<void> {
     const existing = await this.participantRepository.findOne({
-      where: { conversationId, userId },
+      where: { sessionId, userId },
     });
     if (existing) return;
     const participant = this.participantRepository.create({
-      conversationId,
+      sessionId,
       userId,
       role,
     });
@@ -715,7 +773,7 @@ export class ChatService {
   }
 
   private pickOtherParticipant(
-    conversation: ChatConversation,
+    conversation: ChatSession,
     userId: string,
   ): User | null {
     if (conversation.participantOneId === userId) {
@@ -730,10 +788,10 @@ export class ChatService {
 
   private async markConversationRead(
     userId: string,
-    conversation: ChatConversation,
+    conversation: ChatSession,
     cursor?: Date | null,
   ): Promise<void> {
-    if (conversation.type === ChatConversationType.Platform) {
+    if (conversation.type === ChatSessionType.Platform) {
       // Cursor defaults to the newest existing message's timestamp — resolved
       // here so callers like markAsRead don't need to fetch it themselves.
       // Using createdAt of an actual message (not NOW()) makes the read
@@ -742,7 +800,7 @@ export class ChatService {
       let effectiveCursor = cursor ?? null;
       if (!effectiveCursor) {
         const latest = await this.messageRepository.findOne({
-          where: { conversationId: conversation.id },
+          where: { sessionId: conversation.id },
           order: { createdAt: 'DESC' },
         });
         effectiveCursor = latest?.createdAt ?? null;
@@ -754,13 +812,13 @@ export class ChatService {
       // marker moving strictly forward.
       await this.participantRepository
         .createQueryBuilder()
-        .update(ChatConversationParticipant)
+        .update(ChatSessionParticipant)
         .set({
           lastReadAt: () =>
             'GREATEST(COALESCE("lastReadAt", :cursor), :cursor)',
         })
-        .where('"conversationId" = :conversationId', {
-          conversationId: conversation.id,
+        .where('"sessionId" = :sessionId', {
+          sessionId: conversation.id,
         })
         .andWhere('"userId" = :userId', { userId })
         .setParameter('cursor', effectiveCursor)
@@ -771,8 +829,8 @@ export class ChatService {
       .createQueryBuilder()
       .update(ChatMessage)
       .set({ isRead: true })
-      .where('conversationId = :conversationId', {
-        conversationId: conversation.id,
+      .where('sessionId = :sessionId', {
+        sessionId: conversation.id,
       })
       .andWhere('senderId != :userId', { userId })
       .andWhere('isRead = false')
@@ -780,17 +838,17 @@ export class ChatService {
   }
 
   private async computeUnreadCount(
-    conversation: ChatConversation,
+    conversation: ChatSession,
     userId: string,
   ): Promise<number> {
-    if (conversation.type === ChatConversationType.Platform) {
+    if (conversation.type === ChatSessionType.Platform) {
       const participant = await this.participantRepository.findOne({
-        where: { conversationId: conversation.id, userId },
+        where: { sessionId: conversation.id, userId },
       });
       const qb = this.messageRepository
         .createQueryBuilder('m')
-        .where('m."conversationId" = :conversationId', {
-          conversationId: conversation.id,
+        .where('m."sessionId" = :sessionId', {
+          sessionId: conversation.id,
         })
         .andWhere('m."senderId" != :userId', { userId });
       if (participant?.lastReadAt) {
@@ -802,8 +860,8 @@ export class ChatService {
     }
     return this.messageRepository
       .createQueryBuilder('m')
-      .where('m."conversationId" = :conversationId', {
-        conversationId: conversation.id,
+      .where('m."sessionId" = :sessionId', {
+        sessionId: conversation.id,
       })
       .andWhere('m."isRead" = false')
       .andWhere('m."senderId" != :userId', { userId })
@@ -811,12 +869,12 @@ export class ChatService {
   }
 
   private async getRecipientIds(
-    conversation: ChatConversation,
+    conversation: ChatSession,
     excludeUserId: string,
   ): Promise<string[]> {
-    if (conversation.type === ChatConversationType.Platform) {
+    if (conversation.type === ChatSessionType.Platform) {
       const participants = await this.participantRepository.find({
-        where: { conversationId: conversation.id },
+        where: { sessionId: conversation.id },
       });
       return participants
         .map((p) => p.userId)
@@ -830,23 +888,24 @@ export class ChatService {
 
   private async assertConversationAccess(
     userId: string,
-    conversation: ChatConversation,
+    conversation: ChatSession,
   ): Promise<void> {
-    if (conversation.type === ChatConversationType.Platform) {
-      // Platform chats are private between the client, their AI-consultant
-      // and (optionally) a purchased expert / joined operator. Admins do NOT
-      // get a global back-door here — per QIR-256 spec section 8, admin
-      // visibility of other clients' platform chats is explicitly out of
-      // scope. Access is granted only via the participants table.
+    if (conversation.type === ChatSessionType.Platform) {
+      // QIR-687 supersedes the QIR-256 "no admin back-door" rule: admins act
+      // as operators for the AI-chat inbox and need read + reply access to
+      // every platform session. Regular users still must be listed in the
+      // participants table.
       const membership = await this.participantRepository.findOne({
-        where: { conversationId: conversation.id, userId },
+        where: { sessionId: conversation.id, userId },
       });
-      if (!membership) {
-        throw new ForbiddenException(
-          'You are not a participant of this conversation',
-        );
-      }
-      return;
+      if (membership) return;
+
+      const requester = await this.requireUserById(userId, 'User not found');
+      if (requester.role === UserRole.ADMIN) return;
+
+      throw new ForbiddenException(
+        'You are not a participant of this conversation',
+      );
     }
 
     // Legacy expert-type conversations: admins have full visibility (existing

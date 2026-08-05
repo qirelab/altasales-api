@@ -16,6 +16,7 @@ import { BalanceService } from '../balance-transactions/balance.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
+import { RopSubscriptionService } from '../rop/rop-subscription.service';
 import { CreateTopUpPaymentDto } from './dto/create-topup-payment.dto';
 import { RobokassaService } from './robokassa.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -36,6 +37,7 @@ export class PaymentService {
     private readonly balanceService: BalanceService,
     private readonly orderNotificationService: OrderNotificationService,
     private readonly recommendationUserLockService: RecommendationUserLockService,
+    private readonly ropSubscriptionService: RopSubscriptionService,
   ) {}
 
   async createWithManager(
@@ -307,6 +309,8 @@ export class PaymentService {
           (notificationError as Error).stack,
         );
       }
+
+      this.ropSubscriptionService.scheduleSyncForOrders(notifyOrderIds);
     }
 
     return { response: `OK${invId}` };

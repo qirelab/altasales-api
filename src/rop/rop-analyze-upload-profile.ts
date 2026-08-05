@@ -16,17 +16,8 @@ export const ROP_DOCUMENT_ANALYZE_UPLOAD_PROFILE: RopAnalyzeUploadProfile = {
 
 export const ROP_DASHBOARD_ANALYZE_UPLOAD_PROFILE: RopAnalyzeUploadProfile = {
   maxBytes: 25 * 1024 * 1024,
-  allowedExtensions: new Set([
-    'pdf',
-    'xlsx',
-    'csv',
-    'png',
-    'jpg',
-    'jpeg',
-    'webp',
-  ]),
-  formatErrorMessage:
-    'Допустимы только файлы XLSX, CSV, PDF или скрин (PNG, JPG, WEBP)',
+  allowedExtensions: new Set(['pdf', 'xlsx', 'csv']),
+  formatErrorMessage: 'Допустимы только файлы XLSX, CSV или PDF',
   sizeErrorMessage: 'Максимальный размер файла — 25 МБ',
 };
 

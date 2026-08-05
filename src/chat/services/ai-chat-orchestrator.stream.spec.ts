@@ -1,5 +1,5 @@
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
 import {
@@ -11,7 +11,7 @@ import { ChatHistoryMapperService } from './chat-history-mapper.service';
 function makeMessage(overrides: Record<string, unknown> = {}) {
   return {
     id: overrides.id ?? 'msg-generated',
-    conversationId: 'conv-1',
+    sessionId: 'conv-1',
     senderId: overrides.senderId ?? 'client-1',
     text: overrides.text ?? 'txt',
     isRead: false,
@@ -125,7 +125,7 @@ function makeYieldingRagStream(events: unknown[]) {
 
 const conversation = {
   id: 'conv-1',
-  type: ChatConversationType.Platform,
+  type: ChatSessionType.Platform,
   participantOneId: 'client-1',
   participantTwoId: AI_SYSTEM_USER_ID,
 } as never;
@@ -183,11 +183,13 @@ describe('AiChatOrchestratorService.streamReply', () => {
         isAiGenerated: true,
       }),
     );
-    // WS is emitted to OTHER participants, never to the streaming client
-    // (they already saw the deltas over SSE).
+    // WS is emitted to everyone including the client. The client normally
+    // consumes the reply through SSE deltas; the WS event is a redundant
+    // path so a torn stream can still deliver the message via useWsHandlers
+    // (dedupe against streaming placeholder happens on the frontend).
     const targetIds = wsGateway.emitToUser.mock.calls.map((call) => call[0]);
     expect(targetIds).toContain('expert-1');
-    expect(targetIds).not.toContain('client-1');
+    expect(targetIds).toContain('client-1');
     expect(targetIds).not.toContain(AI_SYSTEM_USER_ID);
   });
 
@@ -200,7 +202,7 @@ describe('AiChatOrchestratorService.streamReply', () => {
             answer: 'Я не нашёл информации по этому вопросу.',
             hasContext: false,
             sources: [],
-            refusalReason: 'no_results',
+            refusalReason: 'no_results_in_scope',
           },
         },
       ],
@@ -218,7 +220,7 @@ describe('AiChatOrchestratorService.streamReply', () => {
     );
 
     expect(calls.deltas).toHaveLength(0);
-    expect(calls.refusal).toEqual(['ai-msg-1:no_results']);
+    expect(calls.refusal).toEqual(['ai-msg-1:no_results_in_scope']);
     expect(calls.done).toHaveLength(0);
   });
 
@@ -345,24 +347,24 @@ describe('AiChatOrchestratorService.streamReply', () => {
     expect(handoffEvents.length).toBeGreaterThan(0);
     expect(handoffEvents[0][2]).toEqual(
       expect.objectContaining({
-        conversationId: 'conv-1',
+        sessionId: 'conv-1',
         trigger: ChatHandoffTrigger.UserExplicitRequest,
       }),
     );
     expect(calls.refusal).toEqual(['ai-msg-1:explicit_request']);
   });
 
-  it('marks rag_no_context handoff after a streamed no_results refusal', async () => {
+  it('marks rag_no_context handoff after a streamed no_results_in_scope refusal', async () => {
     const { orchestrator, conversationRepository, wsGateway } =
       buildOrchestrator({
         ragEvents: [
           {
             type: 'refusal',
             response: {
-              answer: 'Я не нашёл информации по этому вопросу.',
+              answer: 'Не нашёл ответ, зову специалиста AltaSales.',
               hasContext: false,
               sources: [],
-              refusalReason: 'no_results',
+              refusalReason: 'no_results_in_scope',
             },
           },
         ],

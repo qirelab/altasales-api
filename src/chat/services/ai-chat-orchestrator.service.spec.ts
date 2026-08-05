@@ -1,5 +1,5 @@
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
-import { ChatConversationType } from '../entities/chat-conversation-type.enum';
+import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
 import { AiChatOrchestratorService } from './ai-chat-orchestrator.service';
@@ -8,7 +8,7 @@ import { ChatHistoryMapperService } from './chat-history-mapper.service';
 function makeMessage(overrides: Record<string, unknown> = {}) {
   return {
     id: overrides.id ?? 'msg-generated',
-    conversationId: 'conv-1',
+    sessionId: 'conv-1',
     senderId: overrides.senderId ?? 'client-1',
     text: overrides.text ?? 'txt',
     isRead: false,
@@ -152,7 +152,7 @@ describe('AiChatOrchestratorService', () => {
 
   const conversation = {
     id: 'conv-1',
-    type: ChatConversationType.Platform,
+    type: ChatSessionType.Platform,
   } as never;
   const clientUserId = 'client-1';
 
@@ -218,7 +218,7 @@ describe('AiChatOrchestratorService', () => {
 
     expect(messageRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        conversationId: 'conv-1',
+        sessionId: 'conv-1',
         senderId: AI_SYSTEM_USER_ID,
         text: 'Here is your answer',
         isAiGenerated: true,
@@ -502,7 +502,7 @@ describe('AiChatOrchestratorService', () => {
     )?.[2];
     expect(handoffPayload).toEqual(
       expect.objectContaining({
-        conversationId: 'conv-1',
+        sessionId: 'conv-1',
         trigger: ChatHandoffTrigger.UserExplicitRequest,
       }),
     );
@@ -518,7 +518,7 @@ describe('AiChatOrchestratorService', () => {
       buildOrchestrator({
         historyRows: [clientMsg],
         currentMessage: clientMsg,
-        ragRefusalReason: 'no_results',
+        ragRefusalReason: 'no_results_in_scope',
         ragAnswer: 'Я не нашёл информации',
       });
 
@@ -550,7 +550,7 @@ describe('AiChatOrchestratorService', () => {
         historyRows: [
           makeMessage({ id: 'm1', senderId: clientUserId, text: 'q1' }),
         ],
-        ragRefusalReason: 'no_results',
+        ragRefusalReason: 'no_results_in_scope',
       });
     conversationRepository.conditionalExecute.mockResolvedValueOnce({
       affected: 0,

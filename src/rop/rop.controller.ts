@@ -12,6 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { MulterOptions } from '@nestjs/platform-express/multer/interfaces/multer-options.interface';
 import {
   ApiBody,
   ApiConsumes,
@@ -45,6 +46,20 @@ import { RopIndicatorsService } from './rop-indicators.service';
 import { RopMeetingsService } from './rop-meetings.service';
 import { RopService } from './rop.service';
 import { RopTasksService } from './rop-tasks.service';
+
+interface MulterUtf8Options extends MulterOptions {
+  defParamCharset?: string;
+}
+
+const DOCUMENT_ANALYZE_UPLOAD_OPTIONS: MulterUtf8Options = {
+  limits: { fileSize: 20 * 1024 * 1024 },
+  defParamCharset: 'utf8',
+};
+
+const DASHBOARD_ANALYZE_UPLOAD_OPTIONS: MulterUtf8Options = {
+  limits: { fileSize: 25 * 1024 * 1024 },
+  defParamCharset: 'utf8',
+};
 
 @ApiTags('rop')
 @Controller('rop')
@@ -138,9 +153,7 @@ export class RopController {
     },
   })
   @ApiCreatedResponse({ type: RopDocumentResponseDto })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 20 * 1024 * 1024 } }),
-  )
+  @UseInterceptors(FileInterceptor('file', DOCUMENT_ANALYZE_UPLOAD_OPTIONS))
   async uploadDocumentForAnalyze(
     @CurrentUser() user: CurrentUserData,
     @UploadedFile() file: Express.Multer.File,
@@ -195,9 +208,7 @@ export class RopController {
     },
   })
   @ApiOkResponse({ type: RopDashboardFileInspectResponseDto })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
-  )
+  @UseInterceptors(FileInterceptor('file', DASHBOARD_ANALYZE_UPLOAD_OPTIONS))
   async inspectDashboardFile(
     @CurrentUser() user: CurrentUserData,
     @UploadedFile() file: Express.Multer.File,
@@ -240,9 +251,7 @@ export class RopController {
     },
   })
   @ApiCreatedResponse({ type: RopDocumentResponseDto })
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }),
-  )
+  @UseInterceptors(FileInterceptor('file', DASHBOARD_ANALYZE_UPLOAD_OPTIONS))
   async uploadDashboardForAnalyze(
     @CurrentUser() user: CurrentUserData,
     @UploadedFile() file: Express.Multer.File,

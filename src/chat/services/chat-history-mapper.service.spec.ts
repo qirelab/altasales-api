@@ -4,7 +4,7 @@ import { ChatHistoryMapperService } from './chat-history-mapper.service';
 function msg(overrides: Partial<ChatMessage>): ChatMessage {
   return {
     id: overrides.id ?? 'm-1',
-    conversationId: overrides.conversationId ?? 'conv-1',
+    sessionId: overrides.sessionId ?? 'conv-1',
     conversation: undefined as never,
     senderId: overrides.senderId ?? 'client-1',
     sender: undefined as never,

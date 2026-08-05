@@ -60,7 +60,7 @@ describe('HandoffTriggerService.detect', () => {
     });
   });
 
-  it.each(['empty_question', 'no_results', 'below_threshold'] as const)(
+  it.each(['no_results_in_scope', 'explicit_handoff'] as const)(
     'fires rag_no_context on refusalReason %s',
     (reason) => {
       const result = service.detect({
@@ -71,6 +71,17 @@ describe('HandoffTriggerService.detect', () => {
         needsHandoff: true,
         trigger: ChatHandoffTrigger.RagNoContext,
       });
+    },
+  );
+
+  it.each(['empty_question', 'no_results', 'below_threshold'] as const)(
+    'does NOT fire handoff on legacy refusalReason %s (off-topic protection)',
+    (reason) => {
+      const result = service.detect({
+        clientMessage: 'Что о политике?',
+        ragResponse: makeRag({ refusalReason: reason }),
+      });
+      expect(result).toEqual({ needsHandoff: false });
     },
   );
 

@@ -27,6 +27,7 @@ import { CartService } from '../cart/cart.service';
 import { Recommendation } from '../recommendations/entities/recommendation.entity';
 import { RecommendationStatus } from '../recommendations/entities/recommendation-status.enum';
 import { RecommendationUserLockService } from '../recommendations/recommendation-user-lock.service';
+import { RopSubscriptionService } from '../rop/rop-subscription.service';
 import { ChatService } from '../chat/chat.service';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
@@ -133,6 +134,7 @@ export class OrdersService {
     private readonly orderNotificationService: OrderNotificationService,
     private readonly chatService: ChatService,
     private readonly recommendationUserLockService: RecommendationUserLockService,
+    private readonly ropSubscriptionService: RopSubscriptionService,
   ) {}
 
   private mapOrderStatusToRecommendationStatus(
@@ -671,6 +673,8 @@ export class OrdersService {
           );
         }
 
+        this.ropSubscriptionService.scheduleSyncForOrders(orderIds);
+
         return {
           orderId: primaryOrderId,
           orderIds,
@@ -1021,13 +1025,13 @@ export class OrdersService {
       // concurrent revoke on a sibling order of the same pair could see
       // this order's `contractorChatAccess = false` (not yet saved),
       // consider itself the last grant, remove the expert we just added,
-      // and only then let us proceed. `addExpertToClientPlatformChat` is
+      // and only then let us proceed. `addExpertToClientPlatformSessions` is
       // idempotent so a repeat grant still self-heals a partial prior run.
       return this.withClientExpertLock(
         order.userId,
         expertUserId,
         async (manager) => {
-          await this.chatService.addExpertToClientPlatformChat(
+          await this.chatService.addExpertToClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1047,7 +1051,7 @@ export class OrdersService {
                 );
               if (!hasOtherGrant) {
                 await this.chatService
-                  .removeExpertFromClientPlatformChat(
+                  .removeExpertFromClientPlatformSessions(
                     order.userId,
                     expertUserId,
                   )
@@ -1082,7 +1086,7 @@ export class OrdersService {
           expertUserId,
         );
         if (!hasOtherGrant) {
-          await this.chatService.removeExpertFromClientPlatformChat(
+          await this.chatService.removeExpertFromClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1131,7 +1135,7 @@ export class OrdersService {
           expertUserId,
         );
         if (!hasOtherGrant) {
-          await this.chatService.removeExpertFromClientPlatformChat(
+          await this.chatService.removeExpertFromClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1171,7 +1175,7 @@ export class OrdersService {
           expertUserId,
         );
         if (!hasOtherGrant) {
-          await this.chatService.removeExpertFromClientPlatformChat(
+          await this.chatService.removeExpertFromClientPlatformSessions(
             order.userId,
             expertUserId,
           );
@@ -1313,6 +1317,7 @@ export class OrdersService {
         packageId: order.item.packageId,
       });
     }
+    this.ropSubscriptionService.scheduleSyncForUser(savedOrder.userId);
     return savedOrder;
   }
 
@@ -1361,6 +1366,7 @@ export class OrdersService {
       });
     }
 
+    this.ropSubscriptionService.scheduleSyncForUser(item.order.userId);
     return savedItem;
   }
 
@@ -1377,6 +1383,7 @@ export class OrdersService {
     let capturedItemStatus: OrderStatus;
     let capturedParentJustCancelled = false;
     let capturedOrderId: string;
+    let capturedUserId: string;
 
     try {
       const itemRepo = queryRunner.manager.getRepository(OrderItem);
@@ -1462,6 +1469,7 @@ export class OrdersService {
       capturedItemStatus = recalculatedStatus;
       capturedParentJustCancelled = parentJustCancelled;
       capturedOrderId = item.orderId;
+      capturedUserId = item.order.userId;
 
       await queryRunner.commitTransaction();
     } catch (error) {
@@ -1491,6 +1499,7 @@ export class OrdersService {
       }
     }
 
+    this.ropSubscriptionService.scheduleSyncForUser(capturedUserId);
     return { subItem: capturedSubItem, itemStatus: capturedItemStatus };
   }
 

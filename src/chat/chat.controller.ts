@@ -14,17 +14,19 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { SessionGuard } from '../auth/guards/session.guard';
 import {
   CurrentUser,
   type CurrentUserData,
 } from '../auth/decorators/current-user.decorator';
+import { SessionGuard } from '../auth/guards/session.guard';
+import { ChatThrottlerGuard } from './guards/chat-throttler.guard';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
-import { GetConversationsQueryDto } from './dto/get-conversations-query.dto';
+import { GetSessionsQueryDto } from './dto/get-sessions-query.dto';
 import { GetMessagesQueryDto } from './dto/get-messages-query.dto';
-import { StartConversationDto } from './dto/start-conversation.dto';
+import { StartSessionDto } from './dto/start-session.dto';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
 import { ChatStreamingService } from './services/chat-streaming.service';
 
@@ -38,17 +40,17 @@ export class ChatController {
     private readonly chatStreamingService: ChatStreamingService,
   ) {}
 
-  @Get('conversations')
-  @ApiOperation({ summary: 'Get conversations list' })
-  getConversations(
+  @Get('sessions')
+  @ApiOperation({ summary: 'Get sessions list' })
+  getSessions(
     @CurrentUser() user: CurrentUserData,
-    @Query() query: GetConversationsQueryDto,
+    @Query() query: GetSessionsQueryDto,
   ) {
-    return this.chatService.getConversations(user.id, query);
+    return this.chatService.getSessions(user.id, query);
   }
 
-  @Get('conversations/:id/messages')
-  @ApiOperation({ summary: 'Get messages for a conversation' })
+  @Get('sessions/:id/messages')
+  @ApiOperation({ summary: 'Get messages for a session' })
   getMessages(
     @CurrentUser() user: CurrentUserData,
     @Param('id', ParseUUIDPipe) id: string,
@@ -66,8 +68,8 @@ export class ChatController {
     return this.chatService.sendMessage(user.id, dto);
   }
 
-  @Patch('conversations/:id/read')
-  @ApiOperation({ summary: 'Mark conversation as read' })
+  @Patch('sessions/:id/read')
+  @ApiOperation({ summary: 'Mark session as read' })
   markAsRead(
     @CurrentUser() user: CurrentUserData,
     @Param('id', ParseUUIDPipe) id: string,
@@ -75,29 +77,33 @@ export class ChatController {
     return this.chatService.markAsRead(user.id, id);
   }
 
-  @Post('conversations/start')
-  @ApiOperation({ summary: 'Find or create a conversation with a user' })
-  startConversation(
+  @Post('sessions/start')
+  @ApiOperation({ summary: 'Find or create a session with a user (legacy)' })
+  startSession(
     @CurrentUser() user: CurrentUserData,
-    @Body() dto: StartConversationDto,
+    @Body() dto: StartSessionDto,
   ) {
-    return this.chatService.findOrCreateConversation(user.id, dto);
+    return this.chatService.findOrCreateSession(user.id, dto);
   }
 
-  @Post('conversations/platform')
+  @Post('sessions/platform')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
-    summary: `Open or return the client's single platform chat with AI-консультант AltaSales`,
+    summary: 'Create a new platform (AI) session for the current client',
   })
-  openPlatformConversation(@CurrentUser() user: CurrentUserData) {
-    return this.chatService.openPlatformConversation(user.id);
+  openPlatformSession(@CurrentUser() user: CurrentUserData) {
+    return this.chatService.openPlatformSession(user.id);
   }
 
-  @Post('conversations/:id/messages')
+  @Post('sessions/:id/messages')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
-      'Send a message inside a platform conversation. Client messages trigger ' +
+      'Send a message inside a platform session. Client messages trigger ' +
       'an async AI reply (delivered via chat:new_message WS event).',
   })
   sendPlatformMessage(
@@ -108,7 +114,9 @@ export class ChatController {
     return this.chatService.sendPlatformMessage(user.id, id, dto);
   }
 
-  @Post('conversations/:id/messages/stream')
+  @Post('sessions/:id/messages/stream')
+  @UseGuards(ChatThrottlerGuard)
+  @Throttle({ chat: { limit: 30, ttl: 60_000 } })
   @ApiOperation({
     summary:
       'Send a client message and stream the AI reply as Server-Sent Events. ' +
