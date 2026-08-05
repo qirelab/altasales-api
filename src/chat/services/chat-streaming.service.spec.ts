@@ -198,7 +198,7 @@ describe('ChatStreamingService.runStream', () => {
     expect(targets).not.toContain(AI_SYSTEM_USER_ID);
   });
 
-  it("schedules AI title generation on the client's first streaming message when title is null", async () => {
+  it('schedules AI title generation on the client\'s first streaming message when title is null', async () => {
     const { service, sessionTitleService } = buildService({
       conversation: {
         id: 'conv-1',

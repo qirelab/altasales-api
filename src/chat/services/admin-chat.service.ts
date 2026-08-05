@@ -70,15 +70,15 @@ export class AdminChatService {
     const where =
       filter === 'resolved'
         ? {
-            type: ChatSessionType.Platform,
-            handoffStatus: ChatHandoffStatus.Resolved,
-          }
+          type: ChatSessionType.Platform,
+          handoffStatus: ChatHandoffStatus.Resolved,
+        }
         : {
-            type: ChatSessionType.Platform,
-            handoffStatus: In(
+          type: ChatSessionType.Platform,
+          handoffStatus: In(
               ACTIVE_STATUSES as unknown as ChatHandoffStatus[],
-            ),
-          };
+          ),
+        };
     const rows = await this.sessionRepository.find({
       where,
       relations: ['participantOne', 'participantTwo', 'assignedOperator'],
@@ -95,12 +95,12 @@ export class AdminChatService {
     const lastMessages =
       sessionIds.length > 0
         ? await this.messageRepository
-            .createQueryBuilder('m')
-            .distinctOn(['m."sessionId"'])
-            .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
-            .orderBy('m."sessionId"')
-            .addOrderBy('m."createdAt"', 'DESC')
-            .getMany()
+          .createQueryBuilder('m')
+          .distinctOn(['m."sessionId"'])
+          .where('m."sessionId" IN (:...ids)', { ids: sessionIds })
+          .orderBy('m."sessionId"')
+          .addOrderBy('m."createdAt"', 'DESC')
+          .getMany()
         : [];
     const lastMessageBySession = new Map<string, ChatMessage>();
     for (const m of lastMessages) lastMessageBySession.set(m.sessionId, m);
@@ -108,8 +108,8 @@ export class AdminChatService {
     const questionnaires =
       clientIds.length > 0
         ? await this.questionnaireRepository.find({
-            where: { userId: In(clientIds) },
-          })
+          where: { userId: In(clientIds) },
+        })
         : [];
     const companyByUserId = new Map<string, string | null>();
     for (const q of questionnaires) {
@@ -168,12 +168,12 @@ export class AdminChatService {
       participant: pickUser(client, companyName),
       lastMessage: lastMessage
         ? {
-            id: lastMessage.id,
-            text: lastMessage.text,
-            senderId: lastMessage.senderId,
-            isAiGenerated: lastMessage.isAiGenerated,
-            createdAt: lastMessage.createdAt,
-          }
+          id: lastMessage.id,
+          text: lastMessage.text,
+          senderId: lastMessage.senderId,
+          isAiGenerated: lastMessage.isAiGenerated,
+          createdAt: lastMessage.createdAt,
+        }
         : null,
       needsHumanHandoff: session.needsHumanHandoff,
       handoffStatus: session.handoffStatus,

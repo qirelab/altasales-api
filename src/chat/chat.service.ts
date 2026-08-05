@@ -547,11 +547,11 @@ export class ChatService {
         handoffStatus: ChatHandoffStatus.Resolved,
         resolvedBy: resolvedBy
           ? {
-              id: resolvedBy.id,
-              name: resolvedBy.name,
-              lastName: resolvedBy.lastName,
-              email: resolvedBy.email,
-            }
+            id: resolvedBy.id,
+            name: resolvedBy.name,
+            lastName: resolvedBy.lastName,
+            email: resolvedBy.email,
+          }
           : null,
       };
       this.wsGateway.emitToUser(
@@ -1321,7 +1321,7 @@ export class ChatService {
 
   private async inferLegacyRole(
     userId: string,
-    conversation: ChatSession,
+    _conversation: ChatSession,
   ): Promise<ChatParticipantRole> {
     const user = await this.requireUserById(userId, 'User not found');
     return this.mapUserRoleToParticipantRole(user.role);

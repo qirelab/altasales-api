@@ -58,7 +58,7 @@ export class ExpertChatController {
       new DefaultValuePipe('all'),
       new ParseEnumPipe(['all', 'active', 'resolved']),
     )
-    filter: ExpertSessionFilter,
+      filter: ExpertSessionFilter,
   ) {
     return this.expertChatService.listExpertSessions(user.id, filter);
   }

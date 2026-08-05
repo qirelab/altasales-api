@@ -122,8 +122,8 @@ export class ExpertChatService {
     const questionnaires =
       clientIds.length > 0
         ? await this.questionnaireRepository.find({
-            where: { userId: In(clientIds) },
-          })
+          where: { userId: In(clientIds) },
+        })
         : [];
     const companyByUserId = new Map<string, string | null>();
     for (const q of questionnaires) {
@@ -182,12 +182,12 @@ export class ExpertChatService {
       participant: pickUser(client, companyName),
       lastMessage: lastMessage
         ? {
-            id: lastMessage.id,
-            text: lastMessage.text,
-            senderId: lastMessage.senderId,
-            isAiGenerated: lastMessage.isAiGenerated,
-            createdAt: lastMessage.createdAt,
-          }
+          id: lastMessage.id,
+          text: lastMessage.text,
+          senderId: lastMessage.senderId,
+          isAiGenerated: lastMessage.isAiGenerated,
+          createdAt: lastMessage.createdAt,
+        }
         : null,
       needsHumanHandoff: session.needsHumanHandoff,
       handoffStatus: session.handoffStatus,
