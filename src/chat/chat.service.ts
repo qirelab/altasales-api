@@ -452,10 +452,6 @@ export class ChatService {
     const files = await this.linkFilesToMessage(dto.fileIds, savedMessage.id);
     const now = new Date();
 
-    const isHumanReplierTurn =
-      membership.role !== ChatParticipantRole.Client &&
-      membership.role !== ChatParticipantRole.Ai;
-
     await this.conversationRepository.update(conversation.id, { updatedAt: now });
 
     // Fire-and-forget AI-generated session title on the client's first
@@ -466,28 +462,6 @@ export class ChatService {
       && !conversation.title
     ) {
       void this.sessionTitleService.generateAndAssign(conversation.id, dto.text);
-    }
-
-    let handoffResolved = false;
-    if (isHumanReplierTurn) {
-      const result = await this.conversationRepository
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({
-          needsHumanHandoff: false,
-          handoffTrigger: null,
-          handoffRequestedAt: null,
-          // Keep handoffStatus in sync — otherwise the operator inbox
-          // (filtered by handoffStatus IN awaiting/in_progress) keeps
-          // showing the chat as active and the explicit /resolve endpoint
-          // would emit a duplicate chat:handoff_resolved event.
-          handoffStatus: ChatHandoffStatus.Resolved,
-          handoffResolvedAt: now,
-        })
-        .where('id = :id', { id: conversation.id })
-        .andWhere('"needsHumanHandoff" = true')
-        .execute();
-      handoffResolved = (result.affected ?? 0) > 0;
     }
 
     const recipientIds = await this.getRecipientIds(conversation, userId);
@@ -502,40 +476,6 @@ export class ChatService {
     this.wsGateway.emitToUser(userId, 'chat:new_message', payload);
     for (const recipientId of recipientIds) {
       this.wsGateway.emitToUser(recipientId, 'chat:new_message', payload);
-    }
-
-    if (handoffResolved) {
-      // Match the payload shape emitted by AdminChatService.resolve so the
-      // frontend `ChatHandoffResolvedEvent` handlers always receive the
-      // required `handoffStatus` (they use it directly to upsertSession)
-      // and a `resolvedBy` we can display in the transcript.
-      const resolvedBy = await this.requireUserById(userId, 'User not found')
-        .catch(() => null);
-      const handoffPayload = {
-        sessionId: conversation.id,
-        resolvedAt: now,
-        handoffStatus: ChatHandoffStatus.Resolved,
-        resolvedBy: resolvedBy
-          ? {
-            id: resolvedBy.id,
-            name: resolvedBy.name,
-            lastName: resolvedBy.lastName,
-            email: resolvedBy.email,
-          }
-          : null,
-      };
-      this.wsGateway.emitToUser(
-        userId,
-        'chat:handoff_resolved',
-        handoffPayload,
-      );
-      for (const recipientId of recipientIds) {
-        this.wsGateway.emitToUser(
-          recipientId,
-          'chat:handoff_resolved',
-          handoffPayload,
-        );
-      }
     }
 
     const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
