@@ -83,9 +83,12 @@ export class ChatStreamingService {
     if (!conversation) {
       throw new NotFoundException('Session not found');
     }
-    if (conversation.type !== ChatSessionType.Platform) {
+    if (
+      conversation.type !== ChatSessionType.Platform &&
+      conversation.type !== ChatSessionType.Expert
+    ) {
       throw new BadRequestException(
-        'This endpoint accepts only platform-type conversations',
+        'This endpoint accepts only platform or expert-type conversations',
       );
     }
 
@@ -143,7 +146,9 @@ export class ChatStreamingService {
       savedClientMessage = await this.messageRepository.save(clientMessage);
 
       const now = new Date();
-      await this.conversationRepository.update(conversation.id, { updatedAt: now });
+      await this.conversationRepository.update(conversation.id, {
+        updatedAt: now,
+      });
 
       // Fire-and-forget AI-generated session title on the first client turn.
       // Doesn't block the streaming pipeline — the sidebar picks up the new
@@ -195,8 +200,9 @@ export class ChatStreamingService {
     // (in_progress). AI resumes once resolved / null. The client message
     // is already persisted and broadcast above so the operator inbox sees
     // it in real time.
-    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
-      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
+    const handoffPaused =
+      conversation.handoffStatus === ChatHandoffStatus.Awaiting ||
+      conversation.handoffStatus === ChatHandoffStatus.InProgress;
     if (handoffPaused) {
       hooks.onDone(savedClientMessage);
       return;

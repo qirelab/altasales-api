@@ -91,10 +91,15 @@ function buildOrchestrator(
   };
   const historyMapper = new ChatHistoryMapperService();
   const handoffTrigger = new HandoffTriggerService();
+  const orderRepository = {
+    findOne: jest.fn().mockResolvedValue(null),
+    find: jest.fn().mockResolvedValue([]),
+  };
   const orchestrator = new AiChatOrchestratorService(
     messageRepository as never,
     conversationRepository as never,
     participantRepository as never,
+    orderRepository as never,
     ragService as never,
     historyMapper,
     wsGateway as never,

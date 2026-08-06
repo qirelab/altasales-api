@@ -316,6 +316,12 @@ const EVENT_SUCCEEDED = 'CHATBOT_RAG_SUCCEEDED';
  *   sees the full turn context. Ownership of history and its storage live with
  *   the caller (e.g. `/chat` module) — this service is agnostic of source.
  */
+export type ChatbotServiceTopic = {
+  name: string;
+  description?: string | null;
+  categoryName?: string | null;
+};
+
 export type ChatbotRagInput = {
   question: string;
   history?: ChatbotHistoryEntry[];
@@ -323,6 +329,10 @@ export type ChatbotRagInput = {
   // as an additional system message. Optional so tests and out-of-user calls
   // still work without a full client context lookup.
   clientUserId?: string;
+  /** When set, AI must stay inside this purchased service topic (expert chats). */
+  serviceTopic?: ChatbotServiceTopic;
+  /** Who human handoff pages — wording in refusal/announce messages. */
+  handoffTarget?: 'operator' | 'expert';
 };
 
 export type ChatbotRagSource = {
@@ -356,7 +366,9 @@ const INFRA_REFUSAL_REASONS: ReadonlySet<ChatbotRagRefusalReason> =
     'context_too_large',
   ]);
 
-const HANDOFF_MESSAGE_BY_REASON: Partial<Record<ChatbotRagRefusalReason, string>> = {
+const HANDOFF_MESSAGE_BY_REASON: Partial<
+  Record<ChatbotRagRefusalReason, string>
+> = {
   no_results_in_scope: NO_INFO_MESSAGE,
   explicit_handoff: EXPLICIT_HANDOFF_MESSAGE,
 };
@@ -453,13 +465,18 @@ export class ChatbotRagService {
         `Knowledge search failed: ${(error as Error)?.message ?? String(error)}`,
       );
       if (!skipRag) {
-        return this.buildRefusal('retrieval_failed', startedAt, {
-          retrievalMs: Date.now() - retrievalStartedAt,
-          totalResults: 0,
-          rewriteMs,
-          queryRewritten,
-          usedHistoryCount: context.usedHistoryCount,
-        }, intent);
+        return this.buildRefusal(
+          'retrieval_failed',
+          startedAt,
+          {
+            retrievalMs: Date.now() - retrievalStartedAt,
+            totalResults: 0,
+            rewriteMs,
+            queryRewritten,
+            usedHistoryCount: context.usedHistoryCount,
+          },
+          intent,
+        );
       }
     }
     const retrievalMs = Date.now() - retrievalStartedAt;
@@ -467,18 +484,24 @@ export class ChatbotRagService {
     const strongResults = results.filter(
       (entry) => entry.score >= this.minRelevanceScore,
     );
-    const contextResults = strongResults.length > 0
-      ? this.trimToBudget(strongResults, question)
-      : [];
+    const contextResults =
+      strongResults.length > 0
+        ? this.trimToBudget(strongResults, question)
+        : [];
     if (strongResults.length > 0 && contextResults.length === 0) {
-      return this.buildRefusal('context_too_large', startedAt, {
-        retrievalMs,
-        totalResults: results.length,
-        topScore: strongResults[0]?.score,
-        rewriteMs,
-        queryRewritten,
-        usedHistoryCount: context.usedHistoryCount,
-      }, intent);
+      return this.buildRefusal(
+        'context_too_large',
+        startedAt,
+        {
+          retrievalMs,
+          totalResults: results.length,
+          topScore: strongResults[0]?.score,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        },
+        intent,
+      );
     }
     // Platform question with no usable RAG context → escalate to a human.
     // Other intents (greeting/meta/off_topic/sales_question) never reach RAG,
@@ -492,12 +515,23 @@ export class ChatbotRagService {
         usedHistoryCount: context.usedHistoryCount,
       });
     }
-    const userContent = contextResults.length > 0
-      ? this.buildAugmentedPrompt(question, contextResults)
-      : question;
+    const userContent =
+      contextResults.length > 0
+        ? this.buildAugmentedPrompt(question, contextResults)
+        : question;
     const clientContextBlock = input.clientUserId
       ? await this.clientContext.buildContextBlock(input.clientUserId)
       : '';
+    const serviceTopicBlock = buildServiceTopicBlock(input.serviceTopic);
+    const systemMessages = [
+      { role: 'system' as const, content: SYSTEM_PROMPT },
+      ...(serviceTopicBlock
+        ? [{ role: 'system' as const, content: serviceTopicBlock }]
+        : []),
+      ...(clientContextBlock
+        ? [{ role: 'system' as const, content: clientContextBlock }]
+        : []),
+    ];
 
     const generationStartedAt = Date.now();
     let answer = '';
@@ -508,10 +542,12 @@ export class ChatbotRagService {
         // Client context contains PII from the anket (name, phone, company,
         // messenger handle) → declare RawPii so the anonymizer strips it
         // before the LLM sees the message.
-        declaredDataClass: clientContextBlock ? DataClass.RawPii : DataClass.NoPii,
+        declaredDataClass:
+          clientContextBlock || serviceTopicBlock
+            ? DataClass.RawPii
+            : DataClass.NoPii,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...(clientContextBlock ? [{ role: 'system' as const, content: clientContextBlock }] : []),
+          ...systemMessages,
           ...context.historyMessages,
           { role: 'user', content: userContent },
         ],
@@ -524,42 +560,55 @@ export class ChatbotRagService {
       this.logger.error(
         `LLM generation failed: ${(error as Error)?.message ?? String(error)}`,
       );
-      return this.buildRefusal('generation_failed', startedAt, {
-        retrievalMs,
-        totalResults: results.length,
-        topScore: results[0]?.score,
-        contextChunks: contextResults.length,
-        generationMs: Date.now() - generationStartedAt,
-        rewriteMs,
-        queryRewritten,
-        usedHistoryCount: context.usedHistoryCount,
-      }, intent);
+      return this.buildRefusal(
+        'generation_failed',
+        startedAt,
+        {
+          retrievalMs,
+          totalResults: results.length,
+          topScore: results[0]?.score,
+          contextChunks: contextResults.length,
+          generationMs: Date.now() - generationStartedAt,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        },
+        intent,
+      );
     }
     const generationMs = Date.now() - generationStartedAt;
 
     if (!answer) {
-      return this.buildRefusal('empty_llm_response', startedAt, {
+      return this.buildRefusal(
+        'empty_llm_response',
+        startedAt,
+        {
+          retrievalMs,
+          totalResults: results.length,
+          contextChunks: contextResults.length,
+          generationMs,
+          rewriteMs,
+          queryRewritten,
+          usedHistoryCount: context.usedHistoryCount,
+        },
+        intent,
+      );
+    }
+
+    this.logSuccess(
+      {
+        totalMs: Date.now() - startedAt,
         retrievalMs,
+        generationMs,
         totalResults: results.length,
         contextChunks: contextResults.length,
-        generationMs,
+        topScore: contextResults[0]?.score,
         rewriteMs,
         queryRewritten,
         usedHistoryCount: context.usedHistoryCount,
-      }, intent);
-    }
-
-    this.logSuccess({
-      totalMs: Date.now() - startedAt,
-      retrievalMs,
-      generationMs,
-      totalResults: results.length,
-      contextChunks: contextResults.length,
-      topScore: contextResults[0]?.score,
-      rewriteMs,
-      queryRewritten,
-      usedHistoryCount: context.usedHistoryCount,
-    }, intent);
+      },
+      intent,
+    );
 
     return {
       answer,
@@ -610,7 +659,11 @@ export class ChatbotRagService {
     if (intent === ChatIntent.ExplicitHandoff) {
       yield {
         type: 'refusal',
-        response: this.buildIntentRefusal('explicit_handoff', intent, startedAt),
+        response: this.buildIntentRefusal(
+          'explicit_handoff',
+          intent,
+          startedAt,
+        ),
       };
       return;
     }
@@ -642,13 +695,18 @@ export class ChatbotRagService {
       if (!skipRag) {
         yield {
           type: 'refusal',
-          response: this.buildRefusal('retrieval_failed', startedAt, {
-            retrievalMs: Date.now() - retrievalStartedAt,
-            totalResults: 0,
-            rewriteMs,
-            queryRewritten,
-            usedHistoryCount: context.usedHistoryCount,
-          }, intent),
+          response: this.buildRefusal(
+            'retrieval_failed',
+            startedAt,
+            {
+              retrievalMs: Date.now() - retrievalStartedAt,
+              totalResults: 0,
+              rewriteMs,
+              queryRewritten,
+              usedHistoryCount: context.usedHistoryCount,
+            },
+            intent,
+          ),
         };
         return;
       }
@@ -658,42 +716,64 @@ export class ChatbotRagService {
     const strongResults = results.filter(
       (entry) => entry.score >= this.minRelevanceScore,
     );
-    const contextResults = strongResults.length > 0
-      ? this.trimToBudget(strongResults, question)
-      : [];
+    const contextResults =
+      strongResults.length > 0
+        ? this.trimToBudget(strongResults, question)
+        : [];
     if (strongResults.length > 0 && contextResults.length === 0) {
       yield {
         type: 'refusal',
-        response: this.buildRefusal('context_too_large', startedAt, {
-          retrievalMs,
-          totalResults: results.length,
-          topScore: strongResults[0]?.score,
-          rewriteMs,
-          queryRewritten,
-          usedHistoryCount: context.usedHistoryCount,
-        }, intent),
+        response: this.buildRefusal(
+          'context_too_large',
+          startedAt,
+          {
+            retrievalMs,
+            totalResults: results.length,
+            topScore: strongResults[0]?.score,
+            rewriteMs,
+            queryRewritten,
+            usedHistoryCount: context.usedHistoryCount,
+          },
+          intent,
+        ),
       };
       return;
     }
     if (!skipRag && contextResults.length === 0) {
       yield {
         type: 'refusal',
-        response: this.buildIntentRefusal('no_results_in_scope', intent, startedAt, {
-          retrievalMs,
-          totalResults: results.length,
-          rewriteMs,
-          queryRewritten,
-          usedHistoryCount: context.usedHistoryCount,
-        }),
+        response: this.buildIntentRefusal(
+          'no_results_in_scope',
+          intent,
+          startedAt,
+          {
+            retrievalMs,
+            totalResults: results.length,
+            rewriteMs,
+            queryRewritten,
+            usedHistoryCount: context.usedHistoryCount,
+          },
+        ),
       };
       return;
     }
-    const userContent = contextResults.length > 0
-      ? this.buildAugmentedPrompt(question, contextResults)
-      : question;
+    const userContent =
+      contextResults.length > 0
+        ? this.buildAugmentedPrompt(question, contextResults)
+        : question;
     const clientContextBlock = input.clientUserId
       ? await this.clientContext.buildContextBlock(input.clientUserId)
       : '';
+    const serviceTopicBlock = buildServiceTopicBlock(input.serviceTopic);
+    const systemMessages = [
+      { role: 'system' as const, content: SYSTEM_PROMPT },
+      ...(serviceTopicBlock
+        ? [{ role: 'system' as const, content: serviceTopicBlock }]
+        : []),
+      ...(clientContextBlock
+        ? [{ role: 'system' as const, content: clientContextBlock }]
+        : []),
+    ];
 
     const generationStartedAt = Date.now();
     let accumulated = '';
@@ -702,10 +782,12 @@ export class ChatbotRagService {
         {
           agentId: AgentId.Chatbot,
           task: LlmTask.Reason,
-          declaredDataClass: clientContextBlock ? DataClass.RawPii : DataClass.NoPii,
+          declaredDataClass:
+            clientContextBlock || serviceTopicBlock
+              ? DataClass.RawPii
+              : DataClass.NoPii,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            ...(clientContextBlock ? [{ role: 'system' as const, content: clientContextBlock }] : []),
+            ...systemMessages,
             ...context.historyMessages,
             { role: 'user', content: userContent },
           ],
@@ -726,16 +808,21 @@ export class ChatbotRagService {
       );
       yield {
         type: 'refusal',
-        response: this.buildRefusal('generation_failed', startedAt, {
-          retrievalMs,
-          totalResults: results.length,
-          topScore: results[0]?.score,
-          contextChunks: contextResults.length,
-          generationMs: Date.now() - generationStartedAt,
-          rewriteMs,
-          queryRewritten,
-          usedHistoryCount: context.usedHistoryCount,
-        }, intent),
+        response: this.buildRefusal(
+          'generation_failed',
+          startedAt,
+          {
+            retrievalMs,
+            totalResults: results.length,
+            topScore: results[0]?.score,
+            contextChunks: contextResults.length,
+            generationMs: Date.now() - generationStartedAt,
+            rewriteMs,
+            queryRewritten,
+            usedHistoryCount: context.usedHistoryCount,
+          },
+          intent,
+        ),
       };
       return;
     }
@@ -745,30 +832,38 @@ export class ChatbotRagService {
     if (!answer) {
       yield {
         type: 'refusal',
-        response: this.buildRefusal('empty_llm_response', startedAt, {
-          retrievalMs,
-          totalResults: results.length,
-          contextChunks: contextResults.length,
-          generationMs,
-          rewriteMs,
-          queryRewritten,
-          usedHistoryCount: context.usedHistoryCount,
-        }, intent),
+        response: this.buildRefusal(
+          'empty_llm_response',
+          startedAt,
+          {
+            retrievalMs,
+            totalResults: results.length,
+            contextChunks: contextResults.length,
+            generationMs,
+            rewriteMs,
+            queryRewritten,
+            usedHistoryCount: context.usedHistoryCount,
+          },
+          intent,
+        ),
       };
       return;
     }
 
-    this.logSuccess({
-      totalMs: Date.now() - startedAt,
-      retrievalMs,
-      generationMs,
-      totalResults: results.length,
-      contextChunks: contextResults.length,
-      topScore: contextResults[0]?.score,
-      rewriteMs,
-      queryRewritten,
-      usedHistoryCount: context.usedHistoryCount,
-    }, intent);
+    this.logSuccess(
+      {
+        totalMs: Date.now() - startedAt,
+        retrievalMs,
+        generationMs,
+        totalResults: results.length,
+        contextChunks: contextResults.length,
+        topScore: contextResults[0]?.score,
+        rewriteMs,
+        queryRewritten,
+        usedHistoryCount: context.usedHistoryCount,
+      },
+      intent,
+    );
 
     yield {
       type: 'done',
@@ -814,7 +909,8 @@ export class ChatbotRagService {
     const references: KnowledgeSearchResultItem[] = [];
     const generic: KnowledgeSearchResultItem[] = [];
     for (const entry of results) {
-      const title = entry.document.title ?? entry.document.originalFileName ?? '';
+      const title =
+        entry.document.title ?? entry.document.originalFileName ?? '';
       if (title.startsWith('[Эталон]')) references.push(entry);
       else generic.push(entry);
     }
@@ -872,7 +968,8 @@ export class ChatbotRagService {
       ...this.pickDefined(metrics),
     });
     return {
-      answer: handoffMessage ?? (isInfra ? INFRA_ERROR_MESSAGE : NO_INFO_MESSAGE),
+      answer:
+        handoffMessage ?? (isInfra ? INFRA_ERROR_MESSAGE : NO_INFO_MESSAGE),
       hasContext: false,
       sources: [],
       refusalReason: reason,
@@ -919,4 +1016,29 @@ export class ChatbotRagService {
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   }
+}
+
+function buildServiceTopicBlock(
+  topic: ChatbotServiceTopic | undefined,
+): string {
+  if (!topic?.name?.trim()) return '';
+  const lines = [
+    '## Тема этого чата (купленная услуга эксперта)',
+    '',
+    `Услуга: ${topic.name.trim()}`,
+  ];
+  if (topic.categoryName?.trim()) {
+    lines.push(`Категория: ${topic.categoryName.trim()}`);
+  }
+  if (topic.description?.trim()) {
+    lines.push(`Описание: ${topic.description.trim()}`);
+  }
+  lines.push(
+    '',
+    'Отвечай ТОЛЬКО в рамках этой услуги и связанных с ней вопросов клиента.',
+    'Если вопрос вне темы услуги - коротко откажись и предложи позвать эксперта',
+    'по этой услуге (система сама запустит handoff). Не уводи разговор на',
+    'другие услуги платформы и не предлагай новые покупки.',
+  );
+  return lines.join('\n');
 }

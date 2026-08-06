@@ -4,13 +4,20 @@ import { Repository } from 'typeorm';
 import {
   ChatbotRagRefusalReason,
   ChatbotRagService,
+  ChatbotServiceTopic,
 } from '../../chatbot/services/chatbot-rag.service';
 import {
   HandoffDetection,
   HandoffTriggerService,
 } from '../../chatbot/services/handoff-trigger.service';
+import { Order } from '../../orders/entities/order.entity';
+import { OrderStatus } from '../../orders/entities/order-status.enum';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
-import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
+import {
+  AI_SYSTEM_USER_ID,
+  HANDOFF_ANNOUNCE_MESSAGE,
+  HANDOFF_ANNOUNCE_MESSAGE_EXPERT,
+} from '../chat.constants';
 import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatSession } from '../entities/chat-session.entity';
 import { ChatSessionParticipant } from '../entities/chat-session-participant.entity';
@@ -69,6 +76,8 @@ export class AiChatOrchestratorService {
     private readonly conversationRepository: Repository<ChatSession>,
     @InjectRepository(ChatSessionParticipant)
     private readonly participantRepository: Repository<ChatSessionParticipant>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly ragService: ChatbotRagService,
     private readonly historyMapper: ChatHistoryMapperService,
     private readonly wsGateway: WebSocketGatewayService,
@@ -100,13 +109,18 @@ export class AiChatOrchestratorService {
   private async respondToClientMessage(input: RespondInput): Promise<void> {
     const startedAt = Date.now();
 
+    if (await this.shouldSkipAiForCompletedOrder(input.conversation)) {
+      return;
+    }
+
+    const handoffAnnounce = this.handoffAnnounceMessage(input.conversation);
     const explicit = this.handoffTrigger.detect({
       clientMessage: input.question,
     });
     if (explicit.needsHandoff) {
       await this.deliverAnswer({
         input,
-        text: HANDOFF_ANNOUNCE_MESSAGE,
+        text: handoffAnnounce,
         handoff: explicit,
         startedAt,
         refusalReason: 'explicit_request',
@@ -144,10 +158,16 @@ export class AiChatOrchestratorService {
       input.clientUserId,
     );
 
+    const serviceTopic = await this.resolveServiceTopic(input.conversation);
     const ragResponse = await this.ragService.askQuestion({
       question: input.question,
       history,
       clientUserId: input.clientUserId,
+      serviceTopic: serviceTopic ?? undefined,
+      handoffTarget:
+        input.conversation.type === ChatSessionType.Expert
+          ? 'expert'
+          : 'operator',
     });
 
     // Second detection pass now that we know how RAG went. Explicit-request
@@ -282,14 +302,20 @@ export class AiChatOrchestratorService {
   ): Promise<void> {
     const startedAt = Date.now();
 
+    if (await this.shouldSkipAiForCompletedOrder(input.conversation)) {
+      hooks.onError('ai_disabled_order_completed');
+      return;
+    }
+
+    const handoffAnnounce = this.handoffAnnounceMessage(input.conversation);
     const explicit = this.handoffTrigger.detect({
       clientMessage: input.question,
     });
     if (explicit.needsHandoff) {
-      hooks.onDelta(HANDOFF_ANNOUNCE_MESSAGE);
+      hooks.onDelta(handoffAnnounce);
       await this.persistStreamAnswer({
         input,
-        answerText: HANDOFF_ANNOUNCE_MESSAGE,
+        answerText: handoffAnnounce,
         handoff: explicit,
         hooks,
         refusalReason: 'explicit_request',
@@ -329,11 +355,17 @@ export class AiChatOrchestratorService {
     } | null = null;
 
     try {
+      const serviceTopic = await this.resolveServiceTopic(input.conversation);
       const stream = this.ragService.askQuestionStream(
         {
           question: input.question,
           history,
           clientUserId: input.clientUserId,
+          serviceTopic: serviceTopic ?? undefined,
+          handoffTarget:
+            input.conversation.type === ChatSessionType.Expert
+              ? 'expert'
+              : 'operator',
         },
         signal,
       );
@@ -510,10 +542,10 @@ export class AiChatOrchestratorService {
   private async resolveRecipientIds(
     conversation: ChatSession,
   ): Promise<string[]> {
-    if (conversation.type === ChatSessionType.Platform) {
-      const participants = await this.participantRepository.find({
-        where: { sessionId: conversation.id },
-      });
+    const participants = await this.participantRepository.find({
+      where: { sessionId: conversation.id },
+    });
+    if (participants.length > 0) {
       return participants
         .map((p) => p.userId)
         .filter((id) => id !== AI_SYSTEM_USER_ID);
@@ -522,5 +554,69 @@ export class AiChatOrchestratorService {
       conversation.participantOneId,
       conversation.participantTwoId,
     ].filter((id) => id !== AI_SYSTEM_USER_ID);
+  }
+
+  private handoffAnnounceMessage(conversation: ChatSession): string {
+    return conversation.type === ChatSessionType.Expert
+      ? HANDOFF_ANNOUNCE_MESSAGE_EXPERT
+      : HANDOFF_ANNOUNCE_MESSAGE;
+  }
+
+  private async shouldSkipAiForCompletedOrder(
+    conversation: ChatSession,
+  ): Promise<boolean> {
+    if (conversation.type !== ChatSessionType.Expert || !conversation.orderId) {
+      return false;
+    }
+    const order = await this.orderRepository.findOne({
+      where: { id: conversation.orderId },
+      select: ['id', 'status'],
+    });
+    return order?.status === OrderStatus.Completed;
+  }
+
+  private async resolveServiceTopic(
+    conversation: ChatSession,
+  ): Promise<ChatbotServiceTopic | null> {
+    if (conversation.type !== ChatSessionType.Expert || !conversation.orderId) {
+      return null;
+    }
+    const order = await this.orderRepository.findOne({
+      where: { id: conversation.orderId },
+      relations: [
+        'item',
+        'item.service',
+        'item.service.category',
+        'item.package',
+        'item.expertPosition',
+      ],
+    });
+    const item = order?.item;
+    if (!item) {
+      if (conversation.title) {
+        return { name: conversation.title };
+      }
+      return null;
+    }
+    if (item.service) {
+      return {
+        name: item.service.name,
+        description: item.service.description ?? null,
+        categoryName: item.service.category?.name ?? null,
+      };
+    }
+    if (item.package?.name) {
+      return {
+        name: item.package.name,
+        description: item.package.description ?? null,
+      };
+    }
+    if (item.expertPosition?.name) {
+      return { name: item.expertPosition.name };
+    }
+    if (conversation.title) {
+      return { name: conversation.title };
+    }
+    return null;
   }
 }

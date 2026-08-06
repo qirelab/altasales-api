@@ -111,14 +111,20 @@ describe('ChatStreamingService.validate', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('rejects with BadRequest for a non-platform conversation', async () => {
+  it('accepts expert-type conversations for streaming', async () => {
     const { service } = buildService({
       conversation: { id: 'conv-1', type: ChatSessionType.Expert },
     });
 
     await expect(
       service.validate('client-1', 'conv-1', { text: 'Hi' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).resolves.toEqual(
+      expect.objectContaining({
+        conversation: expect.objectContaining({ type: ChatSessionType.Expert }),
+        userId: 'client-1',
+        text: 'Hi',
+      }),
+    );
   });
 
   it('rejects with Forbidden when the caller is not a participant', async () => {
@@ -192,7 +198,7 @@ describe('ChatStreamingService.runStream', () => {
     expect(targets).not.toContain(AI_SYSTEM_USER_ID);
   });
 
-  it('schedules AI title generation on the client\'s first streaming message when title is null', async () => {
+  it('schedules AI title generation on the first client streaming message when title is null', async () => {
     const { service, sessionTitleService } = buildService({
       conversation: {
         id: 'conv-1',

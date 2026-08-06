@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { UsersModule } from './users/users.module';
 import { DatabaseModule } from './config/database.module.js';
@@ -31,12 +32,11 @@ import { ChatbotReferenceAnswersModule } from './chatbot/reference-answers/chatb
     UsersModule,
     DatabaseModule,
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     // Named throttlers used selectively via @Throttle({ chat: {...} }) on
     // chat endpoints (see ChatController). Global guard is NOT installed —
     // other endpoints stay unthrottled.
-    ThrottlerModule.forRoot([
-      { name: 'chat', ttl: 60_000, limit: 30 },
-    ]),
+    ThrottlerModule.forRoot([{ name: 'chat', ttl: 60_000, limit: 30 }]),
     AuthModule,
     ServicesModule,
     PaymentModule,

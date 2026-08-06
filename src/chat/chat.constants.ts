@@ -18,3 +18,9 @@ export const AI_SYSTEM_USER_NAME = 'AI-консультант AltaSales';
  */
 export const HANDOFF_ANNOUNCE_MESSAGE =
   'Соединяю вас со специалистом. Менеджер ответит в ближайшее время.';
+
+export const HANDOFF_ANNOUNCE_MESSAGE_EXPERT =
+  'Соединяю вас с вашим экспертом. Он ответит в ближайшее время.';
+
+export const HANDOFF_TIMEOUT_RESUME_MESSAGE =
+  'Специалист пока не ответил, продолжаю помогать вам в этом чате.';

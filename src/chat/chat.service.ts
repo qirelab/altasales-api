@@ -1,16 +1,18 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { WebSocketGatewayService } from '../websocket/websocket.gateway';
 import { FilesService } from '../files/files.service';
 import { User } from '../users/entities/user.entity';
 import { UserRole } from '../users/entities/user-role.enum';
 import { Order } from '../orders/entities/order.entity';
+import { OrderStatus } from '../orders/entities/order-status.enum';
 import { ServiceType } from '../services/entities/service-type.enum';
 import { ChatParticipantRole } from './entities/chat-participant-role.enum';
 import { ChatSessionType } from './entities/chat-session-type.enum';
@@ -24,11 +26,14 @@ import { StartSessionDto } from './dto/start-session.dto';
 import { AI_SYSTEM_USER_ID } from './chat.constants';
 import { ChatHandoffStatus } from './entities/chat-handoff-status.enum';
 import { AiChatOrchestratorService } from './services/ai-chat-orchestrator.service';
+import { HandoffService } from './services/handoff.service';
 import { SendPlatformMessageDto } from './dto/send-platform-message.dto';
 import { SessionTitleService } from './services/session-title.service';
 
 @Injectable()
 export class ChatService {
+  private readonly logger = new Logger(ChatService.name);
+
   constructor(
     @InjectRepository(ChatSession)
     private readonly conversationRepository: Repository<ChatSession>,
@@ -44,11 +49,18 @@ export class ChatService {
     private readonly filesService: FilesService,
     private readonly aiOrchestrator: AiChatOrchestratorService,
     private readonly sessionTitleService: SessionTitleService,
+    private readonly handoffService: HandoffService,
     private readonly dataSource: DataSource,
   ) {}
 
   async getSessions(userId: string, query: GetSessionsQueryDto) {
-    const { offset = 0, limit = 20 } = query;
+    const { offset = 0, limit = 20, type } = query;
+
+    // Self-heal: purchases made before expert-service chats still need a
+    // session. Cheap when already backfilled (idempotent find-or-create).
+    if (!type || type === ChatSessionType.Expert) {
+      await this.ensureExpertSessionsForUser(userId);
+    }
 
     // Return conversations where user is a legacy participantOne/Two OR a
     // member of the participants table (needed for experts joined into a
@@ -76,6 +88,10 @@ export class ChatService {
       .orderBy('conv.updatedAt', 'DESC')
       .skip(offset)
       .take(limit);
+
+    if (type) {
+      qb.andWhere('conv.type = :type', { type });
+    }
 
     const [conversations, total] = await qb.getManyAndCount();
 
@@ -411,12 +427,12 @@ export class ChatService {
   }
 
   /**
-   * Send a message inside a platform conversation.
+   * Send a message inside a platform or expert-service conversation.
    *
    * When the client sends → we persist the message and schedule an async AI
-   * reply through AiChatOrchestratorService. When an expert or operator (a
-   * joined participant) sends → we persist and broadcast, but do NOT trigger
-   * the AI: the human is answering directly. Non-participants get 403.
+   * reply (unless handoff is active or the expert-order is completed). When
+   * an expert or operator sends → we persist and broadcast, but do NOT
+   * trigger the AI. Non-participants get 403.
    */
   async sendPlatformMessage(
     userId: string,
@@ -429,20 +445,30 @@ export class ChatService {
     if (!conversation) {
       throw new NotFoundException('Session not found');
     }
-    if (conversation.type !== ChatSessionType.Platform) {
+    if (
+      conversation.type !== ChatSessionType.Platform &&
+      conversation.type !== ChatSessionType.Expert
+    ) {
       throw new BadRequestException(
-        'This endpoint accepts only platform-type conversations',
+        'This endpoint accepts only platform or expert-type conversations',
       );
     }
 
     const membership = await this.participantRepository.findOne({
       where: { sessionId: conversation.id, userId },
     });
-    if (!membership) {
+    const isLegacyPairMember =
+      conversation.type === ChatSessionType.Expert &&
+      (conversation.participantOneId === userId ||
+        conversation.participantTwoId === userId);
+    if (!membership && !isLegacyPairMember) {
       throw new ForbiddenException(
         'You are not a participant of this conversation',
       );
     }
+
+    const role =
+      membership?.role ?? (await this.inferLegacyRole(userId, conversation));
 
     const savedMessage = await this.persistMessage({
       sessionId: conversation.id,
@@ -453,23 +479,21 @@ export class ChatService {
     const now = new Date();
 
     const isHumanReplierTurn =
-      membership.role !== ChatParticipantRole.Client &&
-      membership.role !== ChatParticipantRole.Ai;
+      role !== ChatParticipantRole.Client && role !== ChatParticipantRole.Ai;
 
-    await this.conversationRepository.update(conversation.id, { updatedAt: now });
+    await this.conversationRepository.update(conversation.id, {
+      updatedAt: now,
+    });
 
-    // Fire-and-forget AI-generated session title on the client's first
-    // message. Doesn't block the reply pipeline — the sidebar picks up
-    // the new title via the `chat:session_updated` WS event.
-    if (
-      membership.role === ChatParticipantRole.Client
-      && !conversation.title
-    ) {
-      void this.sessionTitleService.generateAndAssign(conversation.id, dto.text);
+    if (role === ChatParticipantRole.Client && !conversation.title) {
+      void this.sessionTitleService.generateAndAssign(
+        conversation.id,
+        dto.text,
+      );
     }
 
     let handoffResolved = false;
-    if (isHumanReplierTurn) {
+    if (isHumanReplierTurn && conversation.type === ChatSessionType.Platform) {
       const result = await this.conversationRepository
         .createQueryBuilder()
         .update(ChatSession)
@@ -477,10 +501,6 @@ export class ChatService {
           needsHumanHandoff: false,
           handoffTrigger: null,
           handoffRequestedAt: null,
-          // Keep handoffStatus in sync — otherwise the operator inbox
-          // (filtered by handoffStatus IN awaiting/in_progress) keeps
-          // showing the chat as active and the explicit /resolve endpoint
-          // would emit a duplicate chat:handoff_resolved event.
           handoffStatus: ChatHandoffStatus.Resolved,
           handoffResolvedAt: now,
         })
@@ -488,6 +508,18 @@ export class ChatService {
         .andWhere('"needsHumanHandoff" = true')
         .execute();
       handoffResolved = (result.affected ?? 0) > 0;
+    }
+
+    if (
+      isHumanReplierTurn &&
+      conversation.type === ChatSessionType.Expert &&
+      role === ChatParticipantRole.Expert
+    ) {
+      // Any expert message → in_progress, AI off until explicit resolve.
+      await this.handoffService.ensureExpertActiveOnReply(
+        conversation.id,
+        userId,
+      );
     }
 
     const recipientIds = await this.getRecipientIds(conversation, userId);
@@ -505,24 +537,15 @@ export class ChatService {
     }
 
     if (handoffResolved) {
-      // Match the payload shape emitted by AdminChatService.resolve so the
-      // frontend `ChatHandoffResolvedEvent` handlers always receive the
-      // required `handoffStatus` (they use it directly to upsertSession)
-      // and a `resolvedBy` we can display in the transcript.
-      const resolvedBy = await this.requireUserById(userId, 'User not found')
-        .catch(() => null);
+      const resolvedBy = await this.requireUserById(
+        userId,
+        'User not found',
+      ).catch(() => null);
       const handoffPayload = {
         sessionId: conversation.id,
         resolvedAt: now,
         handoffStatus: ChatHandoffStatus.Resolved,
-        resolvedBy: resolvedBy
-          ? {
-            id: resolvedBy.id,
-            name: resolvedBy.name,
-            lastName: resolvedBy.lastName,
-            email: resolvedBy.email,
-          }
-          : null,
+        resolvedBy: pickParticipant(resolvedBy),
       };
       this.wsGateway.emitToUser(
         userId,
@@ -538,15 +561,16 @@ export class ChatService {
       }
     }
 
-    const handoffPaused = conversation.handoffStatus === ChatHandoffStatus.Awaiting
-      || conversation.handoffStatus === ChatHandoffStatus.InProgress;
-    if (membership.role === ChatParticipantRole.Client && !handoffPaused) {
-      // Only client turns trigger an AI reply. Expert / operator turns are
-      // human-authored answers to the client and must not spawn an AI echo.
-      // Skip AI while a handoff is active (awaiting or in_progress): the
-      // client explicitly needs a human and the operator is either about
-      // to answer or already replying, an AI turn on top would race with
-      // them. AI resumes once the operator resolves the handoff.
+    const handoffPaused = this.handoffService.isAiPausedByHandoff(conversation);
+    const aiDisabledByCompletedOrder =
+      conversation.type === ChatSessionType.Expert &&
+      (await this.isExpertOrderCompleted(conversation.orderId));
+
+    if (
+      role === ChatParticipantRole.Client &&
+      !handoffPaused &&
+      !aiDisabledByCompletedOrder
+    ) {
       this.aiOrchestrator.scheduleReply({
         conversation,
         clientUserId: userId,
@@ -559,13 +583,192 @@ export class ChatService {
   }
 
   /**
+   * Ensure a `type=expert` session exists for a paid order with an assigned
+   * expert. Idempotent. Participants: client, AI, expert. Chat is never
+   * deleted — history survives order completion.
+   */
+  async ensureExpertServiceSession(
+    clientUserId: string,
+    expertUserId: string,
+    orderId: string,
+    title?: string | null,
+  ): Promise<ChatSession> {
+    if (clientUserId === expertUserId) {
+      throw new BadRequestException(
+        'Cannot create expert service chat with the same user as client and expert',
+      );
+    }
+
+    const [participantOneId, participantTwoId] =
+      clientUserId < expertUserId
+        ? [clientUserId, expertUserId]
+        : [expertUserId, clientUserId];
+
+    const existing = await this.conversationRepository.findOne({
+      where: {
+        participantOneId,
+        participantTwoId,
+        orderId,
+        type: ChatSessionType.Expert,
+      },
+    });
+    if (existing) {
+      await this.ensureParticipant(
+        existing.id,
+        clientUserId,
+        ChatParticipantRole.Client,
+      );
+      await this.ensureParticipant(
+        existing.id,
+        AI_SYSTEM_USER_ID,
+        ChatParticipantRole.Ai,
+      );
+      await this.ensureParticipant(
+        existing.id,
+        expertUserId,
+        ChatParticipantRole.Expert,
+      );
+      if (title && !existing.title) {
+        await this.conversationRepository.update(existing.id, { title });
+        existing.title = title;
+      }
+      return existing;
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const session = manager.getRepository(ChatSession).create({
+        participantOneId,
+        participantTwoId,
+        orderId,
+        type: ChatSessionType.Expert,
+        title: title ?? null,
+      });
+      const saved = await manager.getRepository(ChatSession).save(session);
+      await manager.getRepository(ChatSessionParticipant).save([
+        manager.getRepository(ChatSessionParticipant).create({
+          sessionId: saved.id,
+          userId: clientUserId,
+          role: ChatParticipantRole.Client,
+        }),
+        manager.getRepository(ChatSessionParticipant).create({
+          sessionId: saved.id,
+          userId: AI_SYSTEM_USER_ID,
+          role: ChatParticipantRole.Ai,
+        }),
+        manager.getRepository(ChatSessionParticipant).create({
+          sessionId: saved.id,
+          userId: expertUserId,
+          role: ChatParticipantRole.Expert,
+        }),
+      ]);
+      return saved;
+    });
+  }
+
+  /**
+   * Called after orders leave pending_payment (balance checkout or Robokassa
+   * result). Creates expert-service sessions for every paid order that has
+   * an assigned expert executor.
+   */
+  async ensureExpertSessionsForPaidOrders(orderIds: string[]): Promise<void> {
+    if (orderIds.length === 0) return;
+    const orders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: [
+        'item',
+        'item.service',
+        'item.service.category',
+        'item.package',
+        'item.expertPosition',
+      ],
+    });
+
+    for (const order of orders) {
+      await this.ensureExpertSessionForOrder(order);
+    }
+  }
+
+  /**
+   * Backfill / self-heal: create missing expert-service sessions for every
+   * paid order linked to this user as client or as expert executor. Used when
+   * opening chat lists so purchases made before the feature still get a chat
+   * even if the data migration has not run yet.
+   */
+  async ensureExpertSessionsForUser(userId: string): Promise<void> {
+    const asClient = await this.orderRepository
+      .createQueryBuilder('o')
+      .leftJoinAndSelect('o.item', 'item')
+      .leftJoinAndSelect('item.service', 'service')
+      .leftJoinAndSelect('service.category', 'category')
+      .leftJoinAndSelect('item.package', 'package')
+      .leftJoinAndSelect('item.expertPosition', 'expertPosition')
+      .where('o."userId" = :userId', { userId })
+      .andWhere('o.status NOT IN (:...excluded)', {
+        excluded: [OrderStatus.PendingPayment, OrderStatus.Cancelled],
+      })
+      .getMany();
+
+    const asExpert = await this.orderRepository
+      .createQueryBuilder('o')
+      .leftJoinAndSelect('o.item', 'item')
+      .leftJoinAndSelect('item.service', 'service')
+      .leftJoinAndSelect('service.category', 'category')
+      .leftJoinAndSelect('item.package', 'package')
+      .leftJoinAndSelect('item.expertPosition', 'expertPosition')
+      .where('o.status NOT IN (:...excluded)', {
+        excluded: [OrderStatus.PendingPayment, OrderStatus.Cancelled],
+      })
+      .andWhere(
+        '(item."executorUserId" = :userId OR (service.type = :contractorType AND service."userId" = :userId))',
+        { userId, contractorType: ServiceType.Contractor },
+      )
+      .getMany();
+
+    const byId = new Map<string, Order>();
+    for (const order of [...asClient, ...asExpert]) {
+      byId.set(order.id, order);
+    }
+    for (const order of byId.values()) {
+      await this.ensureExpertSessionForOrder(order);
+    }
+  }
+
+  private async ensureExpertSessionForOrder(order: Order): Promise<void> {
+    if (
+      order.status === OrderStatus.PendingPayment ||
+      order.status === OrderStatus.Cancelled
+    ) {
+      return;
+    }
+    const expertUserId = this.resolveOrderExpertUserId(order);
+    if (!expertUserId || expertUserId === order.userId) {
+      return;
+    }
+    const title = this.resolveOrderOfferingTitle(order);
+    try {
+      await this.ensureExpertServiceSession(
+        order.userId,
+        expertUserId,
+        order.id,
+        title,
+      );
+    } catch (error) {
+      this.logger.error(
+        `ensureExpertServiceSession failed for order ${order.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  /**
    * Add an expert as a participant of ALL of the client's existing platform
    * sessions.
    *
-   * Called by OrdersService when contractorChatAccess is granted. Multi-session
-   * means the expert needs to see every current topic the client has open;
-   * future sessions the client creates will auto-include this expert via
-   * {@link getClientActiveExpertIds}.
+   * LEGACY (contractorChatAccess admin grant). New expert-service product
+   * path uses dedicated `type=expert` sessions via
+   * {@link ensureExpertServiceSession} and does NOT join platform threads.
    */
   async addExpertToClientPlatformSessions(
     clientUserId: string,
@@ -791,12 +994,9 @@ export class ChatService {
     conversation: ChatSession,
     cursor?: Date | null,
   ): Promise<void> {
-    if (conversation.type === ChatSessionType.Platform) {
-      // Cursor defaults to the newest existing message's timestamp — resolved
-      // here so callers like markAsRead don't need to fetch it themselves.
-      // Using createdAt of an actual message (not NOW()) makes the read
-      // marker race-free: a message inserted after our fetch has a strictly
-      // greater createdAt and stays unread until the next read pass.
+    const useParticipantCursor =
+      await this.shouldUseParticipantReadCursor(conversation);
+    if (useParticipantCursor) {
       let effectiveCursor = cursor ?? null;
       if (!effectiveCursor) {
         const latest = await this.messageRepository.findOne({
@@ -806,10 +1006,6 @@ export class ChatService {
         effectiveCursor = latest?.createdAt ?? null;
       }
       if (!effectiveCursor) return;
-      // `lastReadAt` must be monotonic — paging BACK (older messages) would
-      // otherwise rewind the cursor to an older timestamp and resurrect
-      // already-read messages as unread. GREATEST(current, new) keeps the
-      // marker moving strictly forward.
       await this.participantRepository
         .createQueryBuilder()
         .update(ChatSessionParticipant)
@@ -841,7 +1037,9 @@ export class ChatService {
     conversation: ChatSession,
     userId: string,
   ): Promise<number> {
-    if (conversation.type === ChatSessionType.Platform) {
+    const useParticipantCursor =
+      await this.shouldUseParticipantReadCursor(conversation);
+    if (useParticipantCursor) {
       const participant = await this.participantRepository.findOne({
         where: { sessionId: conversation.id, userId },
       });
@@ -868,19 +1066,34 @@ export class ChatService {
       .getCount();
   }
 
+  private async shouldUseParticipantReadCursor(
+    conversation: ChatSession,
+  ): Promise<boolean> {
+    if (conversation.type === ChatSessionType.Platform) return true;
+    if (conversation.type !== ChatSessionType.Expert) return false;
+    const ai = await this.participantRepository.findOne({
+      where: {
+        sessionId: conversation.id,
+        userId: AI_SYSTEM_USER_ID,
+        role: ChatParticipantRole.Ai,
+      },
+    });
+    return Boolean(ai);
+  }
+
   private async getRecipientIds(
     conversation: ChatSession,
     excludeUserId: string,
   ): Promise<string[]> {
-    if (conversation.type === ChatSessionType.Platform) {
-      const participants = await this.participantRepository.find({
-        where: { sessionId: conversation.id },
-      });
+    const participants = await this.participantRepository.find({
+      where: { sessionId: conversation.id },
+    });
+    if (participants.length > 0) {
       return participants
         .map((p) => p.userId)
         .filter((id) => id !== excludeUserId && id !== AI_SYSTEM_USER_ID);
     }
-    // Expert-type: legacy two-participant layout.
+    // Legacy expert-type without participant rows: two-party layout.
     return conversation.participantOneId === excludeUserId
       ? [conversation.participantTwoId]
       : [conversation.participantOneId];
@@ -890,16 +1103,13 @@ export class ChatService {
     userId: string,
     conversation: ChatSession,
   ): Promise<void> {
-    if (conversation.type === ChatSessionType.Platform) {
-      // QIR-687 supersedes the QIR-256 "no admin back-door" rule: admins act
-      // as operators for the AI-chat inbox and need read + reply access to
-      // every platform session. Regular users still must be listed in the
-      // participants table.
-      const membership = await this.participantRepository.findOne({
-        where: { sessionId: conversation.id, userId },
-      });
-      if (membership) return;
+    const membership = await this.participantRepository.findOne({
+      where: { sessionId: conversation.id, userId },
+    });
+    if (membership) return;
 
+    if (conversation.type === ChatSessionType.Platform) {
+      // Operators (admins) need back-door read access to every platform session.
       const requester = await this.requireUserById(userId, 'User not found');
       if (requester.role === UserRole.ADMIN) return;
 
@@ -908,13 +1118,8 @@ export class ChatService {
       );
     }
 
-    // Legacy expert-type conversations: admins have full visibility (existing
-    // behaviour) — used for support / moderation of expert-client threads.
-    const user = await this.requireUserById(userId, 'User not found');
-    if (user.role === UserRole.ADMIN) {
-      return;
-    }
-
+    // Expert service chats are isolated from operators — no admin back-door.
+    // Access only via participants table or legacy pair + order entitlement.
     if (
       conversation.participantOneId !== userId &&
       conversation.participantTwoId !== userId
@@ -925,6 +1130,35 @@ export class ChatService {
     }
 
     if (!conversation.orderId) {
+      return;
+    }
+
+    // Auto-created paid expert sessions do not require contractorChatAccess.
+    // Legacy DMs still gate on the flag when the AI participant is absent.
+    const hasAi = await this.participantRepository.findOne({
+      where: {
+        sessionId: conversation.id,
+        userId: AI_SYSTEM_USER_ID,
+        role: ChatParticipantRole.Ai,
+      },
+    });
+    if (hasAi) {
+      const order = await this.orderRepository.findOne({
+        where: { id: conversation.orderId },
+        relations: ['item', 'item.service'],
+      });
+      if (!order) {
+        throw new ForbiddenException('Linked order not found');
+      }
+      const expertId = this.resolveOrderExpertUserId(order);
+      const allowed = new Set(
+        [order.userId, expertId].filter((id): id is string => Boolean(id)),
+      );
+      if (!allowed.has(userId)) {
+        throw new ForbiddenException(
+          'You are not entitled to this expert service chat',
+        );
+      }
       return;
     }
 
@@ -1045,6 +1279,45 @@ export class ChatService {
       throw new NotFoundException(message);
     }
     return user;
+  }
+
+  private resolveOrderExpertUserId(order: Order): string | null {
+    if (order.item?.executorUserId) {
+      return order.item.executorUserId;
+    }
+    const service = order.item?.service;
+    if (service?.type === ServiceType.Contractor && service.userId) {
+      return service.userId;
+    }
+    return null;
+  }
+
+  private resolveOrderOfferingTitle(order: Order): string | null {
+    const item = order.item;
+    if (!item) return null;
+    if (item.service?.name) return item.service.name;
+    if (item.package?.name) return item.package.name;
+    if (item.expertPosition?.name) return item.expertPosition.name;
+    return null;
+  }
+
+  private async isExpertOrderCompleted(
+    orderId: string | null,
+  ): Promise<boolean> {
+    if (!orderId) return false;
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      select: ['id', 'status'],
+    });
+    return order?.status === OrderStatus.Completed;
+  }
+
+  private async inferLegacyRole(
+    userId: string,
+    _conversation: ChatSession,
+  ): Promise<ChatParticipantRole> {
+    const user = await this.requireUserById(userId, 'User not found');
+    return this.mapUserRoleToParticipantRole(user.role);
   }
 }
 
