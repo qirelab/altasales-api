@@ -1,19 +1,25 @@
 import { AgentId } from '../../ai/enums/agent-id.enum';
 import { DataClass } from '../../ai/enums/data-class.enum';
 import { LlmTask } from '../../ai/enums/llm-task.enum';
+import {
+  HANDOFF_ANNOUNCE_MESSAGE,
+  HANDOFF_NO_CONTEXT_MESSAGE,
+} from '../../chat/chat.constants';
 import { KnowledgeBasePurpose } from '../../knowledge/enums/knowledge-base-purpose.enum';
 import { ChatIntent } from '../enums/chat-intent.enum';
 import { ChatbotRagService } from './chatbot-rag.service';
 
-function buildResultItem(overrides: Partial<{
-  chunkId: string;
-  documentId: string;
-  score: number;
-  text: string;
-  chunkIndex: number;
-  documentTitle: string | null;
-  originalFileName: string;
-}> = {}) {
+function buildResultItem(
+  overrides: Partial<{
+    chunkId: string;
+    documentId: string;
+    score: number;
+    text: string;
+    chunkIndex: number;
+    documentTitle: string | null;
+    originalFileName: string;
+  }> = {},
+) {
   return {
     chunkId: overrides.chunkId ?? 'chunk-1',
     documentId: overrides.documentId ?? 'doc-1',
@@ -31,34 +37,41 @@ function buildResultItem(overrides: Partial<{
   };
 }
 
-function buildService(overrides: {
-  searchResults?: ReturnType<typeof buildResultItem>[];
-  searchError?: Error;
-  llmContent?: string;
-  llmError?: Error;
-  configOverrides?: Record<string, number | string>;
-  historyMessages?: { role: 'user' | 'assistant'; content: string }[];
-  rewrittenQuery?: string;
-  intent?: ChatIntent;
-} = {}) {
-  const knowledgeSearch = {
-    search: overrides.searchError
-      ? jest.fn().mockRejectedValue(overrides.searchError)
-      : jest.fn().mockResolvedValue({
-        results: overrides.searchResults ?? [buildResultItem()],
-      }),
-  };
-  const llmProxy = {
-    chat: overrides.llmError
-      ? jest.fn().mockRejectedValue(overrides.llmError)
-      : jest.fn().mockResolvedValue({
-        providerId: 'mock',
-        modelId: 'mock',
-        content: overrides.llmContent ?? 'Готовый ответ от бота.',
-        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-        dataClass: 'no_pii',
-      }),
-  };
+function buildService(
+  overrides: {
+    searchResults?: ReturnType<typeof buildResultItem>[];
+    searchError?: Error;
+    llmContent?: string;
+    llmError?: Error;
+    configOverrides?: Record<string, number | string>;
+    historyMessages?: { role: 'user' | 'assistant'; content: string }[];
+    rewrittenQuery?: string;
+    intent?: ChatIntent;
+  } = {},
+) {
+  const searchMock = jest.fn();
+  if (overrides.searchError) {
+    searchMock.mockRejectedValue(overrides.searchError);
+  } else {
+    searchMock.mockResolvedValue({
+      results: overrides.searchResults ?? [buildResultItem()],
+    });
+  }
+  const knowledgeSearch = { search: searchMock };
+
+  const chatMock = jest.fn();
+  if (overrides.llmError) {
+    chatMock.mockRejectedValue(overrides.llmError);
+  } else {
+    chatMock.mockResolvedValue({
+      providerId: 'mock',
+      modelId: 'mock',
+      content: overrides.llmContent ?? 'Готовый ответ от бота.',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      dataClass: 'no_pii',
+    });
+  }
+  const llmProxy = { chat: chatMock };
   const historyMessages = overrides.historyMessages ?? [];
   const conversationalContext = {
     build: jest.fn().mockReturnValue({
@@ -69,7 +82,9 @@ function buildService(overrides: {
   const queryRewriter = {
     // Mirrors the real rewriter: return the original question unless a rewrite
     // is explicitly configured, so existing "no history" tests keep working.
-    rewrite: jest.fn(async (question: string) => overrides.rewrittenQuery ?? question),
+    rewrite: jest.fn(
+      async (question: string) => overrides.rewrittenQuery ?? question,
+    ),
   };
   const configService = overrides.configOverrides
     ? { get: jest.fn((key: string) => overrides.configOverrides?.[key]) }
@@ -105,12 +120,22 @@ describe('ChatbotRagService', () => {
   it('runs retrieval → augmentation → LLM and returns the answer with sources', async () => {
     const { service, knowledgeSearch, llmProxy } = buildService({
       searchResults: [
-        buildResultItem({ chunkId: 'a', text: 'Пакет CRM Silver стоит 100 000 ₽.', score: 0.9 }),
-        buildResultItem({ chunkId: 'b', text: 'В пакет входит внедрение и обучение.', score: 0.7 }),
+        buildResultItem({
+          chunkId: 'a',
+          text: 'Пакет CRM Silver стоит 100 000 ₽.',
+          score: 0.9,
+        }),
+        buildResultItem({
+          chunkId: 'b',
+          text: 'В пакет входит внедрение и обучение.',
+          score: 0.7,
+        }),
       ],
     });
 
-    const result = await service.askQuestion({ question: 'Сколько стоит CRM Silver?' });
+    const result = await service.askQuestion({
+      question: 'Сколько стоит CRM Silver?',
+    });
 
     expect(knowledgeSearch.search).toHaveBeenCalledWith({
       purpose: KnowledgeBasePurpose.QA_CHATBOT,
@@ -126,7 +151,9 @@ describe('ChatbotRagService', () => {
     // No history → augmented user prompt is the second (and last) message.
     expect(chatArg.messages).toHaveLength(2);
     expect(chatArg.messages[1].role).toBe('user');
-    expect(chatArg.messages[1].content).toContain('Пакет CRM Silver стоит 100 000 ₽.');
+    expect(chatArg.messages[1].content).toContain(
+      'Пакет CRM Silver стоит 100 000 ₽.',
+    );
     expect(chatArg.messages[1].content).toContain('Сколько стоит CRM Silver?');
     expect(chatArg.policy?.cacheTtlMs).toBeGreaterThan(0);
 
@@ -143,10 +170,19 @@ describe('ChatbotRagService', () => {
   });
 
   it('splices history between system and augmented user prompt and uses rewritten query for retrieval', async () => {
-    const { service, knowledgeSearch, llmProxy, conversationalContext, queryRewriter } = buildService({
+    const {
+      service,
+      knowledgeSearch,
+      llmProxy,
+      conversationalContext,
+      queryRewriter,
+    } = buildService({
       historyMessages: [
         { role: 'user', content: 'Что такое CRM Silver?' },
-        { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+        {
+          role: 'assistant',
+          content: 'CRM Silver — это пакет внедрения amoCRM.',
+        },
       ],
       rewrittenQuery: 'Сколько стоит CRM Silver?',
     });
@@ -155,21 +191,27 @@ describe('ChatbotRagService', () => {
       question: 'А сколько он стоит?',
       history: [
         { role: 'user', content: 'Что такое CRM Silver?' },
-        { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+        {
+          role: 'assistant',
+          content: 'CRM Silver — это пакет внедрения amoCRM.',
+        },
       ],
     });
 
     expect(conversationalContext.build).toHaveBeenCalledWith([
       { role: 'user', content: 'Что такое CRM Silver?' },
-      { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
+      {
+        role: 'assistant',
+        content: 'CRM Silver — это пакет внедрения amoCRM.',
+      },
     ]);
-    expect(queryRewriter.rewrite).toHaveBeenCalledWith(
-      'А сколько он стоит?',
-      [
-        { role: 'user', content: 'Что такое CRM Silver?' },
-        { role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' },
-      ],
-    );
+    expect(queryRewriter.rewrite).toHaveBeenCalledWith('А сколько он стоит?', [
+      { role: 'user', content: 'Что такое CRM Silver?' },
+      {
+        role: 'assistant',
+        content: 'CRM Silver — это пакет внедрения amoCRM.',
+      },
+    ]);
     // Retrieval must use the rewritten (standalone) query.
     expect(knowledgeSearch.search).toHaveBeenCalledWith({
       purpose: KnowledgeBasePurpose.QA_CHATBOT,
@@ -181,16 +223,25 @@ describe('ChatbotRagService', () => {
     // system + 2 history messages + augmented user
     expect(chatArg.messages).toHaveLength(4);
     expect(chatArg.messages[0].role).toBe('system');
-    expect(chatArg.messages[1]).toEqual({ role: 'user', content: 'Что такое CRM Silver?' });
-    expect(chatArg.messages[2]).toEqual({ role: 'assistant', content: 'CRM Silver — это пакет внедрения amoCRM.' });
+    expect(chatArg.messages[1]).toEqual({
+      role: 'user',
+      content: 'Что такое CRM Silver?',
+    });
+    expect(chatArg.messages[2]).toEqual({
+      role: 'assistant',
+      content: 'CRM Silver — это пакет внедрения amoCRM.',
+    });
     // The augmented user prompt still contains the ORIGINAL question, not the rewrite.
     expect(chatArg.messages[3].role).toBe('user');
     expect(chatArg.messages[3].content).toContain('А сколько он стоит?');
-    expect(chatArg.messages[3].content).not.toContain('Сколько стоит CRM Silver?');
+    expect(chatArg.messages[3].content).not.toContain(
+      'Сколько стоит CRM Silver?',
+    );
   });
 
   it('skips history entirely when input.history is not provided (backwards-compatible call)', async () => {
-    const { service, llmProxy, conversationalContext, queryRewriter } = buildService();
+    const { service, llmProxy, conversationalContext, queryRewriter } =
+      buildService();
 
     await service.askQuestion({ question: 'Что такое CRM?' });
 
@@ -237,7 +288,9 @@ describe('ChatbotRagService', () => {
       searchResults: [],
     });
 
-    const result = await service.askQuestion({ question: 'Что ты думаешь о политике?' });
+    const result = await service.askQuestion({
+      question: 'Что ты думаешь о политике?',
+    });
 
     expect(knowledgeSearch.search).toHaveBeenCalledTimes(1);
     expect(llmProxy.chat).toHaveBeenCalledTimes(1);
@@ -265,7 +318,8 @@ describe('ChatbotRagService', () => {
     // Curated reference chunks are no longer a deterministic shortcut - the
     // LLM sees them in the augmented prompt (in the "ЭТАЛОННЫЕ ОТВЕТЫ"
     // section) and decides paraphrase vs. near-verbatim based on the turn.
-    const referenceText = 'Вопрос: С кем я общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI';
+    const referenceText =
+      'Вопрос: С кем я общаюсь?\nОтвет: Я цифровой эксперт AltaSales.\nТема: AI';
     const { service, llmProxy } = buildService({
       intent: ChatIntent.PlatformQuestion,
       searchResults: [
@@ -297,8 +351,7 @@ describe('ChatbotRagService', () => {
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('no_results_in_scope');
-    expect(result.answer).toContain('специалист');
-    expect(result.answer).toContain('AltaSales');
+    expect(result.answer).toBe(HANDOFF_NO_CONTEXT_MESSAGE);
   });
 
   it('for platform intent with weak-score RAG results, still refuses with no_results_in_scope', async () => {
@@ -310,7 +363,9 @@ describe('ChatbotRagService', () => {
       ],
     });
 
-    const result = await service.askQuestion({ question: 'Есть ли пакет РОП?' });
+    const result = await service.askQuestion({
+      question: 'Есть ли пакет РОП?',
+    });
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('no_results_in_scope');
@@ -321,19 +376,20 @@ describe('ChatbotRagService', () => {
       intent: ChatIntent.ExplicitHandoff,
     });
 
-    const result = await service.askQuestion({ question: 'Позовите менеджера' });
+    const result = await service.askQuestion({
+      question: 'Позовите менеджера',
+    });
 
     expect(knowledgeSearch.search).not.toHaveBeenCalled();
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('explicit_handoff');
     expect(result.intent).toBe(ChatIntent.ExplicitHandoff);
-    expect(result.answer).toContain('специалист');
+    expect(result.answer).toBe(HANDOFF_ANNOUNCE_MESSAGE);
   });
 
   it('refuses with empty_question on empty question and skips classifier and retrieval', async () => {
-    const {
-      service, knowledgeSearch, llmProxy, intentClassifier,
-    } = buildService();
+    const { service, knowledgeSearch, llmProxy, intentClassifier } =
+      buildService();
 
     const result = await service.askQuestion({ question: '   ' });
 
@@ -398,9 +454,24 @@ describe('ChatbotRagService', () => {
     const { service, llmProxy } = buildService({
       configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 15000 },
       searchResults: [
-        buildResultItem({ chunkId: 'top', score: 0.95, chunkIndex: 0, text: bigText }),
-        buildResultItem({ chunkId: 'mid', score: 0.85, chunkIndex: 1, text: bigText }),
-        buildResultItem({ chunkId: 'low', score: 0.75, chunkIndex: 2, text: bigText }),
+        buildResultItem({
+          chunkId: 'top',
+          score: 0.95,
+          chunkIndex: 0,
+          text: bigText,
+        }),
+        buildResultItem({
+          chunkId: 'mid',
+          score: 0.85,
+          chunkIndex: 1,
+          text: bigText,
+        }),
+        buildResultItem({
+          chunkId: 'low',
+          score: 0.75,
+          chunkIndex: 2,
+          text: bigText,
+        }),
       ],
     });
 
@@ -417,7 +488,11 @@ describe('ChatbotRagService', () => {
       // System prompt alone is well over 500 chars; a 500-char budget can't fit a chunk.
       configOverrides: { CHATBOT_RAG_MAX_CONTEXT_CHARS: 500 },
       searchResults: [
-        buildResultItem({ chunkId: 'top', score: 0.95, text: 'x'.repeat(1000) }),
+        buildResultItem({
+          chunkId: 'top',
+          score: 0.95,
+          text: 'x'.repeat(1000),
+        }),
       ],
     });
 

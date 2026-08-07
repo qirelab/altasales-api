@@ -4,6 +4,11 @@ import { AgentId } from '../../ai/enums/agent-id.enum';
 import { DataClass } from '../../ai/enums/data-class.enum';
 import { LlmTask } from '../../ai/enums/llm-task.enum';
 import { LlmProxyService } from '../../ai/llm-proxy.service';
+import {
+  HANDOFF_ANNOUNCE_MESSAGE,
+  HANDOFF_INFRA_ERROR_MESSAGE,
+  HANDOFF_NO_CONTEXT_MESSAGE,
+} from '../../chat/chat.constants';
 import { KnowledgeBasePurpose } from '../../knowledge/enums/knowledge-base-purpose.enum';
 import {
   KnowledgeSearchResultItem,
@@ -23,22 +28,6 @@ const DEFAULT_MIN_RELEVANCE_SCORE = 0.35;
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_CONTEXT_CHARS = 16_000;
 const MAX_QUESTION_CHARS = 2_000;
-
-const NO_INFO_MESSAGE = [
-  'Здесь мне лучше не гадать, чтобы не подвести вас с ответом.',
-  'Уже позвал специалиста AltaSales, он подключится к этому чату',
-  'и разберёт вопрос подробно.',
-].join(' ');
-const INFRA_ERROR_MESSAGE = [
-  'Что-то пошло не так на моей стороне, ответ не сформировался.',
-  'Попробуйте, пожалуйста, задать вопрос ещё раз через минуту.',
-  'Если проблема повторится, позову специалиста AltaSales, он подключится к чату.',
-].join(' ');
-const EXPLICIT_HANDOFF_MESSAGE = [
-  'Конечно, уже зову специалиста AltaSales.',
-  'Он подключится к этому чату и продолжит разговор с вами лично.',
-  'Обычно это занимает несколько минут.',
-].join(' ');
 
 const SYSTEM_PROMPT = [
   '# Роль',
@@ -72,9 +61,11 @@ const SYSTEM_PROMPT = [
   '  Не отправляй клиента искать самому, отвечай сам из имеющихся данных.',
   '- «В зависимости от вашей ситуации», «Может варьироваться», «Уточните детали».',
   '  Расплывчатые формулировки. Отвечай конкретно или честно скажи что не знаешь.',
-  '- «Конечно, уже зову специалиста», «Соединяю вас со специалистом»,',
-  '  «Специалист подключится к чату», «Передал ваш вопрос команде».',
-  '  Никогда не пиши сам, что зовёшь / позвал / подключил специалиста.',
+  '- «Конечно, уже зову специалиста», «уже передаю вас специалисту»,',
+  '  «подключу к вам живого специалиста», «Соединяю вас со специалистом»,',
+  '  «Специалист подключится к чату», «Передал ваш вопрос команде»,',
+  '  «Передаю вас коллеге», «Оператор принял ваш запрос».',
+  '  Никогда не пиши сам, что зовёшь / позвал / подключил / передаёшь специалиста.',
   '  Систему handoff запускает бекенд, а не ты. Если считаешь что клиенту',
   '  реально нужен человек, честно ответь на вопрос как можешь и не более.',
   '',
@@ -369,8 +360,8 @@ const INFRA_REFUSAL_REASONS: ReadonlySet<ChatbotRagRefusalReason> =
 const HANDOFF_MESSAGE_BY_REASON: Partial<
   Record<ChatbotRagRefusalReason, string>
 > = {
-  no_results_in_scope: NO_INFO_MESSAGE,
-  explicit_handoff: EXPLICIT_HANDOFF_MESSAGE,
+  no_results_in_scope: HANDOFF_NO_CONTEXT_MESSAGE,
+  explicit_handoff: HANDOFF_ANNOUNCE_MESSAGE,
 };
 
 export type ChatbotRagResponse = {
@@ -969,7 +960,8 @@ export class ChatbotRagService {
     });
     return {
       answer:
-        handoffMessage ?? (isInfra ? INFRA_ERROR_MESSAGE : NO_INFO_MESSAGE),
+        handoffMessage ??
+        (isInfra ? HANDOFF_INFRA_ERROR_MESSAGE : HANDOFF_NO_CONTEXT_MESSAGE),
       hasContext: false,
       sources: [],
       refusalReason: reason,

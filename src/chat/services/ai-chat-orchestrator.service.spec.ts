@@ -1,4 +1,5 @@
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
+import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
@@ -26,6 +27,8 @@ describe('AiChatOrchestratorService', () => {
       ragRefusalReason?: string;
       ragThrows?: Error;
       participants?: { userId: string }[];
+      admins?: { id: string }[];
+      conversationType?: ChatSessionType;
     } = {},
   ) {
     // Default: currentMessage.createdAt = now, all history rows keep their
@@ -132,6 +135,13 @@ describe('AiChatOrchestratorService', () => {
       findOne: jest.fn().mockResolvedValue(null),
       find: jest.fn().mockResolvedValue([]),
     };
+    const userRepository = {
+      find: jest
+        .fn()
+        .mockResolvedValue(
+          opts.admins ?? [{ id: 'admin-1' }, { id: 'admin-2' }],
+        ),
+    };
     const historyMapper = new ChatHistoryMapperService();
     const handoffTrigger = new HandoffTriggerService();
     const orchestrator = new AiChatOrchestratorService(
@@ -139,6 +149,7 @@ describe('AiChatOrchestratorService', () => {
       conversationRepository as never,
       participantRepository as never,
       orderRepository as never,
+      userRepository as never,
       ragService as never,
       historyMapper,
       wsGateway as never,
@@ -149,16 +160,22 @@ describe('AiChatOrchestratorService', () => {
       messageRepository,
       conversationRepository,
       participantRepository,
+      userRepository,
       ragService,
       wsGateway,
       handoffTrigger,
+      conversationType: opts.conversationType ?? ChatSessionType.Platform,
     };
   }
 
-  const conversation = {
-    id: 'conv-1',
-    type: ChatSessionType.Platform,
-  } as never;
+  function conversationFor(type: ChatSessionType = ChatSessionType.Platform): {
+    id: string;
+    type: ChatSessionType;
+  } {
+    return { id: 'conv-1', type };
+  }
+
+  const conversation = conversationFor(ChatSessionType.Platform) as never;
   const clientUserId = 'client-1';
 
   it('generates AI reply, persists as isAiGenerated message from AI_SYSTEM_USER_ID, and emits WS', async () => {
@@ -499,9 +516,16 @@ describe('AiChatOrchestratorService', () => {
 
     const eventNames = wsGateway.emitToUser.mock.calls.map((call) => call[1]);
     expect(eventNames.filter((e) => e === 'chat:new_message')).toHaveLength(2);
+    // participants (client + expert) + admins (admin-1, admin-2)
     expect(
       eventNames.filter((e) => e === 'chat:handoff_requested'),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
+    const handoffTargets = wsGateway.emitToUser.mock.calls
+      .filter((call) => call[1] === 'chat:handoff_requested')
+      .map((call) => call[0]);
+    expect(handoffTargets).toEqual(
+      expect.arrayContaining(['client-1', 'expert-1', 'admin-1', 'admin-2']),
+    );
     const handoffPayload = wsGateway.emitToUser.mock.calls.find(
       (call) => call[1] === 'chat:handoff_requested',
     )?.[2];
@@ -509,8 +533,110 @@ describe('AiChatOrchestratorService', () => {
       expect.objectContaining({
         sessionId: 'conv-1',
         trigger: ChatHandoffTrigger.UserExplicitRequest,
+        handoffStatus: ChatHandoffStatus.Awaiting,
+        sessionType: ChatSessionType.Platform,
       }),
     );
+  });
+
+  it('fans out platform handoff_requested to all admins even when they are not participants', async () => {
+    const { orchestrator, wsGateway, userRepository } = buildOrchestrator({
+      participants: [{ userId: 'client-1' }, { userId: AI_SYSTEM_USER_ID }],
+      admins: [{ id: 'admin-a' }, { id: 'admin-b' }],
+    });
+
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'Позовите менеджера, пожалуйста',
+    });
+
+    expect(userRepository.find).toHaveBeenCalled();
+    const handoffTargets = wsGateway.emitToUser.mock.calls
+      .filter((call) => call[1] === 'chat:handoff_requested')
+      .map((call) => call[0]);
+    expect(handoffTargets).toEqual(
+      expect.arrayContaining(['client-1', 'admin-a', 'admin-b']),
+    );
+    expect(handoffTargets).toHaveLength(3);
+  });
+
+  it('does not fan out expert handoff_requested to admins', async () => {
+    const expertConversation = conversationFor(ChatSessionType.Expert) as never;
+    const { orchestrator, wsGateway, userRepository } = buildOrchestrator({
+      participants: [
+        { userId: 'client-1' },
+        { userId: 'expert-1' },
+        { userId: AI_SYSTEM_USER_ID },
+      ],
+      admins: [{ id: 'admin-1' }],
+    });
+
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
+      conversation: expertConversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'Позовите специалиста, пожалуйста',
+    });
+
+    expect(userRepository.find).not.toHaveBeenCalled();
+    const handoffTargets = wsGateway.emitToUser.mock.calls
+      .filter((call) => call[1] === 'chat:handoff_requested')
+      .map((call) => call[0]);
+    expect(handoffTargets).toEqual(
+      expect.arrayContaining(['client-1', 'expert-1']),
+    );
+    expect(handoffTargets).not.toContain('admin-1');
+    expect(handoffTargets).toHaveLength(2);
+    const payload = wsGateway.emitToUser.mock.calls.find(
+      (call) => call[1] === 'chat:handoff_requested',
+    )?.[2];
+    expect(payload).toEqual(
+      expect.objectContaining({
+        sessionType: ChatSessionType.Expert,
+        handoffStatus: ChatHandoffStatus.Awaiting,
+      }),
+    );
+  });
+
+  it('dedupes admin who is already a platform participant on handoff_requested', async () => {
+    const { orchestrator, wsGateway } = buildOrchestrator({
+      participants: [
+        { userId: 'client-1' },
+        { userId: 'admin-1' },
+        { userId: AI_SYSTEM_USER_ID },
+      ],
+      admins: [{ id: 'admin-1' }, { id: 'admin-2' }],
+    });
+
+    await (
+      orchestrator as unknown as {
+        respondToClientMessage: (input: unknown) => Promise<void>;
+      }
+    ).respondToClientMessage({
+      conversation,
+      clientUserId,
+      clientMessageId: 'm1',
+      question: 'Позовите менеджера, пожалуйста',
+    });
+
+    const handoffTargets = wsGateway.emitToUser.mock.calls
+      .filter((call) => call[1] === 'chat:handoff_requested')
+      .map((call) => call[0]);
+    expect(handoffTargets.filter((id) => id === 'admin-1')).toHaveLength(1);
+    expect(handoffTargets).toEqual(
+      expect.arrayContaining(['client-1', 'admin-1', 'admin-2']),
+    );
+    expect(handoffTargets).toHaveLength(3);
   });
 
   it('marks rag_no_context handoff when RAG refuses with no_results', async () => {
@@ -542,7 +668,8 @@ describe('AiChatOrchestratorService', () => {
     const handoffCalls = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_requested',
     );
-    expect(handoffCalls).toHaveLength(1);
+    // default participants: client only (+ AI filtered) + 2 admins
+    expect(handoffCalls).toHaveLength(3);
   });
 
   it('does not emit chat:handoff_requested when the conditional UPDATE affects zero rows', async () => {
