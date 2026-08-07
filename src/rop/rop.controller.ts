@@ -26,6 +26,7 @@ import {
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { SessionGuard } from '../auth/guards/session.guard';
+import { UserRole } from '../users/entities/user-role.enum';
 import { CreateRopDocumentAnalysisLinkDto } from './dto/create-rop-document-analysis-link.dto';
 import { CreateRopDashboardAnalysisLinkDto } from './dto/create-rop-dashboard-analysis-link.dto';
 import { ListRopTasksQueryDto } from './dto/list-rop-tasks-query.dto';
@@ -44,6 +45,7 @@ import { RopTaskResponseDto } from './dto/rop-task-response.dto';
 import { RopDocumentsService } from './rop-documents.service';
 import { RopIndicatorsService } from './rop-indicators.service';
 import { RopMeetingsService } from './rop-meetings.service';
+import { RopProvisioningService } from './rop-provisioning.service';
 import { RopService } from './rop.service';
 import { RopTasksService } from './rop-tasks.service';
 
@@ -67,6 +69,7 @@ const DASHBOARD_ANALYZE_UPLOAD_OPTIONS: MulterUtf8Options = {
 export class RopController {
   constructor(
     private readonly ropService: RopService,
+    private readonly ropProvisioningService: RopProvisioningService,
     private readonly ropDocumentsService: RopDocumentsService,
     private readonly ropIndicatorsService: RopIndicatorsService,
     private readonly ropMeetingsService: RopMeetingsService,
@@ -83,6 +86,15 @@ export class RopController {
   ): Promise<RopSsoLoginLinkResponseDto> {
     if (!user.email?.trim()) {
       throw new BadRequestException('У пользователя не указан email');
+    }
+
+    const projectId = await this.ropProvisioningService.ensureProvisionedForUser(
+      user.id,
+    );
+    if (!projectId && user.role !== UserRole.ADMIN) {
+      throw new BadRequestException(
+        'Не удалось подготовить доступ к РОП. Заполните анкету или попробуйте позже.',
+      );
     }
 
     return this.ropService.createSsoLoginLink(user.email.trim());
