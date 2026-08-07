@@ -1,4 +1,5 @@
 import { AI_SYSTEM_USER_ID, HANDOFF_ANNOUNCE_MESSAGE } from '../chat.constants';
+import { ChatHandoffStatus } from '../entities/chat-handoff-status.enum';
 import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { HandoffTriggerService } from '../../chatbot/services/handoff-trigger.service';
@@ -26,6 +27,7 @@ function buildOrchestrator(
     ragEvents?: unknown[];
     ragThrows?: Error;
     participants?: { userId: string }[];
+    admins?: { id: string }[];
   } = {},
 ) {
   const qb = {
@@ -95,11 +97,17 @@ function buildOrchestrator(
     findOne: jest.fn().mockResolvedValue(null),
     find: jest.fn().mockResolvedValue([]),
   };
+  const userRepository = {
+    find: jest
+      .fn()
+      .mockResolvedValue(opts.admins ?? [{ id: 'admin-1' }, { id: 'admin-2' }]),
+  };
   const orchestrator = new AiChatOrchestratorService(
     messageRepository as never,
     conversationRepository as never,
     participantRepository as never,
     orderRepository as never,
+    userRepository as never,
     ragService as never,
     historyMapper,
     wsGateway as never,
@@ -110,6 +118,7 @@ function buildOrchestrator(
     messageRepository,
     conversationRepository,
     participantRepository,
+    userRepository,
     wsGateway,
   };
 }
@@ -349,12 +358,19 @@ describe('AiChatOrchestratorService.streamReply', () => {
     const handoffEvents = wsGateway.emitToUser.mock.calls.filter(
       (call) => call[1] === 'chat:handoff_requested',
     );
-    expect(handoffEvents.length).toBeGreaterThan(0);
+    // participants client+expert + admins admin-1+admin-2
+    expect(handoffEvents).toHaveLength(4);
     expect(handoffEvents[0][2]).toEqual(
       expect.objectContaining({
         sessionId: 'conv-1',
         trigger: ChatHandoffTrigger.UserExplicitRequest,
+        handoffStatus: ChatHandoffStatus.Awaiting,
+        sessionType: ChatSessionType.Platform,
       }),
+    );
+    const handoffTargets = handoffEvents.map((call) => call[0]);
+    expect(handoffTargets).toEqual(
+      expect.arrayContaining(['client-1', 'expert-1', 'admin-1', 'admin-2']),
     );
     expect(calls.refusal).toEqual(['ai-msg-1:explicit_request']);
   });

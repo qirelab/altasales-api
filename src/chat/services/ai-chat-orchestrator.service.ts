@@ -12,6 +12,8 @@ import {
 } from '../../chatbot/services/handoff-trigger.service';
 import { Order } from '../../orders/entities/order.entity';
 import { OrderStatus } from '../../orders/entities/order-status.enum';
+import { User } from '../../users/entities/user.entity';
+import { UserRole } from '../../users/entities/user-role.enum';
 import { WebSocketGatewayService } from '../../websocket/websocket.gateway';
 import {
   AI_SYSTEM_USER_ID,
@@ -25,6 +27,14 @@ import { ChatSessionType } from '../entities/chat-session-type.enum';
 import { ChatHandoffTrigger } from '../entities/chat-handoff-trigger.enum';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatHistoryMapperService } from './chat-history-mapper.service';
+
+type HandoffRequestedPayload = {
+  sessionId: string;
+  trigger: ChatHandoffTrigger | null;
+  requestedAt: Date | null;
+  handoffStatus: ChatHandoffStatus.Awaiting;
+  sessionType: ChatSessionType;
+};
 
 const HISTORY_FETCH_LIMIT = 40;
 
@@ -62,7 +72,9 @@ export type StreamReplyHooks = {
  *      trigger service on (message + ragResponse) to catch RAG-side
  *      handoff signals (no context / infra error).
  *   3. If any trigger fired, mark the conversation as needing a human
- *      via a conditional UPDATE and emit `chat:handoff_requested`.
+ *      via a conditional UPDATE and emit `chat:handoff_requested`
+ *      to session participants. For `type=platform` also fan-out to
+ *      every ADMIN (operators are not participants until claim).
  */
 @Injectable()
 export class AiChatOrchestratorService {
@@ -78,6 +90,8 @@ export class AiChatOrchestratorService {
     private readonly participantRepository: Repository<ChatSessionParticipant>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     private readonly ragService: ChatbotRagService,
     private readonly historyMapper: ChatHistoryMapperService,
     private readonly wsGateway: WebSocketGatewayService,
@@ -257,18 +271,13 @@ export class AiChatOrchestratorService {
     }
 
     if (handoffRegistered) {
-      const handoffPayload = {
+      await this.emitHandoffRequested(input.conversation, recipientIds, {
         sessionId: input.conversation.id,
         trigger: handoffTriggerType,
         requestedAt: handoffRequestedAt,
-      };
-      for (const recipientId of recipientIds) {
-        this.wsGateway.emitToUser(
-          recipientId,
-          'chat:handoff_requested',
-          handoffPayload,
-        );
-      }
+        handoffStatus: ChatHandoffStatus.Awaiting,
+        sessionType: input.conversation.type,
+      });
     }
 
     this.logger.log(
@@ -501,18 +510,13 @@ export class AiChatOrchestratorService {
       }
 
       if (handoffRegistered) {
-        const handoffPayload = {
+        await this.emitHandoffRequested(input.conversation, recipientIds, {
           sessionId: input.conversation.id,
           trigger: handoffTriggerType,
           requestedAt: handoffRequestedAt,
-        };
-        for (const recipientId of recipientIds) {
-          this.wsGateway.emitToUser(
-            recipientId,
-            'chat:handoff_requested',
-            handoffPayload,
-          );
-        }
+          handoffStatus: ChatHandoffStatus.Awaiting,
+          sessionType: input.conversation.type,
+        });
       }
     } catch (error) {
       this.logger.error(
@@ -554,6 +558,32 @@ export class AiChatOrchestratorService {
       conversation.participantOneId,
       conversation.participantTwoId,
     ].filter((id) => id !== AI_SYSTEM_USER_ID);
+  }
+
+  /**
+   * Emit `chat:handoff_requested` to current session participants, plus
+   * every ADMIN when the session is platform (operator inbox). Expert
+   * sessions already include the assigned expert as a participant — no
+   * admin fan-out there.
+   */
+  private async emitHandoffRequested(
+    conversation: ChatSession,
+    participantIds: string[],
+    payload: HandoffRequestedPayload,
+  ): Promise<void> {
+    const targets = new Set(participantIds);
+    if (conversation.type === ChatSessionType.Platform) {
+      const admins = await this.userRepository.find({
+        where: { role: UserRole.ADMIN },
+        select: ['id'],
+      });
+      for (const admin of admins) {
+        targets.add(admin.id);
+      }
+    }
+    for (const userId of targets) {
+      this.wsGateway.emitToUser(userId, 'chat:handoff_requested', payload);
+    }
   }
 
   private handoffAnnounceMessage(conversation: ChatSession): string {
