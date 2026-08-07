@@ -1,6 +1,10 @@
 import { AgentId } from '../../ai/enums/agent-id.enum';
 import { DataClass } from '../../ai/enums/data-class.enum';
 import { LlmTask } from '../../ai/enums/llm-task.enum';
+import {
+  HANDOFF_ANNOUNCE_MESSAGE,
+  HANDOFF_NO_CONTEXT_MESSAGE,
+} from '../../chat/chat.constants';
 import { KnowledgeBasePurpose } from '../../knowledge/enums/knowledge-base-purpose.enum';
 import { ChatIntent } from '../enums/chat-intent.enum';
 import { ChatbotRagService } from './chatbot-rag.service';
@@ -297,8 +301,7 @@ describe('ChatbotRagService', () => {
 
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('no_results_in_scope');
-    expect(result.answer).toContain('специалист');
-    expect(result.answer).toContain('AltaSales');
+    expect(result.answer).toBe(HANDOFF_NO_CONTEXT_MESSAGE);
   });
 
   it('for platform intent with weak-score RAG results, still refuses with no_results_in_scope', async () => {
@@ -327,7 +330,7 @@ describe('ChatbotRagService', () => {
     expect(llmProxy.chat).not.toHaveBeenCalled();
     expect(result.refusalReason).toBe('explicit_handoff');
     expect(result.intent).toBe(ChatIntent.ExplicitHandoff);
-    expect(result.answer).toContain('специалист');
+    expect(result.answer).toBe(HANDOFF_ANNOUNCE_MESSAGE);
   });
 
   it('refuses with empty_question on empty question and skips classifier and retrieval', async () => {
