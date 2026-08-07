@@ -49,24 +49,29 @@ function buildService(
     intent?: ChatIntent;
   } = {},
 ) {
-  const knowledgeSearch = {
-    search: overrides.searchError
-      ? jest.fn().mockRejectedValue(overrides.searchError)
-      : jest.fn().mockResolvedValue({
-          results: overrides.searchResults ?? [buildResultItem()],
-        }),
-  };
-  const llmProxy = {
-    chat: overrides.llmError
-      ? jest.fn().mockRejectedValue(overrides.llmError)
-      : jest.fn().mockResolvedValue({
-          providerId: 'mock',
-          modelId: 'mock',
-          content: overrides.llmContent ?? 'Готовый ответ от бота.',
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          dataClass: 'no_pii',
-        }),
-  };
+  const searchMock = jest.fn();
+  if (overrides.searchError) {
+    searchMock.mockRejectedValue(overrides.searchError);
+  } else {
+    searchMock.mockResolvedValue({
+      results: overrides.searchResults ?? [buildResultItem()],
+    });
+  }
+  const knowledgeSearch = { search: searchMock };
+
+  const chatMock = jest.fn();
+  if (overrides.llmError) {
+    chatMock.mockRejectedValue(overrides.llmError);
+  } else {
+    chatMock.mockResolvedValue({
+      providerId: 'mock',
+      modelId: 'mock',
+      content: overrides.llmContent ?? 'Готовый ответ от бота.',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      dataClass: 'no_pii',
+    });
+  }
+  const llmProxy = { chat: chatMock };
   const historyMessages = overrides.historyMessages ?? [];
   const conversationalContext = {
     build: jest.fn().mockReturnValue({
