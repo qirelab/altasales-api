@@ -138,7 +138,9 @@ describe('AiChatOrchestratorService', () => {
     const userRepository = {
       find: jest
         .fn()
-        .mockResolvedValue(opts.admins ?? [{ id: 'admin-1' }, { id: 'admin-2' }]),
+        .mockResolvedValue(
+          opts.admins ?? [{ id: 'admin-1' }, { id: 'admin-2' }],
+        ),
     };
     const historyMapper = new ChatHistoryMapperService();
     const handoffTrigger = new HandoffTriggerService();
@@ -166,9 +168,10 @@ describe('AiChatOrchestratorService', () => {
     };
   }
 
-  function conversationFor(
-    type: ChatSessionType = ChatSessionType.Platform,
-  ): { id: string; type: ChatSessionType } {
+  function conversationFor(type: ChatSessionType = ChatSessionType.Platform): {
+    id: string;
+    type: ChatSessionType;
+  } {
     return { id: 'conv-1', type };
   }
 
@@ -564,9 +567,7 @@ describe('AiChatOrchestratorService', () => {
   });
 
   it('does not fan out expert handoff_requested to admins', async () => {
-    const expertConversation = conversationFor(
-      ChatSessionType.Expert,
-    ) as never;
+    const expertConversation = conversationFor(ChatSessionType.Expert) as never;
     const { orchestrator, wsGateway, userRepository } = buildOrchestrator({
       participants: [
         { userId: 'client-1' },
