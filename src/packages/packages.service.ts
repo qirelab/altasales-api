@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, In, IsNull, Repository } from 'typeorm';
 import { Category } from '../categories/entities/category.entity';
@@ -28,6 +32,7 @@ export interface AdminPackageListItem {
   image: string | null;
   imageOriginal: string | null;
   isHidden: boolean;
+  ropTariff: string | null;
   categoryId: string | null;
   category: { id: string; name: string; slug: string } | null;
   categoryIds: string[];
@@ -60,16 +65,16 @@ function resolvePackageCategoryIds(dto: {
 }
 
 function categoriesRefs(ids: string[]): Category[] {
-  return ids.map((id) => ({ id } as Category));
+  return ids.map((id) => ({ id }) as Category);
 }
 
 function normalizePackageName(name: string): string {
   return name.trim().replace(/\s+/g, ' ');
 }
 
-function attachLegacyPackageCategory<T extends { categories?: Category[] | null }>(
-  entity: T,
-): T & { category: Category | null; categoryId: string | null } {
+function attachLegacyPackageCategory<
+  T extends { categories?: Category[] | null },
+>(entity: T): T & { category: Category | null; categoryId: string | null } {
   const first = entity.categories?.[0] ?? null;
   return Object.assign(entity, {
     category: first,
@@ -91,7 +96,7 @@ export class PackagesService {
     @InjectRepository(OrderItem)
     private readonly orderItemRepository: Repository<OrderItem>,
     private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   async create(createPackageDto: CreatePackageDto): Promise<ServicePackage> {
     const normalizedName = normalizePackageName(createPackageDto.name);
@@ -100,9 +105,15 @@ export class PackagesService {
     const categoryIds = resolvePackageCategoryIds(createPackageDto) ?? [];
     await this.ensureCategoriesExist(categoryIds);
 
-    const services = await this.resolvePackageServices(createPackageDto.serviceIds);
+    const services = await this.resolvePackageServices(
+      createPackageDto.serviceIds,
+    );
 
-    const { categoryId: _legacyId, categoryIds: _newIds, ...rest } = createPackageDto;
+    const {
+      categoryId: _legacyId,
+      categoryIds: _newIds,
+      ...rest
+    } = createPackageDto;
     const servicePackage = this.packageRepository.create({
       ...rest,
       name: normalizedName,
@@ -120,7 +131,11 @@ export class PackagesService {
     const packages = await applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false')
+        .leftJoinAndSelect(
+          'sp.categories',
+          'category',
+          'category."isHidden" = false',
+        )
         .leftJoinAndSelect(
           'sp.services',
           's',
@@ -128,11 +143,13 @@ export class PackagesService {
         ),
       'sp',
     )
-      .andWhere(`(
+      .andWhere(
+        `(
         NOT EXISTS (
           SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
         ) OR category.id IS NOT NULL
-      )`)
+      )`,
+      )
       .orderBy('sp."createdAt"', 'DESC')
       .getMany();
     return packages.map((pkg) => attachLegacyPackageCategory(pkg));
@@ -142,7 +159,11 @@ export class PackagesService {
     const servicePackage = await applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false')
+        .leftJoinAndSelect(
+          'sp.categories',
+          'category',
+          'category."isHidden" = false',
+        )
         .leftJoinAndSelect(
           'sp.services',
           's',
@@ -151,14 +172,16 @@ export class PackagesService {
       'sp',
     )
       .andWhere('sp.id = :id', { id })
-      .andWhere(`(
+      .andWhere(
+        `(
         NOT EXISTS (
           SELECT 1 FROM "package_categories" pc WHERE pc."packageId" = sp.id
         ) OR category.id IS NOT NULL
-      )`)
+      )`,
+      )
       .getOne();
 
-    if (!servicePackage) {
+    if (!servicePackage || servicePackage.isHidden) {
       throw new NotFoundException(`Пакет с ID ${id} не найден`);
     }
 
@@ -176,7 +199,10 @@ export class PackagesService {
     return attachLegacyPackageCategory(servicePackage);
   }
 
-  async update(id: string, updatePackageDto: UpdatePackageDto): Promise<ServicePackage> {
+  async update(
+    id: string,
+    updatePackageDto: UpdatePackageDto,
+  ): Promise<ServicePackage> {
     const servicePackage = await this.packageRepository.findOne({
       where: { id, ...activePackageWhere() },
       relations: ['categories', 'services'],
@@ -205,9 +231,10 @@ export class PackagesService {
       await this.ensureCategoriesExist(categoryIds);
     }
 
-    const services = serviceIds !== undefined
-      ? await this.resolvePackageServices(serviceIds)
-      : servicePackage.services;
+    const services =
+      serviceIds !== undefined
+        ? await this.resolvePackageServices(serviceIds)
+        : servicePackage.services;
 
     Object.assign(servicePackage, {
       ...packageFields,
@@ -279,7 +306,8 @@ export class PackagesService {
       );
     }
 
-    const totalRaw = await qb.clone()
+    const totalRaw = await qb
+      .clone()
       .select('COUNT(DISTINCT p.id)', 'count')
       .getRawOne<{ count: string }>();
     const total = Number(totalRaw?.count ?? 0);
@@ -294,7 +322,9 @@ export class PackagesService {
     const ordersMap = await this.buildOrdersCountMap(packageIds);
 
     return {
-      data: packages.map((pkg) => this.mapPackageListItem(pkg, ordersMap.get(pkg.id) ?? 0)),
+      data: packages.map((pkg) =>
+        this.mapPackageListItem(pkg, ordersMap.get(pkg.id) ?? 0),
+      ),
       total,
       offset,
       limit,
@@ -327,7 +357,9 @@ export class PackagesService {
 
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.item', 'item', 'item."packageId" = :packageId', { packageId: id })
+      .innerJoin('o.item', 'item', 'item."packageId" = :packageId', {
+        packageId: id,
+      })
       .leftJoin('o.user', 'u')
       .select('o.id', 'id')
       .addSelect('u.name', 'clientName')
@@ -367,7 +399,9 @@ export class PackagesService {
     };
   }
 
-  private async buildOrdersCountMap(packageIds: string[]): Promise<Map<string, number>> {
+  private async buildOrdersCountMap(
+    packageIds: string[],
+  ): Promise<Map<string, number>> {
     if (packageIds.length === 0) return new Map();
 
     const rows = await this.orderItemRepository
@@ -381,7 +415,10 @@ export class PackagesService {
     return new Map(rows.map((row) => [row.packageId, Number(row.count)]));
   }
 
-  private mapPackageListItem(pkg: ServicePackage, ordersCount: number): AdminPackageListItem {
+  private mapPackageListItem(
+    pkg: ServicePackage,
+    ordersCount: number,
+  ): AdminPackageListItem {
     const first = pkg.categories?.[0] ?? null;
     return {
       id: pkg.id,
@@ -394,12 +431,17 @@ export class PackagesService {
       image: pkg.image,
       imageOriginal: pkg.imageOriginal,
       isHidden: pkg.isHidden,
+      ropTariff: pkg.ropTariff,
       categoryId: first?.id ?? null,
       category: first
         ? { id: first.id, name: first.name, slug: first.slug }
         : null,
       categoryIds: (pkg.categories ?? []).map((c) => c.id),
-      categories: (pkg.categories ?? []).map((c) => ({ id: c.id, name: c.name, slug: c.slug })),
+      categories: (pkg.categories ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+      })),
       services: filterActiveServices(pkg.services).map((service) => ({
         id: service.id,
         name: service.name,
@@ -409,7 +451,10 @@ export class PackagesService {
     };
   }
 
-  private async ensurePackageNameUnique(name: string, excludeId?: string): Promise<void> {
+  private async ensurePackageNameUnique(
+    name: string,
+    excludeId?: string,
+  ): Promise<void> {
     const qb = this.packageRepository
       .createQueryBuilder('sp')
       .where('LOWER(sp.name) = LOWER(:name)', { name })
@@ -427,7 +472,9 @@ export class PackagesService {
 
   private async ensureCategoriesExist(categoryIds: string[]): Promise<void> {
     if (!categoryIds.length) return;
-    const found = await this.categoryRepository.find({ where: { id: In(categoryIds) } });
+    const found = await this.categoryRepository.find({
+      where: { id: In(categoryIds) },
+    });
     const foundIds = new Set(found.map((c) => c.id));
     const missing = categoryIds.filter((id) => !foundIds.has(id));
     if (missing.length > 0) {
@@ -435,7 +482,9 @@ export class PackagesService {
     }
   }
 
-  private async resolvePackageServices(serviceIds?: string[]): Promise<Service[]> {
+  private async resolvePackageServices(
+    serviceIds?: string[],
+  ): Promise<Service[]> {
     if (!serviceIds || serviceIds.length === 0) {
       return [];
     }
@@ -450,7 +499,9 @@ export class PackagesService {
     const missingIds = serviceIds.filter((id) => !serviceIdsSet.has(id));
 
     if (missingIds.length > 0) {
-      throw new NotFoundException(`Услуги с ID ${missingIds.join(', ')} не найдены`);
+      throw new NotFoundException(
+        `Услуги с ID ${missingIds.join(', ')} не найдены`,
+      );
     }
 
     const invalidServiceIds = services
@@ -466,7 +517,10 @@ export class PackagesService {
     return services;
   }
 
-  async setVisibilityForAdmin(id: string, isHidden: boolean): Promise<ServicePackage> {
+  async setVisibilityForAdmin(
+    id: string,
+    isHidden: boolean,
+  ): Promise<ServicePackage> {
     const servicePackage = await this.findOneEntityForAdmin(id);
     servicePackage.isHidden = isHidden;
     return this.packageRepository.save(servicePackage);
@@ -484,5 +538,4 @@ export class PackagesService {
 
     return servicePackage;
   }
-
 }

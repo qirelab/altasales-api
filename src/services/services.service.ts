@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, In, IsNull, Repository } from 'typeorm';
 import { UsersService } from '../users/users.service';
@@ -48,7 +52,7 @@ export class ServicesService {
     private readonly orderItemRepository: Repository<OrderItem>,
     private readonly dataSource: DataSource,
     private readonly usersService: UsersService,
-  ) { }
+  ) {}
 
   async create(createServiceDto: CreateServiceDto): Promise<Service> {
     if (createServiceDto.categoryId) {
@@ -81,7 +85,11 @@ export class ServicesService {
     const qb = applyPublicServiceFilter(
       this.serviceRepository
         .createQueryBuilder('service')
-        .leftJoinAndSelect('service.category', 'category', 'category."isHidden" = false'),
+        .leftJoinAndSelect(
+          'service.category',
+          'category',
+          'category."isHidden" = false',
+        ),
     );
     qb.andWhere('(service."categoryId" IS NULL OR category.id IS NOT NULL)');
 
@@ -97,23 +105,38 @@ export class ServicesService {
       qb.andWhere('service."categoryId" IN (:...categoryIds)', { categoryIds });
     }
     if (query.skill) {
-      qb.andWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([query.skill]) });
+      qb.andWhere('service.skills::jsonb @> :skill::jsonb', {
+        skill: JSON.stringify([query.skill]),
+      });
     }
     if (query.dateOrder) {
-      qb.orderBy('service.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
+      qb.orderBy(
+        'service.createdAt',
+        query.dateOrder === 'asc' ? 'ASC' : 'DESC',
+      );
     }
     if (query.priceOrder) {
       if (query.dateOrder) {
-        qb.addOrderBy('service.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+        qb.addOrderBy(
+          'service.price',
+          query.priceOrder === 'asc' ? 'ASC' : 'DESC',
+        );
       } else {
-        qb.orderBy('service.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+        qb.orderBy(
+          'service.price',
+          query.priceOrder === 'asc' ? 'ASC' : 'DESC',
+        );
       }
     }
 
     const packageQb = applyPublicPackageFilter(
       this.packageRepository
         .createQueryBuilder('sp')
-        .leftJoinAndSelect('sp.categories', 'category', 'category."isHidden" = false')
+        .leftJoinAndSelect(
+          'sp.categories',
+          'category',
+          'category."isHidden" = false',
+        )
         .leftJoinAndSelect(
           'sp.services',
           's',
@@ -128,15 +151,23 @@ export class ServicesService {
     )`);
 
     if (categoryIds.length > 0) {
-      packageQb.andWhere((sqb) => {
-        const sub = sqb.subQuery()
-          .select('pc."packageId"')
-          .from('package_categories', 'pc')
-          .innerJoin(Category, 'fc', 'fc.id = pc."categoryId" AND fc."isHidden" = false')
-          .where('pc."categoryId" IN (:...categoryIds)')
-          .getQuery();
-        return `sp.id IN ${sub}`;
-      }, { categoryIds });
+      packageQb.andWhere(
+        (sqb) => {
+          const sub = sqb
+            .subQuery()
+            .select('pc."packageId"')
+            .from('package_categories', 'pc')
+            .innerJoin(
+              Category,
+              'fc',
+              'fc.id = pc."categoryId" AND fc."isHidden" = false',
+            )
+            .where('pc."categoryId" IN (:...categoryIds)')
+            .getQuery();
+          return `sp.id IN ${sub}`;
+        },
+        { categoryIds },
+      );
     }
     if (query.name?.trim()) {
       packageQb.andWhere('sp.name ILIKE :name', {
@@ -144,19 +175,30 @@ export class ServicesService {
       });
     }
     if (query.dateOrder) {
-      packageQb.orderBy('sp.createdAt', query.dateOrder === 'asc' ? 'ASC' : 'DESC');
+      packageQb.orderBy(
+        'sp.createdAt',
+        query.dateOrder === 'asc' ? 'ASC' : 'DESC',
+      );
     }
     if (query.priceOrder) {
       if (query.dateOrder) {
-        packageQb.addOrderBy('sp.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+        packageQb.addOrderBy(
+          'sp.price',
+          query.priceOrder === 'asc' ? 'ASC' : 'DESC',
+        );
       } else {
-        packageQb.orderBy('sp.price', query.priceOrder === 'asc' ? 'ASC' : 'DESC');
+        packageQb.orderBy(
+          'sp.price',
+          query.priceOrder === 'asc' ? 'ASC' : 'DESC',
+        );
       }
     }
 
     const [services, packages, categoryContent] = await Promise.all([
       qb.getMany(),
-      query.type && query.type !== ServiceType.Service ? Promise.resolve([]) : packageQb.getMany(),
+      query.type && query.type !== ServiceType.Service
+        ? Promise.resolve([])
+        : packageQb.getMany(),
       this.getCategoryContentForFilter(categoryIds),
     ]);
 
@@ -183,6 +225,7 @@ export class ServicesService {
       createdAt: Date;
       userId: string | null;
       giftEligible: boolean;
+      ropTariff: string | null;
       contractorRatePerHour: number | null;
       contractorExperienceYears: number | null;
       ordersCount: number;
@@ -207,8 +250,7 @@ export class ServicesService {
     if (search) {
       baseQb.andWhere(
         new Brackets((qb) => {
-          qb
-            .where('s.name ILIKE :search', { search: `%${search}%` })
+          qb.where('s.name ILIKE :search', { search: `%${search}%` })
             .orWhere('c.name ILIKE :search', { search: `%${search}%` })
             .orWhere('s.description ILIKE :search', { search: `%${search}%` });
         }),
@@ -232,6 +274,7 @@ export class ServicesService {
       .addSelect('s."isHidden"', 'isHidden')
       .addSelect('s.skills', 'skills')
       .addSelect('s."giftEligible"', 'giftEligible')
+      .addSelect('s."ropTariff"', 'ropTariff')
       .addSelect('s."createdAt"', 'createdAt')
       .addSelect('s."userId"', 'userId')
       .addSelect('COUNT(oi.id)', 'ordersCount')
@@ -255,6 +298,7 @@ export class ServicesService {
         createdAt: Date;
         userId: string | null;
         giftEligible: boolean;
+        ropTariff: string | null;
         ordersCount: string;
       }>();
 
@@ -270,10 +314,13 @@ export class ServicesService {
         image: row.image,
         imageOriginal: row.imageOriginal,
         isHidden: row.isHidden,
-        skills: Array.isArray(row.skills) ? row.skills : JSON.parse(row.skills ?? '[]'),
+        skills: Array.isArray(row.skills)
+          ? row.skills
+          : JSON.parse(row.skills ?? '[]'),
         createdAt: row.createdAt,
         userId: row.userId,
         giftEligible: row.giftEligible,
+        ropTariff: row.ropTariff,
         contractorRatePerHour: null,
         contractorExperienceYears: null,
         ordersCount: Number(row.ordersCount),
@@ -307,12 +354,16 @@ export class ServicesService {
     const service = await applyPublicServiceFilter(
       this.serviceRepository
         .createQueryBuilder('service')
-        .leftJoinAndSelect('service.category', 'category', 'category."isHidden" = false'),
+        .leftJoinAndSelect(
+          'service.category',
+          'category',
+          'category."isHidden" = false',
+        ),
     )
       .where('service.id = :id', { id })
       .andWhere('(service."categoryId" IS NULL OR category.id IS NOT NULL)')
       .getOne();
-    if (!service) {
+    if (!service || service.isHidden) {
       throw new NotFoundException(`Услуга с ID ${id} не найдена`);
     }
     return service;
@@ -331,7 +382,10 @@ export class ServicesService {
     });
   }
 
-  async update(id: string, updateServiceDto: UpdateServiceDto): Promise<Service> {
+  async update(
+    id: string,
+    updateServiceDto: UpdateServiceDto,
+  ): Promise<Service> {
     if (updateServiceDto.categoryId) {
       await this.ensureCategoryExists(updateServiceDto.categoryId);
     }
@@ -398,16 +452,24 @@ export class ServicesService {
   }
 
   async createContractor(dto: CreateAdminContractorDto): Promise<Service> {
-    const user = await this.userRepository.findOne({ where: { id: dto.userId } });
+    const user = await this.userRepository.findOne({
+      where: { id: dto.userId },
+    });
     if (!user) {
       throw new NotFoundException(`Пользователь с ID ${dto.userId} не найден`);
     }
 
     const duplicateByUser = await this.serviceRepository.findOne({
-      where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
+      where: {
+        type: ServiceType.Contractor,
+        userId: dto.userId,
+        ...activeServiceWhere(),
+      },
     });
     if (duplicateByUser) {
-      throw new ConflictException('Для этого пользователя уже создан подрядчик');
+      throw new ConflictException(
+        'Для этого пользователя уже создан подрядчик',
+      );
     }
 
     const expertCategoryId = await this.resolveExpertCategoryId();
@@ -434,7 +496,9 @@ export class ServicesService {
     return this.serviceRepository.save(contractor);
   }
 
-  async findAllContractorsForAdmin(query: GetAdminContractorsQueryDto): Promise<{
+  async findAllContractorsForAdmin(
+    query: GetAdminContractorsQueryDto,
+  ): Promise<{
     data: Array<Service & { ordersCount: number }>;
     total: number;
     offset: number;
@@ -462,7 +526,9 @@ export class ServicesService {
             .orWhere('u.email ILIKE :search', { search: `%${search}%` })
             .orWhere('u."phoneNumber" ILIKE :search', { search: `%${search}%` })
             .orWhere('category.name ILIKE :search', { search: `%${search}%` })
-            .orWhere('service.skills::jsonb @> :skill::jsonb', { skill: JSON.stringify([search]) });
+            .orWhere('service.skills::jsonb @> :skill::jsonb', {
+              skill: JSON.stringify([search]),
+            });
         }),
       );
     }
@@ -471,10 +537,11 @@ export class ServicesService {
 
     const { entities, raw } = await qb
       .addSelect(
-        (subQb) => subQb
-          .select('COUNT(oi.id)')
-          .from(OrderItem, 'oi')
-          .where('oi."serviceId" = service.id'),
+        (subQb) =>
+          subQb
+            .select('COUNT(oi.id)')
+            .from(OrderItem, 'oi')
+            .where('oi."serviceId" = service.id'),
         'ordersCount',
       )
       .orderBy('service.createdAt', 'DESC')
@@ -595,14 +662,17 @@ export class ServicesService {
       this.expertProfileRepository.findOne({ where: { userId } }),
     ]);
 
-    const contractorView = contractor ?? this.buildExpertCabinetContractorView(user, expertProfile);
+    const contractorView =
+      contractor ?? this.buildExpertCabinetContractorView(user, expertProfile);
 
     const expertOrdersFilter = new Brackets((qb) => {
-      qb.where('item."executorUserId" = :userId', { userId })
-        .orWhere('service.type = :contractorType AND service."userId" = :userId', {
+      qb.where('item."executorUserId" = :userId', { userId }).orWhere(
+        'service.type = :contractorType AND service."userId" = :userId',
+        {
           contractorType: ServiceType.Contractor,
           userId,
-        });
+        },
+      );
     });
 
     const aggregateRaw = await this.orderRepository
@@ -671,9 +741,10 @@ export class ServicesService {
     user: User,
     expertProfile: ExpertProfile | null,
   ): Service & { user: User | null } {
-    const displayName = expertProfile?.displayName?.trim()
-      || `${user.name} ${user.lastName}`.trim()
-      || user.name;
+    const displayName =
+      expertProfile?.displayName?.trim() ||
+      `${user.name} ${user.lastName}`.trim() ||
+      user.name;
 
     return {
       id: user.id,
@@ -686,6 +757,7 @@ export class ServicesService {
       image: expertProfile?.image ?? null,
       imageOriginal: expertProfile?.imageOriginal ?? null,
       externalUrl: null,
+      ropTariff: null,
       skills: expertProfile?.skills ?? [],
       contractorRatePerHour: null,
       contractorExperienceYears: expertProfile?.experienceYears ?? null,
@@ -727,7 +799,11 @@ export class ServicesService {
     }>;
   }> {
     const service = await this.serviceRepository.findOne({
-      where: { id, type: In([ServiceType.Service, ServiceType.Document]), deletedAt: IsNull() },
+      where: {
+        id,
+        type: In([ServiceType.Service, ServiceType.Document]),
+        deletedAt: IsNull(),
+      },
       relations: ['category'],
     });
     if (!service) {
@@ -736,7 +812,9 @@ export class ServicesService {
 
     const aggregateRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.item', 'item', 'item."serviceId" = :serviceId', { serviceId: id })
+      .innerJoin('o.item', 'item', 'item."serviceId" = :serviceId', {
+        serviceId: id,
+      })
       .select('COUNT(DISTINCT o.id)', 'totalProjects')
       .addSelect(
         `SUM(CASE WHEN o.status IN (:...activeStatuses) THEN 1 ELSE 0 END)`,
@@ -760,7 +838,9 @@ export class ServicesService {
 
     const ordersRaw = await this.orderRepository
       .createQueryBuilder('o')
-      .innerJoin('o.item', 'item', 'item."serviceId" = :serviceId', { serviceId: id })
+      .innerJoin('o.item', 'item', 'item."serviceId" = :serviceId', {
+        serviceId: id,
+      })
       .select('o.id', 'id')
       .addSelect('1', 'positions')
       .addSelect('o."createdAt"', 'createdAt')
@@ -804,29 +884,44 @@ export class ServicesService {
     };
   }
 
-  async updateContractorForAdmin(id: string, dto: UpdateAdminContractorDto): Promise<Service> {
+  async updateContractorForAdmin(
+    id: string,
+    dto: UpdateAdminContractorDto,
+  ): Promise<Service> {
     const contractor = await this.findOneContractorEntityForAdmin(id);
     if (dto.name !== undefined) contractor.name = dto.name;
     if (dto.description !== undefined) contractor.description = dto.description;
     if (dto.image !== undefined) contractor.image = dto.image ?? null;
-    if (dto.imageOriginal !== undefined) contractor.imageOriginal = dto.imageOriginal ?? null;
+    if (dto.imageOriginal !== undefined)
+      contractor.imageOriginal = dto.imageOriginal ?? null;
     if (dto.ratePerHour !== undefined) {
       contractor.contractorRatePerHour = dto.ratePerHour;
       contractor.price = dto.ratePerHour;
     }
-    if (dto.experienceYears !== undefined) contractor.contractorExperienceYears = dto.experienceYears;
+    if (dto.experienceYears !== undefined)
+      contractor.contractorExperienceYears = dto.experienceYears;
     if (dto.skills !== undefined) contractor.skills = dto.skills;
     if (dto.userId !== undefined && dto.userId !== contractor.userId) {
-      const user = await this.userRepository.findOne({ where: { id: dto.userId } });
+      const user = await this.userRepository.findOne({
+        where: { id: dto.userId },
+      });
       if (!user) {
-        throw new NotFoundException(`Пользователь с ID ${dto.userId} не найден`);
+        throw new NotFoundException(
+          `Пользователь с ID ${dto.userId} не найден`,
+        );
       }
 
       const duplicateByUser = await this.serviceRepository.findOne({
-        where: { type: ServiceType.Contractor, userId: dto.userId, ...activeServiceWhere() },
+        where: {
+          type: ServiceType.Contractor,
+          userId: dto.userId,
+          ...activeServiceWhere(),
+        },
       });
       if (duplicateByUser) {
-        throw new ConflictException('Для этого пользователя уже создан подрядчик');
+        throw new ConflictException(
+          'Для этого пользователя уже создан подрядчик',
+        );
       }
 
       if (user.role !== UserRole.EXPERT) {
@@ -882,14 +977,18 @@ export class ServicesService {
   }
 
   private async ensureCategoryExists(categoryId: string): Promise<void> {
-    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+    });
     if (!category) {
       throw new NotFoundException(`Категория с ID ${categoryId} не найдена`);
     }
   }
 
   private async resolveExpertCategoryId(): Promise<string> {
-    const category = await this.categoryRepository.findOne({ where: { name: 'Эксперты' } });
+    const category = await this.categoryRepository.findOne({
+      where: { name: 'Эксперты' },
+    });
     if (!category) {
       throw new NotFoundException('Категория «Эксперты» не найдена');
     }

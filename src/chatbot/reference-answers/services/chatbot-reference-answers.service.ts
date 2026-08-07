@@ -90,7 +90,7 @@ export class ChatbotReferenceAnswersService {
       qb.andWhere('ref.status = :status', { status: query.status });
     }
     if (query.topic) {
-      qb.andWhere('ref.topic = :topic', { topic: query.topic });
+      qb.andWhere('LOWER(ref.topic) = LOWER(:topic)', { topic: query.topic });
     }
     if (query.search) {
       const like = `%${query.search}%`;

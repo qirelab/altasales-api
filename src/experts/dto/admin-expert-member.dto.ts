@@ -8,10 +8,15 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   Max,
   Min,
   MinLength,
 } from 'class-validator';
+
+const EXPERT_PASSWORD_MIN_LENGTH = 8;
+const EXPERT_PASSWORD_RULES_MESSAGE =
+  'Пароль не соответствует требованиям: минимум 8 символов, хотя бы одна цифра, хотя бы одна заглавная буква';
 
 export class CreateAdminExpertMemberDto {
   @ApiProperty({ example: 'Анна' })
@@ -32,9 +37,13 @@ export class CreateAdminExpertMemberDto {
   @IsString()
   phoneNumber: string;
 
-  @ApiProperty({ example: 'secret123', minLength: 6 })
+  @ApiProperty({ example: 'Secret123', minLength: EXPERT_PASSWORD_MIN_LENGTH })
   @IsString()
-  @MinLength(6, { message: 'Пароль должен быть не короче 6 символов' })
+  @MinLength(EXPERT_PASSWORD_MIN_LENGTH, {
+    message: EXPERT_PASSWORD_RULES_MESSAGE,
+  })
+  @Matches(/\d/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
+  @Matches(/[A-ZА-ЯЁ]/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
   password: string;
 
   @ApiProperty({ example: 5, minimum: 0, maximum: 99 })
@@ -88,13 +97,17 @@ export class UpdateAdminExpertMemberDto {
   phoneNumber?: string;
 
   @ApiPropertyOptional({
-    example: 'secret123',
-    minLength: 6,
+    example: 'Secret123',
+    minLength: EXPERT_PASSWORD_MIN_LENGTH,
     description: 'New password for the expert. Omit to keep the current one.',
   })
   @IsOptional()
   @IsString()
-  @MinLength(6, { message: 'Пароль должен быть не короче 6 символов' })
+  @MinLength(EXPERT_PASSWORD_MIN_LENGTH, {
+    message: EXPERT_PASSWORD_RULES_MESSAGE,
+  })
+  @Matches(/\d/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
+  @Matches(/[A-ZА-ЯЁ]/, { message: EXPERT_PASSWORD_RULES_MESSAGE })
   password?: string;
 
   @ApiPropertyOptional({ example: 5, minimum: 0, maximum: 99 })

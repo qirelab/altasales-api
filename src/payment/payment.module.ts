@@ -7,6 +7,7 @@ import { BalanceTransactionsModule } from '../balance-transactions/balance-trans
 import { AuthModule } from '../auth/auth.module';
 import { OrderNotificationsModule } from '../orders/order-notifications.module';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
+import { RopModule } from '../rop/rop.module';
 import { RobokassaService } from './robokassa.service';
 import { PaymentController } from './payment.controller';
 import { PaymentService } from './payment.service';
@@ -21,6 +22,7 @@ import { Payment } from './entities/payment.entity';
     AuthModule,
     OrderNotificationsModule,
     RecommendationsModule,
+    RopModule,
   ],
   controllers: [PaymentController],
   providers: [PaymentService, RobokassaService],

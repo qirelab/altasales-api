@@ -10,6 +10,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Service } from '../../services/entities/service.entity';
 import { Category } from '../../categories/entities/category.entity';
+import { RopTariff } from '../../rop/rop-tariff.enum';
 
 @Entity()
 export class ServicePackage {
@@ -57,6 +58,16 @@ export class ServicePackage {
   })
   @Column({ type: 'boolean', default: false })
   isHidden: boolean;
+
+  @ApiPropertyOptional({
+    enum: RopTariff,
+    example: RopTariff.Hos,
+    nullable: true,
+    description:
+      'ROP Sharing tariff activated for the buyer while this package order is active',
+  })
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  ropTariff: RopTariff | null;
 
   @ApiPropertyOptional({ example: 'https://api.example.com/uploads/catalog/packages/uuid.jpeg' })
   @Column({ type: 'varchar', nullable: true })
