@@ -3,7 +3,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AiModule } from '../ai/ai.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { Order } from '../orders/entities/order.entity';
+import { ServicePackage } from '../packages/entities/package.entity';
 import { Questionnaire } from '../questionnaires/entities/questionnaire.entity';
+import { Service } from '../services/entities/service.entity';
 import { ChatbotConversationalContextService } from './services/chatbot-conversational-context.service';
 import { ChatbotHistorySlicerService } from './services/chatbot-history-slicer.service';
 import { ChatbotIntentClassifierService } from './services/chatbot-intent-classifier.service';
@@ -16,7 +18,7 @@ import { HandoffTriggerService } from './services/handoff-trigger.service';
   imports: [
     AiModule,
     KnowledgeModule,
-    TypeOrmModule.forFeature([Questionnaire, Order]),
+    TypeOrmModule.forFeature([Questionnaire, Order, Service, ServicePackage]),
   ],
   providers: [
     ChatbotHistorySlicerService,
